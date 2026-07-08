@@ -24,6 +24,7 @@
 |----------|-------------|
 | `load_dll(dll_path=None, version=None)` | Load the IWFM DLL. Returns a `ctypes.WinDLL` handle. |
 | `list_dll_versions()` | Scan `dlls/` and `~/.iwfm/dlls/` for installed DLL versions. |
+| `download_dll(version="2025.0.1747")` | Download an official DLL build (sha256-verified) from the project's GitHub releases into `~/.iwfm/dlls/<version>/`. |
 | `get_version(dll)` | Return the IWFM version string. |
 | `get_kernel_version(dll)` | Return the IWFM kernel version string. |
 | `set_log_file(dll, path)` | Redirect DLL log output to a file. |
@@ -190,6 +191,22 @@ adapter.stratigraphy_df() # DataFrame
 adapter.reaches_df()     # DataFrame
 adapter.heads_df(layer=1, begin_date=..., end_date=...)  # DataFrame
 adapter.budget_df("GW", location=1)  # DataFrame
+```
+
+DLL-free simulation-state equivalents (v1.2+), served from the model's
+input and budget-output files:
+
+```python
+adapter.tile_drains_df()               # from the GW main's tile drain file
+adapter.bypasses_df()                  # from the stream main's bypass specs
+adapter.stream_flows_df(stat="mean")   # per-node gain from GW etc. (needs a stream node budget HDF)
+adapter.supply_demand_df()             # ag/urban requirement + shortage per subregion (L&WU budget)
+adapter.get_land_use_areas(lu_type="AG")             # (n_subregions, n_times)
+adapter.get_aquifer_horizontal_k()     # (n_nodes, n_layers); also _vertical_k,
+                                       #   _specific_yield, _specific_storage,
+                                       #   get_aquitard_vertical_k (NGROUP=0 models)
+adapter.get_subregion_ag_pumping_avg_depth_to_gw()   # GSE − head per subregion
+adapter.get_zbudget_timeseries("GW", zone_id=1, columns=[0, 1, 2])  # zones = subregions
 ```
 
 ### Comparing Models
