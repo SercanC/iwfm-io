@@ -46,6 +46,7 @@ from .budget import IWFMBudget
 from .zbudget import IWFMZBudget
 from ._errors import IWFMError
 from ._dll import load_dll, list_dll_versions
+from .download import download_dll
 from .run import (
     RunResult,
     run_model,

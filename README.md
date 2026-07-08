@@ -34,7 +34,14 @@ Python file I/O, DLL wrapper, and visualization library for the Integrated Water
 ### Prerequisites
 - Python 3.8 or higher
 - For `iwfm.io` and plotting: any OS (plots work DLL-free via `IOModelAdapter`)
-- For the DLL wrapper: Windows 10+ x64 and a copy of `IWFM_C_x64.dll` (ships with IWFM from the [DWR IWFM site](https://water.ca.gov/Library/Modeling-and-Analysis/Modeling-Platforms/Integrated-Water-Flow-Model); place it next to your scripts, in `dlls/<version>/`, or in `~/.iwfm/dlls/`)
+- For the DLL wrapper: Windows 10+ x64 and a copy of `IWFM_C_x64.dll`. One line fetches an official build (GPLv2, published with its corresponding source on this project's GitHub releases):
+
+  ```python
+  import iwfm
+  iwfm.download_dll("2025.0.1747")   # → ~/.iwfm/dlls/2025.0.1747/IWFM_C_x64.dll
+  ```
+
+  Other builds ship with IWFM from the [DWR IWFM site](https://water.ca.gov/Library/Modeling-and-Analysis/Modeling-Platforms/Integrated-Water-Flow-Model) — place them in `dlls/<version>/` or `~/.iwfm/dlls/<version>/` and select with `load_dll(version=...)` / `IWFMModel(..., dll_version=...)`. The DLL is version-sensitive: match it to your model's IWFM version.
 
 ### Install
 
