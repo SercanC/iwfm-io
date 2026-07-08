@@ -722,6 +722,74 @@ class IOModelAdapter:
                           else np.zeros(len(df)))
         return np.asarray(series)
 
+    def get_zbudget_timeseries(self, zbudget_type, zone_id, columns,
+                               zone_extent=None, elements=None, layers=None,
+                               zone_ids=None, begin_date=None, end_date=None,
+                               interval="1MON", fact_ar=1.0, fact_vl=1.0):
+        """DLL-free zone-budget time series from a Z-Budget HDF file.
+
+        Mirrors ``IWFMModel.get_zbudget_timeseries`` closely enough for
+        the plotting functions: zones are the model's subregions (every
+        element is assigned to its subregion), *zone_id* is a subregion
+        id, and *columns* are 0-based column indices into that zone's
+        aggregated DataFrame. Extra DLL-specific arguments
+        (*zone_extent*, *elements*, *layers*, *zone_ids*) are accepted
+        and ignored.
+
+        Returns ``{"dates": excel_serials, "values": (n_times, n_cols),
+        "data_types": names}``.
+        """
+        # Fuzzy-match the requested type against discovered zbudget HDFs
+        key = None
+        if zbudget_type in self._zbudget_hdfs:
+            key = zbudget_type
+        else:
+            want = str(zbudget_type).upper().replace("&", "").replace("_", "")
+            for k in self._zbudget_hdfs:
+                if want in k.upper().replace("&", "").replace("_", ""):
+                    key = k
+                    break
+        if key is None:
+            raise RuntimeError(
+                f"No zone-budget HDF matching {zbudget_type!r}; available: "
+                f"{sorted(self._zbudget_hdfs)}")
+
+        cache_key = f"_zbudget_subregions::{key}"
+        if cache_key in self._cache:
+            z = self._cache[cache_key]
+        else:
+            from iwfm.io.models.base import ZoneDefinition
+            from iwfm.io.readers.hdf5 import read_zbudget_hdf
+            elems = self.elements_df()
+            zd = ZoneDefinition(
+                extent="horizontal",
+                zones={int(s): f"Subregion {int(s)}"
+                       for s in sorted(elems["subregion"].unique())},
+                element_zones=pd.DataFrame({
+                    "element_id": elems["element_id"].astype(int),
+                    "zone_id": elems["subregion"].astype(int),
+                }),
+            )
+            z = read_zbudget_hdf(self._zbudget_hdfs[key], zone_def=zd)
+            self._cache[cache_key] = z
+
+        df = z["data"][f"Subregion {int(zone_id)}"]
+        if begin_date is not None:
+            from iwfm.io._tokens import parse_iwfm_date
+            df = df[df.index >= parse_iwfm_date(begin_date)]
+        if end_date is not None:
+            from iwfm.io._tokens import parse_iwfm_date
+            df = df[df.index <= parse_iwfm_date(end_date)]
+        cols = list(columns)
+        sub = df.iloc[:, cols]
+        # Plotting code converts dates with excel_date_to_datetime
+        excel = (sub.index - pd.Timestamp("1899-12-30")).days.to_numpy(float)
+        return {
+            "dates": excel,
+            "values": sub.to_numpy() * fact_vl,
+            "data_types": list(sub.columns),
+        }
+
     # -- Aquifer parameters (from the GW main file, NGROUP=0) -----------
 
     def _aquifer_params(self):

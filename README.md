@@ -2,6 +2,8 @@
 
 Python file I/O, DLL wrapper, and visualization library for the Integrated Water Flow Model (IWFM).
 
+**[📊 Example plot gallery](docs/GALLERY.md)** — all 58 plot functions rendered from DWR's C2VSimFG v1.5 Central Valley model.
+
 ## Features
 
 - **`iwfm.io`** — Pure-Python file I/O (no DLL, cross-platform):
