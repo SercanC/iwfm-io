@@ -157,6 +157,27 @@ timeseries.plot_gw_head_hydrographs(
 | `examples/08_run_scenario.py` | Windows + sample_model/Bin | Full loop: create scenario → run IWFM → compare |
 | `examples/test_plots_dllfree.py` | .assets/sample_model (any OS) | The nine formerly DLL-only plots via `IOModelAdapter` |
 
+## Claude Code Skill (analyze models by chatting)
+
+`skills/iwfm-analyst/` is a [Claude Code](https://claude.com/claude-code)
+skill that lets non-programmers analyze IWFM models conversationally —
+"show me the groundwater budget for subregion 5", "map depth to water",
+"compare these two runs" — with Claude doing the `iwfm-io` work and
+returning tables and plot images. Install by copying it into your
+personal skills folder:
+
+```powershell
+# Windows
+Copy-Item skills\iwfm-analyst "$env:USERPROFILE\.claude\skills\" -Recurse
+```
+```bash
+# macOS / Linux
+cp -r skills/iwfm-analyst ~/.claude/skills/
+```
+
+Then start Claude Code anywhere and ask about your model (have
+`pip install iwfm-io` available, or let Claude install it).
+
 ## Testing
 
 ```bash
