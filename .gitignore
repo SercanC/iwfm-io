@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+venv/
+.venv/
+
+# IWFM binaries and model data (download separately — see README)
+IWFM_C_x64.dll
+.assets/
+dlls/*/
+
+# Generated output
+test_output/
+*.log

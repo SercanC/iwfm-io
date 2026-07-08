@@ -1,0 +1,4 @@
+# Ignore DLL binaries — place them manually in version subdirectories.
+# Only the folder structure and config files are tracked by git.
+*.dll
+*.dll.D
