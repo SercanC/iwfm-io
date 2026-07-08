@@ -166,6 +166,29 @@ class ElemPumpFile:
 
 
 @dataclass
+class WellSpecFile:
+    """Parsed well specification file (e.g. ``WellSpec.dat``).
+
+    Attributes
+    ----------
+    header : FileHeader
+    n_wells : int
+        Number of wells (NWELL).
+    factors : dict
+        Conversion factors: factxy (coordinates), factrw (radius),
+        factlt (perforation depths). ``data`` stores file-native values;
+        apply factors for model units.
+    data : pd.DataFrame or None
+        Columns: well_id, x, y, radius, perf_top, perf_bot, name.
+    """
+
+    header: FileHeader = field(default_factory=FileHeader)
+    n_wells: int = 0
+    factors: dict = field(default_factory=dict)
+    data: Any = None  # DataFrame
+
+
+@dataclass
 class TSPumpingFile:
     """Parsed time-series pumping data file (e.g. ``TSPumping.dat``).
 

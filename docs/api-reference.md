@@ -207,6 +207,8 @@ adapter.get_aquifer_horizontal_k()     # (n_nodes, n_layers); also _vertical_k,
                                        #   get_aquitard_vertical_k (NGROUP=0 models)
 adapter.get_subregion_ag_pumping_avg_depth_to_gw()   # GSE − head per subregion
 adapter.get_zbudget_timeseries("GW", zone_id=1, columns=[0, 1, 2])  # zones = subregions
+adapter.wells_df()                     # well specs: id, x, y, radius, perf top/bot, name
+adapter.diversions_df()                # diversion id, export stream node, name
 ```
 
 ### Comparing Models

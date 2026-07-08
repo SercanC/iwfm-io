@@ -70,6 +70,8 @@ class IOModelAdapter:
         tile_drain=None,
         zbudget_hdfs=None,
         gw_main=None,
+        well_spec=None,
+        diver_specs=None,
     ):
         self._pp = preprocessor
         self._sim = simulation
@@ -81,6 +83,8 @@ class IOModelAdapter:
         self._tile_drain_file = tile_drain
         self._zbudget_hdfs = zbudget_hdfs or {}
         self._gw_main = gw_main
+        self._well_spec = well_spec
+        self._diver_specs = diver_specs
         self._root = None  # set by open_model()
         self._cache: dict[str, Any] = {}
 
@@ -241,22 +245,46 @@ class IOModelAdapter:
     # -- Wells (placeholder — requires pump file parsing) ---------------
 
     def wells_df(self):
-        """Return GeoDataFrame: well_id, x, y, perf_top, perf_bot, geometry(Point)."""
+        """Return GeoDataFrame: well_id, x, y, radius, perf_top, perf_bot,
+        name, geometry(Point).
+
+        From the well specification file referenced by the pumping main
+        (discovered by ``open_model``). Coordinates are file-native, the
+        same system the node file uses. Empty when the model has no well
+        file (e.g. the sample model pumps by element only).
+        """
         if "wells" in self._cache:
             return self._cache["wells"]
-        # IO layer doesn't currently parse individual well specs
-        df = pd.DataFrame(columns=["well_id", "x", "y", "perf_top", "perf_bot"])
+        if self._well_spec is None or self._well_spec.data is None:
+            df = pd.DataFrame(columns=[
+                "well_id", "x", "y", "radius", "perf_top", "perf_bot", "name"])
+        else:
+            df = self._well_spec.data.copy()
+            if _HAS_GEO and len(df) > 0:
+                geom = [Point(x, y) for x, y in zip(df["x"], df["y"])]
+                df = gpd.GeoDataFrame(df, geometry=geom)
         self._cache["wells"] = df
         return df
 
-    # -- Diversions (placeholder — DiverSpecs is raw) -------------------
+    # -- Diversions ------------------------------------------------------
 
     def diversions_df(self):
-        """Return DataFrame: diversion_id, export_node, n_elements, elements(list)."""
+        """Return DataFrame: diversion_id, export_node, name, elements.
+
+        Basic table from the diversion specification file
+        (``export_node`` is the diverting stream node; 0 = import from
+        outside the model). ``elements`` (served-element lists) come
+        from nested element groups the reader does not parse — they are
+        empty lists here; the raw spec is on ``DiverSpecsFile.raw_data``.
+        """
         if "diversions" in self._cache:
             return self._cache["diversions"]
-        df = pd.DataFrame(
-            columns=["diversion_id", "export_node", "n_elements", "elements"])
+        if self._diver_specs is None or self._diver_specs.data is None:
+            df = pd.DataFrame(
+                columns=["diversion_id", "export_node", "name", "elements"])
+        else:
+            df = self._diver_specs.data.copy()
+            df["elements"] = [[] for _ in range(len(df))]
         self._cache["diversions"] = df
         return df
 
@@ -1313,25 +1341,37 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
     stream_main = None
     tile_drain = None
     bypass_specs = None
+    well_spec = None
+    diver_specs = None
     if sim is not None:
         gw_path = sim.file_paths.get("gw_main")
         if gw_path and Path(gw_path).is_file():
             try:
-                from iwfm.io.readers.groundwater import read_gw_main, read_tile_drain
+                from iwfm.io.readers.groundwater import (
+                    read_gw_main, read_pump_main, read_tile_drain, read_well_spec)
                 gw_main = read_gw_main(gw_path)
                 td_path = gw_main.file_paths.get("tile_drain")
                 if td_path and Path(td_path).is_file():
                     tile_drain = read_tile_drain(td_path)
+                pump_path = gw_main.file_paths.get("pump_main")
+                if pump_path and Path(pump_path).is_file():
+                    well_path = read_pump_main(pump_path).file_paths.get("well")
+                    if well_path and Path(well_path).is_file():
+                        well_spec = read_well_spec(well_path)
             except Exception as exc:
                 logger.warning("Could not parse GW main/children: %s", exc)
         st_path = sim.file_paths.get("stream_main")
         if st_path and Path(st_path).is_file():
             try:
-                from iwfm.io.readers.stream import read_bypass_specs, read_stream_main
+                from iwfm.io.readers.stream import (
+                    read_bypass_specs, read_diver_specs, read_stream_main)
                 stream_main = read_stream_main(st_path)
                 bp_path = stream_main.file_paths.get("bypass_specs")
                 if bp_path and Path(bp_path).is_file():
                     bypass_specs = read_bypass_specs(bp_path)
+                dv_path = stream_main.file_paths.get("diver_specs")
+                if dv_path and Path(dv_path).is_file():
+                    diver_specs = read_diver_specs(dv_path)
             except Exception as exc:
                 logger.warning("Could not parse stream main/children: %s", exc)
 
@@ -1382,6 +1422,8 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
         tile_drain=tile_drain,
         zbudget_hdfs=zbudget_hdfs,
         gw_main=gw_main,
+        well_spec=well_spec,
+        diver_specs=diver_specs,
     )
     adapter._root = root
     return adapter

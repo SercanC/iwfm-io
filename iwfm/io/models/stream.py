@@ -87,6 +87,11 @@ class DiverSpecsFile:
     header: FileHeader = field(default_factory=FileHeader)
     n_diversions: int = 0
     raw_data: list[str] = field(default_factory=list)
+    #: Basic per-diversion table parsed from the first NRDV rows:
+    #: diversion_id, export_node (0 = import from outside), name.
+    #: The full nested spec (element groups, recharge zones) remains
+    #: only in raw_data.
+    data: Any = None
 
 
 @dataclass

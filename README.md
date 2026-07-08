@@ -257,7 +257,7 @@ The `iwfm` package wraps the IWFM C DLL using ctypes:
 - 12 of 58 plot tests fail on the sample model due to DLL inquiry-mode limitations (spurious duplicate-node error, partial instantiation) — not wrapper bugs
 
 **`iwfm.io` (cross-platform):**
-- `IOModelAdapter.wells_df()` and `diversions_df()` return empty DataFrames — the raw pump/diver data is read but not yet normalized into a clean per-well/diversion table
+- `IOModelAdapter.diversions_df()` lists id/export-node/name only — the nested served-element groups in the diversion spec are preserved raw, not parsed
 - `IOModelAdapter.subsidence_df()` returns an empty DataFrame (per-node subsidence exists only as DLL state; observation-point series are readable via `read_hydrograph_out`)
 - `stream_flows_df()` needs a stream *node budget* HDF in Results (returns empty otherwise); `supply_demand_df()`/land-use areas need the L&WU or RootZone budget HDF; aquifer parameters need a per-node (NGROUP=0) parameter block — parametric-grid models require the DLL
 - HEC-DSS file reading is not supported (DSS pathnames are stored but not parsed)

@@ -156,6 +156,16 @@ class TestAdapterDllFree:
         assert len(sf) == 4634
         assert (sf["gain_from_gw"] != 0).sum() > 4000
 
+    def test_wells_and_diversions(self, model):
+        w = model.wells_df()
+        assert len(w) == 937
+        assert {"well_id", "x", "y", "perf_top", "perf_bot", "name"} <= set(w.columns)
+        assert w.iloc[0]["name"].endswith("Te Velde Trust")
+        d = model.diversions_df()
+        assert len(d) == 498
+        assert d.iloc[0]["name"] == "DIV_001"
+        assert (d["export_node"] >= 0).all()
+
     def test_depth_to_gw(self, model):
         import numpy as np
         d = model.get_subregion_ag_pumping_avg_depth_to_gw()

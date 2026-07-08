@@ -6,6 +6,7 @@ All functions return dataclass containers with pandas DataFrames.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -23,6 +24,7 @@ from iwfm.io.models.groundwater import (
     SubsidenceFile,
     TileDrainFile,
     TSPumpingFile,
+    WellSpecFile,
 )
 
 
@@ -487,6 +489,60 @@ def read_pump_main(
     }
 
     return PumpMain(header=header, file_paths=file_paths)
+
+
+# ------------------------------------------------------------------
+# Well Specifications
+# ------------------------------------------------------------------
+
+def read_well_spec(path: str | Path) -> WellSpecFile:
+    """Read a well specification file (e.g. ``WellSpec.dat``).
+
+    Parses NWELL, the conversion factors, and the well location table
+    (ID, XWELL, YWELL, RWELL, PERFT, PERFB, optional ``/name`` comment).
+    The pumping-configuration sections that follow are not parsed.
+
+    Parameters
+    ----------
+    path : str or Path
+
+    Returns
+    -------
+    WellSpecFile
+    """
+    reader = IWFMFileReader(path)
+    header = reader.read_header()
+
+    n_wells, _ = reader.read_keyed_int()
+    factxy, _ = reader.read_keyed_float()
+    factrw, _ = reader.read_keyed_float()
+    factlt, _ = reader.read_keyed_float()
+
+    rows = []
+    for _ in range(n_wells):
+        line = reader.next_data_line()
+        toks = tokenize_data_line(line)
+        # Well name rides in the trailing "/..." comment
+        name = ""
+        m = re.search(r"\s/(.+)$", line)
+        if m:
+            name = m.group(1).strip().lstrip("/").strip()
+        rows.append({
+            "well_id": int(float(toks[0])),
+            "x": float(toks[1]),
+            "y": float(toks[2]),
+            "radius": float(toks[3]),
+            "perf_top": float(toks[4]),
+            "perf_bot": float(toks[5]),
+            "name": name,
+        })
+
+    return WellSpecFile(
+        header=header,
+        n_wells=n_wells,
+        factors={"factxy": factxy, "factrw": factrw, "factlt": factlt},
+        data=pd.DataFrame(rows),
+    )
 
 
 # ------------------------------------------------------------------

@@ -290,11 +290,45 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
     # Collect all remaining raw lines (data + comments)
     raw_data = reader.skip_to_end()
 
+    # Parse the basic per-diversion table from the first NRDV data rows.
+    # Column layouts vary across IWFM versions, but the first two columns
+    # (ID, export stream node — 0 means import from outside the model)
+    # and the trailing NAME token are stable.
+    from iwfm.io._tokens import is_comment
+    rows = []
+    for line in raw_data:
+        if is_comment(line):
+            continue
+        toks = tokenize_data_line(line)
+        if len(toks) < 3:
+            continue
+        try:
+            rows.append({
+                "diversion_id": int(float(toks[0])),
+                "export_node": int(float(toks[1])),
+                "name": toks[-1] if not _is_number(toks[-1]) else "",
+            })
+        except ValueError:
+            break
+        if len(rows) == n_diversions:
+            break
+
+    data = pd.DataFrame(rows) if len(rows) == n_diversions else None
+
     return DiverSpecsFile(
         header=header,
         n_diversions=n_diversions,
         raw_data=raw_data,
+        data=data,
     )
+
+
+def _is_number(token: str) -> bool:
+    try:
+        float(token)
+        return True
+    except ValueError:
+        return False
 
 
 # ------------------------------------------------------------------
