@@ -8,19 +8,28 @@
 **Passed**: 48 (83%)
 **Failed**: 10 (17%)
 
-> Wrapper mitigations (2026-07-08): `get_hydrograph` now masks the
-> DLL's invalid trailing dates/values, so tests 15 and 16 pass; the
+> **Read this first**: the pass/fail tables below describe ONE of the
+> two ways to drive the plot library — the **DLL wrapper in inquiry
+> mode**, where 10 functions hit permanent DLL limitations (analyzed in
+> `docs/DLL_INQUIRY_MODE_LIMITS.md`). Every one of those functions also
+> has a **DLL-free path** through `IOModelAdapter`
+> (`iwfm.io.open_model`), which serves the same data from the model's
+> input and budget-output files. Run it with
+> `python examples/test_plots_dllfree.py [model_root]`:
+>
+> | Model | DLL-free result |
+> |---|---|
+> | C2VSimFG v1.5 (real DWR model) | **9/9 render** |
+> | sample model | 7/9 (its aquifer block uses a parametric grid, which needs the DLL; needs a stream *node* budget output for 39/40 to carry data) |
+>
+> So a ❌ below means "not available through the DLL in inquiry mode" —
+> not "this plot cannot be produced."
+>
+> Wrapper mitigations (2026-07-08): `get_hydrograph` masks the DLL's
+> invalid trailing dates/values, so tests 15 and 16 pass; the
 > stream-state getters refuse inquiry-mode calls with a clean
 > `IWFMError` instead of letting older DLL builds crash the process
-> (tests 39, 40 fail politely now). See
-> `docs/DLL_INQUIRY_MODE_LIMITS.md` for the root-cause analyses.
->
-> **DLL-free alternative**: `IOModelAdapter` (via `iwfm.io.open_model`)
-> now serves tile drains, bypasses, aquifer parameters (NGROUP=0),
-> land-use areas, supply/shortage, and stream–GW exchange from the
-> model's input and budget-output files — all nine previously
-> DLL-only plots render without the DLL on C2VSimFG (9/9), and 7/9 on
-> the sample model (its parametric-grid aquifer block needs the DLL).
+> (tests 39, 40 fail politely now).
 
 ---
 
@@ -33,12 +42,12 @@ model** — the same functions work with a fully instantiated model (a
 simulation run) or, where applicable, through the DLL-free
 `IOModelAdapter`.
 
-| Category | Tests | Root cause |
-|----------|-------|------------|
-| DLL return-flow skip bug | 08, 33 | DLL bug (see below) |
-| Partially instantiated model | 11, 20, 38, 54, 58 | Inquiry-mode design limit |
-| Stream state guarded in inquiry mode | 39, 40 | wrapper raises `IWFMError` (older DLLs crashed) |
-| No zone-budget data in sample model | 18 | Sample model config |
+| Category | Tests | Root cause (DLL path) | DLL-free path |
+|----------|-------|-----------------------|---------------|
+| DLL return-flow skip bug | 08, 33 | DLL bug (see below) | ✅ aquifer params parsed from the GW main (NGROUP=0 models) |
+| Partially instantiated model | 11, 20, 38, 54, 58 | Inquiry-mode design limit | ✅ tile drains/bypasses from input files; land use + supply/shortage from budget HDFs |
+| Stream state guarded in inquiry mode | 39, 40 | wrapper raises `IWFMError` (older DLLs crashed) | ✅ per-node exchange from the stream node budget HDF |
+| No zone-budget data in sample model | 18 | Sample model config | ✅ `read_zbudget_hdf` where zone-budget HDFs exist |
 
 (Tests 15 and 16 previously failed on uninitialized hydrograph dates;
 the wrapper now masks them and both pass.)
@@ -124,10 +133,10 @@ propagates into `plot_zbudget_timeseries` (18).
 | 05 | plot_depth_to_water | ✅ OK | previously failed; DLL-build fix |
 | 06 | plot_layer_thickness | ✅ OK | |
 | 07 | plot_head_change | ✅ OK | |
-| 08 | plot_aquifer_parameter | ❌ FAIL | DLL return-flow skip bug |
+| 08 | plot_aquifer_parameter | ❌ FAIL | DLL return-flow skip bug — DLL-free ✅ |
 | 09 | plot_well_locations | ✅ OK | |
 | 10 | plot_lake_and_diversion_elements | ✅ OK | |
-| 11 | plot_tile_drain_locations | ❌ FAIL | partial instantiation |
+| 11 | plot_tile_drain_locations | ❌ FAIL | partial instantiation — DLL-free ✅ |
 
 ### profiles.py (Tests 12–13) — 2/2 Passed ✅
 
@@ -144,9 +153,9 @@ propagates into `plot_zbudget_timeseries` (18).
 | 15 | plot_stream_flow_hydrograph | ✅ OK | wrapper masks invalid dates |
 | 16 | plot_stream_stage_hydrograph | ✅ OK | wrapper masks invalid dates |
 | 17 | plot_budget_timeseries | ✅ OK | |
-| 18 | plot_zbudget_timeseries | ❌ FAIL | no zone-budget data in sample model |
+| 18 | plot_zbudget_timeseries | ❌ FAIL | no zone-budget data in sample model — DLL-free ✅ where zbudget HDFs exist |
 | 19 | plot_cumulative_gw_storage_change | ✅ OK | |
-| 20 | plot_land_use_area_timeseries | ❌ FAIL | partial instantiation |
+| 20 | plot_land_use_area_timeseries | ❌ FAIL | partial instantiation — DLL-free ✅ |
 
 ### trends.py (Tests 21–24) — 4/4 Passed ✅
 
@@ -179,19 +188,19 @@ propagates into `plot_zbudget_timeseries` (18).
 | # | Function | Status | Notes |
 |---|----------|--------|-------|
 | 32 | plot_rating_curve | ✅ OK | |
-| 33 | plot_aquifer_parameter_histograms | ❌ FAIL | DLL return-flow skip bug |
+| 33 | plot_aquifer_parameter_histograms | ❌ FAIL | DLL return-flow skip bug — DLL-free ✅ |
 | 34 | plot_budget_pie | ✅ OK | |
 | 35 | plot_budget_monthly_average | ✅ OK | |
 | 36 | plot_budget_annual_bars | ✅ OK | |
 | 37 | plot_water_balance_summary | ✅ OK | |
-| 38 | plot_supply_vs_demand | ❌ FAIL | partial instantiation |
+| 38 | plot_supply_vs_demand | ❌ FAIL | partial instantiation — DLL-free ✅ |
 
 ### stream_analysis.py (Tests 39–40) — 0/2 Passed
 
 | # | Function | Status | Notes |
 |---|----------|--------|-------|
-| 39 | plot_stream_gain_loss_profile | ❌ FAIL | wrapper guard: needs simulation mode (or DLL-free adapter) |
-| 40 | plot_stream_aquifer_exchange_map | ❌ FAIL | wrapper guard: needs simulation mode (or DLL-free adapter) |
+| 39 | plot_stream_gain_loss_profile | ❌ FAIL | wrapper guard in inquiry mode — DLL-free ✅ |
+| 40 | plot_stream_aquifer_exchange_map | ❌ FAIL | wrapper guard in inquiry mode — DLL-free ✅ |
 
 ### water_balance.py (Tests 41–45) — 5/5 Passed ✅
 
@@ -225,7 +234,7 @@ propagates into `plot_zbudget_timeseries` (18).
 | 51 | plot_supply_gap_timeline | ✅ OK | |
 | 52 | plot_budget_supply_gap | ✅ OK | |
 | 53 | plot_pumping_depth_vs_shortage | ✅ OK | |
-| 54 | plot_subregion_depth_vs_shortage | ❌ FAIL | partial instantiation |
+| 54 | plot_subregion_depth_vs_shortage | ❌ FAIL | partial instantiation — DLL-free ✅ |
 
 ### cross_sections.py (Tests 55–56) — 2/2 Passed ✅
 
@@ -239,7 +248,7 @@ propagates into `plot_zbudget_timeseries` (18).
 | # | Function | Status | Notes |
 |---|----------|--------|-------|
 | 57 | plot_diversion_network | ✅ OK | |
-| 58 | plot_bypass_flow_diagram | ❌ FAIL | partial instantiation |
+| 58 | plot_bypass_flow_diagram | ❌ FAIL | partial instantiation — DLL-free ✅ |
 
 ---
 

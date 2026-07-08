@@ -146,6 +146,7 @@ timeseries.plot_gw_head_hydrographs(
 | `examples/06_multi_run_budgets.py` | .assets/sample_model/Results | Multi-run unified budget DataFrame |
 | `examples/07_compare_models.py` | .assets/sample_model | File diff + comparison report between model versions |
 | `examples/08_run_scenario.py` | Windows + sample_model/Bin | Full loop: create scenario → run IWFM → compare |
+| `examples/test_plots_dllfree.py` | .assets/sample_model (any OS) | The nine formerly DLL-only plots via `IOModelAdapter` |
 
 ## Testing
 
@@ -158,7 +159,7 @@ python examples/test_plots.py
 # Output goes to test_output/
 ```
 
-See `docs/TEST_PLOTS_RESULTS.md` for detailed plot-test results (46 of 58 pass on the sample model; all failures are DLL or inquiry-mode limitations, not wrapper bugs).
+See `docs/TEST_PLOTS_RESULTS.md` for detailed plot-test results: 48 of 58 pass through the DLL in inquiry mode (all failures are DLL/inquiry-mode limitations, not wrapper bugs), and every failing function also renders DLL-free through `IOModelAdapter` — run `python examples/test_plots_dllfree.py` to verify.
 
 ## Project Structure
 
