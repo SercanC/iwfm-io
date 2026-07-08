@@ -164,7 +164,14 @@ class IWFMFileReader:
         # Normalise backslash to forward slash
         value_str = value_str.replace("\\", "/")
         if base_dir is not None:
-            resolved = Path(base_dir) / value_str
+            base = Path(base_dir)
+            resolved = base / value_str
+            # IWFM resolves child-file paths against the simulation
+            # working directory; for component mains in a subfolder
+            # (e.g. Simulation/Groundwater/GW_MAIN) that is the parent
+            # of this file's own folder. Prefer whichever exists.
+            if not resolved.exists() and (base.parent / value_str).exists():
+                resolved = base.parent / value_str
             return str(resolved), keyword
         return value_str, keyword
 

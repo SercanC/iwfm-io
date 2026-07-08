@@ -5,8 +5,22 @@
 **DLL Build**: repo-root `IWFM_C_x64.dll` (IWFM 2025.0)
 **Model**: `.assets/sample_model/` opened with `is_for_inquiry=True`
 **Total Functions Tested**: 58
-**Passed**: 46 (79%)
-**Failed**: 12 (21%)
+**Passed**: 48 (83%)
+**Failed**: 10 (17%)
+
+> Wrapper mitigations (2026-07-08): `get_hydrograph` now masks the
+> DLL's invalid trailing dates/values, so tests 15 and 16 pass; the
+> stream-state getters refuse inquiry-mode calls with a clean
+> `IWFMError` instead of letting older DLL builds crash the process
+> (tests 39, 40 fail politely now). See
+> `docs/DLL_INQUIRY_MODE_LIMITS.md` for the root-cause analyses.
+>
+> **DLL-free alternative**: `IOModelAdapter` (via `iwfm.io.open_model`)
+> now serves tile drains, bypasses, aquifer parameters (NGROUP=0),
+> land-use areas, supply/shortage, and stream–GW exchange from the
+> model's input and budget-output files — all nine previously
+> DLL-only plots render without the DLL on C2VSimFG (9/9), and 7/9 on
+> the sample model (its parametric-grid aquifer block needs the DLL).
 
 ---
 
@@ -23,9 +37,11 @@ simulation run) or, where applicable, through the DLL-free
 |----------|-------|------------|
 | DLL return-flow skip bug | 08, 33 | DLL bug (see below) |
 | Partially instantiated model | 11, 20, 38, 54, 58 | Inquiry-mode design limit |
-| Inquiry-mode access violation | 39, 40 | Solver state never initialized |
-| Uninitialized hydrograph dates | 15, 16 | DLL returns wrong valid count |
+| Stream state guarded in inquiry mode | 39, 40 | wrapper raises `IWFMError` (older DLLs crashed) |
 | No zone-budget data in sample model | 18 | Sample model config |
+
+(Tests 15 and 16 previously failed on uninitialized hydrograph dates;
+the wrapper now masks them and both pass.)
 
 ---
 
@@ -120,13 +136,13 @@ propagates into `plot_zbudget_timeseries` (18).
 | 12 | plot_stratigraphic_cross_section | ✅ OK | previously failed; DLL-build fix |
 | 13 | plot_stream_longitudinal_profile | ✅ OK | |
 
-### timeseries.py (Tests 14–20) — 4/7 Passed
+### timeseries.py (Tests 14–20) — 6/7 Passed
 
 | # | Function | Status | Notes |
 |---|----------|--------|-------|
 | 14 | plot_gw_head_hydrographs | ✅ OK | |
-| 15 | plot_stream_flow_hydrograph | ❌ FAIL | uninitialized hydrograph dates |
-| 16 | plot_stream_stage_hydrograph | ❌ FAIL | uninitialized hydrograph dates |
+| 15 | plot_stream_flow_hydrograph | ✅ OK | wrapper masks invalid dates |
+| 16 | plot_stream_stage_hydrograph | ✅ OK | wrapper masks invalid dates |
 | 17 | plot_budget_timeseries | ✅ OK | |
 | 18 | plot_zbudget_timeseries | ❌ FAIL | no zone-budget data in sample model |
 | 19 | plot_cumulative_gw_storage_change | ✅ OK | |
@@ -174,8 +190,8 @@ propagates into `plot_zbudget_timeseries` (18).
 
 | # | Function | Status | Notes |
 |---|----------|--------|-------|
-| 39 | plot_stream_gain_loss_profile | ❌ FAIL | inquiry-mode access violation |
-| 40 | plot_stream_aquifer_exchange_map | ❌ FAIL | inquiry-mode access violation |
+| 39 | plot_stream_gain_loss_profile | ❌ FAIL | wrapper guard: needs simulation mode (or DLL-free adapter) |
+| 40 | plot_stream_aquifer_exchange_map | ❌ FAIL | wrapper guard: needs simulation mode (or DLL-free adapter) |
 
 ### water_balance.py (Tests 41–45) — 5/5 Passed ✅
 

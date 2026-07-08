@@ -100,7 +100,7 @@ See `examples/01_read_inputs.py` for a complete walkthrough of all input file re
 import iwfm
 
 with iwfm.IWFMModel(
-    preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
+    preprocessor_file=".assets/sample_model/Preprocessor/PreProcessor_MAIN.IN",
     simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
     is_for_inquiry=True,
 ) as model:
@@ -227,7 +227,8 @@ The `iwfm` package wraps the IWFM C DLL using ctypes:
 
 **`iwfm.io` (cross-platform):**
 - `IOModelAdapter.wells_df()` and `diversions_df()` return empty DataFrames — the raw pump/diver data is read but not yet normalized into a clean per-well/diversion table
-- `IOModelAdapter.stream_flows_df()`, `subsidence_df()`, and `supply_demand_df()` return empty DataFrames — these require live DLL solver output
+- `IOModelAdapter.subsidence_df()` returns an empty DataFrame (per-node subsidence exists only as DLL state; observation-point series are readable via `read_hydrograph_out`)
+- `stream_flows_df()` needs a stream *node budget* HDF in Results (returns empty otherwise); `supply_demand_df()`/land-use areas need the L&WU or RootZone budget HDF; aquifer parameters need a per-node (NGROUP=0) parameter block — parametric-grid models require the DLL
 - HEC-DSS file reading is not supported (DSS pathnames are stored but not parsed)
 - Binary `PreProcessor.bin` files cannot be read — only the text input files
 

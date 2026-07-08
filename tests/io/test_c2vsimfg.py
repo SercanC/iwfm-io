@@ -119,6 +119,51 @@ class TestStreams:
         assert si.data.shape[0] == 576
 
 
+class TestAdapterDllFree:
+    """DLL-free adapter methods added so plots don't need the DLL."""
+
+    def test_tile_drains_and_bypasses(self, model):
+        td = model.tile_drains_df()
+        assert len(td) == 1162
+        assert {"id", "node", "x", "y"} <= set(td.columns)
+        bp = model.bypasses_df()
+        assert len(bp) == 18
+
+    def test_aquifer_parameters(self, model):
+        import numpy as np
+        kh = model.get_aquifer_horizontal_k()
+        assert kh.shape == (30179, 4)
+        assert not np.isnan(kh).any()
+        sy = model.get_aquifer_specific_yield()
+        assert 0.0 <= np.nanmin(sy) and np.nanmax(sy) < 0.5
+
+    def test_supply_demand(self, model):
+        sd = model.supply_demand_df()
+        assert len(sd) == 21
+        assert list(sd["location_id"]) == list(range(1, 22))
+        assert (sd["ag_requirement"] > 0).all()
+
+    def test_land_use_areas(self, model):
+        areas = model.get_land_use_areas(lu_type="AG")
+        assert areas.shape == (21, 576)
+        assert areas[:, -1].sum() > 0
+
+    def test_stream_flows_from_node_budget(self, model):
+        hdf = C2VSIMFG / "Results" / "C2VSimFG_Stream_NodeBudget.hdf"
+        if not hdf.exists():
+            pytest.skip("stream node budget HDF absent — run the simulation")
+        sf = model.stream_flows_df()
+        assert len(sf) == 4634
+        assert (sf["gain_from_gw"] != 0).sum() > 4000
+
+    def test_depth_to_gw(self, model):
+        import numpy as np
+        d = model.get_subregion_ag_pumping_avg_depth_to_gw()
+        assert d.shape == (21,)
+        assert np.isfinite(d).all()
+        assert 0 < np.nanmin(d) < np.nanmax(d) < 1000  # feet, plausible
+
+
 class TestResults:
     def test_budget_text(self):
         from iwfm.io.readers.text_output import read_budget_text

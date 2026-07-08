@@ -12,7 +12,7 @@ except ImportError:
     _HAS_GEO = False
 
 from ._dll import load_dll
-from ._errors import _check_status
+from ._errors import IWFMError, _check_status
 from ._marshal import str_to_c, c_to_str, c_to_str_list, alloc_int, alloc_double, alloc_char
 
 
@@ -48,6 +48,7 @@ class IWFMModel:
         self._model_id = None
         self._open = False
         self._cache = {}
+        self._is_for_inquiry = bool(is_for_inquiry)
 
         pp_len, c_pp = str_to_c(preprocessor_file)
         sim_len, c_sim = str_to_c(simulation_file)
@@ -862,8 +863,29 @@ class IWFMModel:
     # Stream flow results (current timestep)
     # ==================================================================
 
+    def _require_full_instantiation(self, what):
+        """Fail fast for getters that read live simulation state.
+
+        In inquiry mode the stream state and stream-GW connector arrays
+        (e.g. ``StrmGWFlow``) are never allocated — only full
+        instantiation creates them. Recent IWFM builds guard some of
+        these paths and return a clean error, but older DLL builds
+        (including the one shipped with this repo) dereference the
+        unallocated arrays and crash the whole process with an access
+        violation, so we refuse the call up front.
+        """
+        if self._is_for_inquiry:
+            raise IWFMError(
+                f"{what} requires a fully instantiated model: open with "
+                "is_for_inquiry=False and run the simulation. In inquiry "
+                "mode this data does not exist, and calling the DLL for it "
+                "can crash Python with an access violation on older IWFM "
+                "builds."
+            )
+
     def _get_strm_array(self, func_name, factor=1.0):
-        """Helper for stream node array getters."""
+        """Helper for stream node array getters (current-timestep state)."""
+        self._require_full_instantiation(func_name.replace("IW_Model_Get", ""))
         n = self.n_stream_nodes
         buf = alloc_double(n)
         iStat = c_int(0)
@@ -874,6 +896,7 @@ class IWFMModel:
         return np.array(buf, dtype=np.float64)
 
     def get_stream_flow(self, node, factor=1.0):
+        self._require_full_instantiation("StrmFlow")
         flow = c_double(0.0)
         iStat = c_int(0)
         self._dll.IW_Model_GetStrmFlow(
@@ -1336,7 +1359,15 @@ class IWFMModel:
         )
         _check_status(iStat, self._dll)
         n = nt_out.value
-        return np.array(dates[:n], dtype=np.float64), np.array(vals[:n], dtype=np.float64)
+        dates_arr = np.array(dates[:n], dtype=np.float64)
+        vals_arr = np.array(vals[:n], dtype=np.float64)
+        # The DLL reports the requested-window size, never the number of
+        # entries actually read from the file. Unfilled date slots hold
+        # zero Julian dates (-2415020.0 after the DLL's Julian->Excel
+        # shift) and the corresponding VALUES are uninitialized memory,
+        # so both arrays must be masked together by the date validity.
+        valid = dates_arr > 0.0
+        return dates_arr[valid], vals_arr[valid]
 
     # ==================================================================
     # Budget via model

@@ -190,7 +190,14 @@ def read_gw_main(
     def _resolve(value: str) -> str | None:
         if not value or value == "*":
             return None
-        return str(base_dir / value.replace("\\", "/"))
+        rel = value.replace("\\", "/")
+        resolved = base_dir / rel
+        # IWFM resolves child paths against the simulation working
+        # directory (the parent folder when this main file lives in a
+        # component subfolder) — prefer whichever candidate exists.
+        if not resolved.exists() and (base_dir.parent / rel).exists():
+            resolved = base_dir.parent / rel
+        return str(resolved)
 
     # Keyed header block, identified by keyword rather than position:
     # real-world files comment out optional entries (e.g. C2VSimFG has no
@@ -682,7 +689,14 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
     def _resolve(value: str) -> str | None:
         if not value or value == "*":
             return None
-        return str(base_dir / value.replace("\\", "/"))
+        rel = value.replace("\\", "/")
+        resolved = base_dir / rel
+        # IWFM resolves child paths against the simulation working
+        # directory (the parent folder when this main file lives in a
+        # component subfolder) — prefer whichever candidate exists.
+        if not resolved.exists() and (base_dir.parent / rel).exists():
+            resolved = base_dir.parent / rel
+        return str(resolved)
 
     # Keyed header block, identified by keyword rather than position:
     # optional entries may be commented out entirely (e.g. C2VSimFG has
