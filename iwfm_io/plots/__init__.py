@@ -52,6 +52,12 @@ def iwfm_datestr_to_datetime(datestr):
 # Budget post-processing
 # ──────────────────────────────────────────────────────────────────
 
+#: Cubic feet → acre-feet. IWFM models almost always carry volumes in
+#: cubic feet internally, so budget plots use this as their default
+#: ``fact_vl`` to display acre-feet; pass ``fact_vl=1.0`` for raw model
+#: units (or your own factor for non-cubic-feet models).
+CUFT_TO_AF = 1.0 / 43560.0
+
 def sign_budget_components(names, values):
     """Convert IWFM budget magnitudes into signed in/out flows.
 

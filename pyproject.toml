@@ -54,6 +54,12 @@ geo = [
     "geopandas>=0.10",
     "shapely>=1.8",
 ]
+# Interactive/high-quality Sankey diagrams (plot_budget_sankey engine="plotly";
+# kaleido enables static PNG export)
+viz = [
+    "plotly>=5.0",
+    "kaleido",
+]
 
 [tool.setuptools.packages.find]
 include = ["iwfm_io*"]

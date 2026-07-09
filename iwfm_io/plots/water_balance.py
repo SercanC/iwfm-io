@@ -7,8 +7,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.sankey import Sankey
-from . import excel_date_to_datetime, savefig
+from . import CUFT_TO_AF, excel_date_to_datetime, savefig
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -42,21 +41,103 @@ def plot_water_balance_sankey(names, values, title="Water Balance",
                 transform=ax.transAxes)
         return fig, ax
 
-    f_names, f_values = zip(*filtered)
+    inflows = sorted([(n, v) for n, v in filtered if v > 0],
+                     key=lambda x: x[1], reverse=True)
+    outflows = sorted([(n, -v) for n, v in filtered if v < 0],
+                      key=lambda x: x[1], reverse=True)
 
-    # Normalize for Sankey (positive = in, negative = out)
-    sankey = Sankey(ax=ax, unit="", format="%.3g", scale=1.0 / max(abs(v) for v in f_values))
-    sankey.add(
-        flows=list(f_values),
-        labels=list(f_names),
-        orientations=[0] * len(f_values),
-        pathlengths=[0.4] * len(f_values),
-        facecolor="lightsteelblue",
-        edgecolor="steelblue",
-    )
-    sankey.finish()
+    from matplotlib.path import Path as MplPath
+    from matplotlib.patches import PathPatch, Rectangle
 
-    ax.set_title(title, fontsize=14)
+    fig.patch.set_facecolor(_SURFACE)
+    ax.set_facecolor(_SURFACE)
+
+    total = max(sum(v for _, v in inflows), sum(v for _, v in outflows), 1e-30)
+    gap = 0.018            # vertical gap between bands (axis units)
+    x_edge_l, x_node_l = 0.16, 0.475   # left band edge -> center node
+    x_node_r, x_edge_r = 0.525, 0.84   # center node -> right band edge
+    bar_w = 0.012
+
+    def _stack(entries):
+        """Return [(name, v, y_bottom, y_top)] centered vertically."""
+        h_total = sum(v for _, v in entries) / total * 0.82
+        h_total += gap * max(len(entries) - 1, 0)
+        y = 0.5 + h_total / 2
+        out = []
+        for n, v in entries:
+            h = v / total * 0.82
+            out.append((n, v, y - h, y))
+            y -= h + gap
+        return out
+
+    def _ribbon(x0, y0b, y0t, x1, y1b, y1t, color):
+        xm = (x0 + x1) / 2
+        verts = [(x0, y0b), (xm, y0b), (xm, y1b), (x1, y1b), (x1, y1t),
+                 (xm, y1t), (xm, y0t), (x0, y0t), (x0, y0b)]
+        codes = [MplPath.MOVETO, MplPath.CURVE4, MplPath.CURVE4,
+                 MplPath.CURVE4, MplPath.LINETO, MplPath.CURVE4,
+                 MplPath.CURVE4, MplPath.CURVE4, MplPath.CLOSEPOLY]
+        ax.add_patch(PathPatch(MplPath(verts, codes), facecolor=color,
+                               edgecolor=_SURFACE, linewidth=1.2, alpha=0.55,
+                               zorder=2))
+
+    left = _stack(inflows)
+    right = _stack(outflows)
+
+    # Where each ribbon meets the center node (contiguous stacks)
+    def _node_stack(entries, side_total):
+        h_total = side_total / total * 0.82
+        y = 0.5 + h_total / 2
+        out = []
+        for n, v, *_ in entries:
+            h = v / total * 0.82
+            out.append((y - h, y))
+            y -= h
+        return out
+
+    node_l = _node_stack(left, sum(v for _, v in inflows))
+    node_r = _node_stack(right, sum(v for _, v in outflows))
+
+    def _spread_labels(bands, min_gap=0.055):
+        """Nudge label centers apart so small-band labels don't collide."""
+        ys = [(yb + yt) / 2 for _, _, yb, yt in bands]
+        for k in range(1, len(ys)):
+            if ys[k - 1] - ys[k] < min_gap:
+                ys[k] = ys[k - 1] - min_gap
+        return ys
+
+    label_l = _spread_labels(left)
+    label_r = _spread_labels(right)
+
+    for i, ((name, v, yb, yt), (nyb, nyt)) in enumerate(zip(left, node_l)):
+        c = _SANKEY_COLORS[i % 8]
+        _ribbon(x_edge_l, yb, yt, x_node_l, nyb, nyt, c)
+        ax.add_patch(Rectangle((x_edge_l - bar_w, yb), bar_w, yt - yb,
+                               facecolor=c, edgecolor="none", zorder=3))
+        ax.text(x_edge_l - bar_w - 0.012, label_l[i],
+                f"{name}\n{v:,.0f}", ha="right", va="center",
+                fontsize=9.5, color=_INK, linespacing=1.4)
+
+    for j, ((name, v, yb, yt), (nyb, nyt)) in enumerate(zip(right, node_r)):
+        c = _SANKEY_COLORS[(len(left) + j) % 8]
+        _ribbon(x_node_r, nyb, nyt, x_edge_r, yb, yt, c)
+        ax.add_patch(Rectangle((x_edge_r, yb), bar_w, yt - yb,
+                               facecolor=c, edgecolor="none", zorder=3))
+        ax.text(x_edge_r + bar_w + 0.012, label_r[j],
+                f"{name}\n{v:,.0f}", ha="left", va="center",
+                fontsize=9.5, color=_INK, linespacing=1.4)
+
+    # Center node spanning the taller of the two stacks
+    all_y = [y for s in (node_l, node_r) for pair in s for y in pair] or [0.5]
+    ax.add_patch(Rectangle((x_node_l, min(all_y)), x_node_r - x_node_l,
+                           max(all_y) - min(all_y), facecolor=_NODE_GRAY,
+                           edgecolor="none", zorder=4))
+    ax.text(0.5, max(all_y) + 0.03, "Balance", ha="center", va="bottom",
+            fontsize=10, color=_INK_2)
+
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1.02)
+    ax.set_title(title, fontsize=14, color=_INK, loc="left")
     ax.axis("off")
 
     if save_path:
@@ -64,8 +145,92 @@ def plot_water_balance_sankey(names, values, title="Water Balance",
     return fig, ax
 
 
+# Validated categorical palette + chart chrome (see dataviz reference)
+_SANKEY_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#008300",
+                  "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"]
+_INK = "#0b0b0b"
+_INK_2 = "#52514e"
+_SURFACE = "#fcfcfb"
+_NODE_GRAY = "#c3c2b7"
+
+
+def _hex_to_rgba(hex_color, alpha):
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _plotly_sankey(names, values, title, save_path, figsize=(14, 8)):
+    """Render the signed in/out flows as a plotly Sankey.
+
+    Returns ``(fig, None)`` — a plotly Figure, not matplotlib axes.
+    ``save_path`` ending in ``.html`` writes an interactive page; other
+    extensions use plotly's static export (requires *kaleido*).
+    """
+    import plotly.graph_objects as go
+
+    inflows = [(n, v) for n, v in zip(names, values) if v > 0]
+    outflows = [(n, -v) for n, v in zip(names, values) if v < 0]
+    inflows.sort(key=lambda x: x[1], reverse=True)
+    outflows.sort(key=lambda x: x[1], reverse=True)
+
+    center = len(inflows)
+    node_labels = ([f"{n}  {v:,.0f}" for n, v in inflows]
+                   + ["Balance"]
+                   + [f"{n}  {v:,.0f}" for n, v in outflows])
+    node_colors = ([_SANKEY_COLORS[i % 8] for i in range(len(inflows))]
+                   + [_NODE_GRAY]
+                   + [_SANKEY_COLORS[(len(inflows) + i) % 8]
+                      for i in range(len(outflows))])
+
+    sources, targets, link_vals, link_colors = [], [], [], []
+    for i, (_, v) in enumerate(inflows):
+        sources.append(i)
+        targets.append(center)
+        link_vals.append(v)
+        link_colors.append(_hex_to_rgba(node_colors[i], 0.35))
+    for j, (_, v) in enumerate(outflows):
+        sources.append(center)
+        targets.append(center + 1 + j)
+        link_vals.append(v)
+        link_colors.append(_hex_to_rgba(node_colors[center + 1 + j], 0.35))
+
+    fig = go.Figure(go.Sankey(
+        arrangement="snap",
+        node=dict(
+            label=node_labels,
+            color=node_colors,
+            pad=18,
+            thickness=16,
+            line=dict(color="rgba(11,11,11,0.10)", width=1),
+        ),
+        link=dict(source=sources, target=targets, value=link_vals,
+                  color=link_colors),
+        valueformat=",.0f",
+    ))
+    fig.update_layout(
+        title=dict(text=title, font=dict(color=_INK, size=18), x=0.02),
+        font=dict(family='"Segoe UI", system-ui, sans-serif',
+                  color=_INK_2, size=13),
+        paper_bgcolor=_SURFACE,
+        width=int(figsize[0] * 100),
+        height=int(figsize[1] * 100),
+        margin=dict(l=30, r=30, t=60, b=30),
+    )
+
+    if save_path:
+        sp = str(save_path)
+        if sp.lower().endswith(".html"):
+            fig.write_html(sp, include_plotlyjs="cdn")
+        else:
+            fig.write_image(sp, scale=2)  # needs kaleido
+        print(f"Saved: {sp}")
+    return fig, None
+
+
 def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
-                       interval="1MON", combine_storage=True,
+                       interval="1MON", fact_vl=CUFT_TO_AF,
+                       combine_storage=True, engine="auto",
                        ax=None, figsize=(14, 8),
                        save_path=None):
     """Sankey from model budget time-series averages.
@@ -73,15 +238,22 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
     Parameters
     ----------
     model : IWFMModel (inquiry mode)
+    fact_vl : float
+        Volume conversion; the default converts cubic-feet model units
+        to acre-feet for display (pass 1.0 for raw model units).
     combine_storage : bool
         Replace Beginning/Ending Storage with a flux-scale
         "Change in Storage" component (default True).
+    engine : str
+        ``"plotly"`` uses plotly's Sankey (interactive HTML, or PNG via
+        the *kaleido* package), ``"matplotlib"`` the built-in flow
+        diagram, ``"auto"`` (default) plotly when it is installed.
     """
     titles = model.get_budget_column_titles(budget_type, location)
     n_cols = len(titles)
     ts = model.get_budget_timeseries(
         budget_type, location, list(range(1, n_cols + 1)),
-        begin_date, end_date, interval,
+        begin_date, end_date, interval, fact_vl=fact_vl,
     )
     values = np.asarray(ts["values"])
     if combine_storage:
@@ -108,9 +280,21 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
         names_f.append("Other outflows")
         vals_f.append(other_out)
 
+    title = f"Water Balance — Location {location} (mean monthly, AF)"
+
+    if engine == "auto":
+        try:
+            import plotly.graph_objects  # noqa: F401
+            engine = "plotly"
+        except ImportError:
+            engine = "matplotlib"
+    if engine == "plotly":
+        return _plotly_sankey(names_f, vals_f, title, save_path,
+                              figsize=figsize)
+
     return plot_water_balance_sankey(
         names_f, vals_f,
-        title=f"Water Balance Sankey — Location {location}",
+        title=title,
         ax=ax, figsize=figsize, save_path=save_path,
     )
 
@@ -167,7 +351,7 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
 
     ax.axvline(0, color="black", linewidth=0.8)
     ax.set_yticks([])
-    ax.set_xlabel("Flow magnitude")
+    ax.set_xlabel("Mean flow (AF)")
     ax.set_title(title, fontsize=14)
     ax.legend(loc="lower right")
     ax.grid(True, axis="x", alpha=0.3)
@@ -178,15 +362,20 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
 
 
 def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
-                           interval="1MON", combine_storage=True,
+                           interval="1MON", fact_vl=CUFT_TO_AF,
+                           combine_storage=True,
                            ax=None, figsize=(10, 8),
                            save_path=None):
-    """Butterfly chart from model budget time-series averages."""
+    """Butterfly chart from model budget time-series averages.
+
+    Values display in acre-feet by default (``fact_vl=CUFT_TO_AF``,
+    assuming cubic-feet model units); pass ``fact_vl=1.0`` for raw units.
+    """
     titles = model.get_budget_column_titles(budget_type, location)
     n_cols = len(titles)
     ts = model.get_budget_timeseries(
         budget_type, location, list(range(1, n_cols + 1)),
-        begin_date, end_date, interval,
+        begin_date, end_date, interval, fact_vl=fact_vl,
     )
     values = np.asarray(ts["values"])
     if combine_storage:
@@ -211,6 +400,7 @@ def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
 def plot_cumulative_departure(model, budget_type, location,
                                begin_date, end_date, interval="1MON",
                                inflow_cols=None, outflow_cols=None,
+                               fact_vl=CUFT_TO_AF,
                                combine_storage=True,
                                ax=None, figsize=(12, 5),
                                save_path=None):
@@ -234,7 +424,7 @@ def plot_cumulative_departure(model, budget_type, location,
     n_cols = len(titles)
     ts = model.get_budget_timeseries(
         budget_type, location, list(range(1, n_cols + 1)),
-        begin_date, end_date, interval,
+        begin_date, end_date, interval, fact_vl=fact_vl,
     )
     dates = excel_date_to_datetime(ts["dates"])
     values = np.asarray(ts["values"])
@@ -274,7 +464,7 @@ def plot_cumulative_departure(model, budget_type, location,
     ax.axhline(0, color="gray", linewidth=0.5, linestyle="--")
 
     ax.set_xlabel("Date")
-    ax.set_ylabel("Cumulative departure")
+    ax.set_ylabel("Cumulative departure (AF)")
     ax.set_title("Cumulative Departure — Net Water Balance")
     ax.legend()
     ax.grid(True, alpha=0.3)

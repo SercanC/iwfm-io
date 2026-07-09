@@ -17,7 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from . import excel_date_to_datetime, savefig
+from . import CUFT_TO_AF, excel_date_to_datetime, savefig
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -306,7 +306,7 @@ def plot_budget_timeseries(
     columns=None,
     fact_lt=1.0,
     fact_ar=1.0,
-    fact_vl=1.0,
+    fact_vl=CUFT_TO_AF,
     combine_storage=True,
     title=None,
     ylabel="Volume (AF)",
@@ -434,7 +434,7 @@ def plot_zbudget_timeseries(
     end_date=None,
     interval="1MON",
     fact_ar=1.0,
-    fact_vl=1.0,
+    fact_vl=CUFT_TO_AF,
     title=None,
     ylabel="Volume (AF)",
     stacked=False,

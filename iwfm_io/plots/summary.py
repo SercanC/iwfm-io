@@ -28,7 +28,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-from . import savefig, excel_date_to_datetime, _has_df_methods
+from . import CUFT_TO_AF, savefig, excel_date_to_datetime, _has_df_methods
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ def plot_budget_pie(
     volume_unit="CU_FT",
     fact_lt=1.0,
     fact_ar=1.0,
-    fact_vl=1.0,
+    fact_vl=CUFT_TO_AF,
     other_threshold=0.03,
     combine_storage=True,
     ax=None,
@@ -193,7 +193,7 @@ def plot_budget_monthly_average(
     location,
     begin_date,
     end_date,
-    fact_vl=1.0,
+    fact_vl=CUFT_TO_AF,
     max_components=8,
     combine_storage=True,
     ax=None,
@@ -311,7 +311,7 @@ def plot_budget_annual_bars(
     location,
     begin_date,
     end_date,
-    fact_vl=1.0,
+    fact_vl=CUFT_TO_AF,
     stacked=False,
     max_components=8,
     combine_storage=True,
@@ -634,7 +634,7 @@ def plot_water_balance_summary(
     volume_unit="CU_FT",
     fact_lt=1.0,
     fact_ar=1.0,
-    fact_vl=1.0,
+    fact_vl=CUFT_TO_AF,
     combine_storage=True,
     ax=None,
     figsize=(10, 7),

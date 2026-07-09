@@ -8,7 +8,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from . import excel_date_to_datetime, savefig
+from . import CUFT_TO_AF, excel_date_to_datetime, savefig
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -192,7 +192,8 @@ def plot_polar_seasonal(monthly_values, labels=None,
 
 def plot_budget_polar_seasonal(model, budget_type, location,
                                 begin_date, end_date,
-                                components=None, combine_storage=True,
+                                components=None, fact_vl=CUFT_TO_AF,
+                                combine_storage=True,
                                 ax=None,
                                 figsize=(8, 8), save_path=None):
     """Polar seasonal plot from budget monthly averages.
@@ -206,7 +207,7 @@ def plot_budget_polar_seasonal(model, budget_type, location,
         "Change in Storage" component (default True).
     """
     result = model.get_budget_monthly_average(
-        budget_type, location, begin_date, end_date,
+        budget_type, location, begin_date, end_date, fact_vl=fact_vl,
     )
     names = result["names"]
     flows = np.asarray(result["flows"])  # (n_flows, 12)
