@@ -363,13 +363,15 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
 
 def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
                            interval="1MON", fact_vl=CUFT_TO_AF,
-                           combine_storage=True,
+                           combine_storage=True, engine="matplotlib",
                            ax=None, figsize=(10, 8),
                            save_path=None):
     """Butterfly chart from model budget time-series averages.
 
     Values display in acre-feet by default (``fact_vl=CUFT_TO_AF``,
     assuming cubic-feet model units); pass ``fact_vl=1.0`` for raw units.
+    ``engine="plotly"`` renders interactive diverging bars; returns
+    ``(plotly Figure, None)``.
     """
     titles = model.get_budget_column_titles(budget_type, location)
     n_cols = len(titles)
@@ -385,6 +387,13 @@ def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
     # Sign magnitudes by their label direction so outflows go left
     from . import sign_budget_components
     titles, signed = sign_budget_components(titles, values.mean(axis=0))
+
+    if engine == "plotly":
+        from . import _plotly
+        return _plotly.diverging_bars(
+            titles, signed.tolist(),
+            f"Inflows vs Outflows — Location {location}",
+            "Mean flow (AF)", save_path, figsize)
 
     return plot_butterfly_chart(
         titles, signed.tolist(),

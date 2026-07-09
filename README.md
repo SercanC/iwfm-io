@@ -17,7 +17,7 @@ Python file I/O, DLL wrapper, and visualization library for the Integrated Water
   - **Scenario builder**: `create_scenario()` copies a model and applies input changes (`set_keyed_value`, `replace_text`, or your own functions)
 - **Run models from Python** (Windows): `iwfm.run_model()` drives the PreProcessor → Simulation → Budget → ZBudget executables with error detection — the full loop is `create_scenario()` → `run_model()` → `compare_models()`
 - **Python ctypes wrapper** for IWFM DLL — Windows x64 only (8 modules)
-- **58 plotting functions** across 13 modules:
+- **58 plotting functions** across 13 modules — matplotlib PNGs by default, and key plots (Sankey, budget time series/pie/bars, hydrographs, butterfly) accept `engine="plotly"` for interactive HTML with hover, zoom, and range sliders (`pip install iwfm-io[viz]`):
   - **Maps** (11 functions) — Grid, heads, streams, wells, lakes, tile drains
   - **Profiles** (2 functions) — Cross-sections, longitudinal profiles
   - **Time Series** (7 functions) — Hydrographs, budgets, land use

@@ -2,6 +2,12 @@
 
 Every function accepts the `open_model()` adapter (no DLL needed),
 returns `(fig, ax)`, and takes `save_path=` to write a PNG.
+Budget plots display **acre-feet** by default (assuming cubic-feet
+model units; pass `fact_vl=1.0` for raw units). The Sankey, budget
+time series/pie/bars, hydrographs, and butterfly accept
+`engine="plotly"` for interactive output — save as `.html` and share
+it with the user (`pip install iwfm-io[viz]` provides plotly; add
+kaleido for PNG export).
 Gallery from a real model:
 https://github.com/SercanC/iwfm-io/blob/main/docs/GALLERY.md
 

@@ -66,12 +66,16 @@ def plot_budget_pie(
     fact_vl=CUFT_TO_AF,
     other_threshold=0.03,
     combine_storage=True,
+    engine="matplotlib",
     ax=None,
     figsize=(8, 8),
     save_path=None,
     title=None,
 ):
     """Pie chart of average absolute flow by budget component.
+
+    ``engine="plotly"`` renders an interactive donut (save as ``.html``,
+    or ``.png`` with kaleido); returns ``(plotly Figure, None)``.
 
     ``combine_storage=True`` (default) replaces the cumulative
     Beginning/Ending Storage columns with a single flux-scale
@@ -156,6 +160,14 @@ def plot_budget_pie(
         pie_labels.append("Other")
 
     pie_vals = np.array(pie_vals)
+
+    if engine == "plotly":
+        from . import _plotly
+        return _plotly.donut(
+            pie_labels, pie_vals,
+            title or f"Budget Composition (avg |flow|) — Location {location}",
+            save_path, figsize)
+
     colors = _DEFAULT_COLORS[: len(pie_vals)]
 
     # Plot
@@ -196,12 +208,16 @@ def plot_budget_monthly_average(
     fact_vl=CUFT_TO_AF,
     max_components=8,
     combine_storage=True,
+    engine="matplotlib",
     ax=None,
     figsize=(12, 6),
     save_path=None,
     title=None,
 ):
     """Grouped bar chart of monthly-average budget flows.
+
+    ``engine="plotly"`` renders an interactive version; returns
+    ``(plotly Figure, None)``.
 
     Each budget component gets one bar per month (12 groups).
     Error bars show one standard deviation.
@@ -262,6 +278,15 @@ def plot_budget_monthly_average(
     sel_std = std_devs[top_idx, :]
     n_sel = len(sel_names)
 
+    if engine == "plotly":
+        from . import _plotly
+        series = [(n, sel_flows[k]) for k, n in enumerate(sel_names)]
+        return _plotly.grouped_bars(
+            _MONTH_LABELS, series,
+            title or f"Monthly Average Budget — Location {location}",
+            "Volume (AF)", save_path, figsize,
+            error_bars=[sel_std[k] for k in range(n_sel)])
+
     # Bar layout
     x = np.arange(12)
     bar_width = 0.8 / max(n_sel, 1)
@@ -315,6 +340,7 @@ def plot_budget_annual_bars(
     stacked=False,
     max_components=8,
     combine_storage=True,
+    engine="matplotlib",
     ax=None,
     figsize=(14, 6),
     save_path=None,
@@ -377,6 +403,15 @@ def plot_budget_annual_bars(
     sel_flows = flows[top_idx, :]
     n_sel = len(sel_names)
 
+    if engine == "plotly":
+        from . import _plotly
+        series = [(n, sel_flows[k]) for k, n in enumerate(sel_names)]
+        return _plotly.grouped_bars(
+            [str(y) for y in years], series,
+            title or f"Annual Budget — Location {location}",
+            "Annual volume (AF)", save_path, figsize,
+            barmode="relative" if stacked else "group")
+
     x = np.arange(n_years)
 
     if ax is None:
@@ -411,7 +446,7 @@ def plot_budget_annual_bars(
 
     ax.set_xticks(x)
     ax.set_xticklabels(years, rotation=45, ha="right")
-    ax.set_ylabel("Annual Flow")
+    ax.set_ylabel("Annual volume (AF)")
     ax.set_title(title or f"Annual Budget — Location {location}")
     ax.legend(fontsize=8, loc="best", ncol=2)
     ax.axhline(0, color="black", linewidth=0.5)

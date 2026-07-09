@@ -78,6 +78,7 @@ def plot_gw_head_hydrographs(
     interval="1MON",
     layers=None,
     factor=1.0,
+    engine="matplotlib",
     title="Groundwater Head Hydrographs",
     ylabel="Head (ft)",
     ax=None,
@@ -86,6 +87,10 @@ def plot_gw_head_hydrographs(
     dpi=150,
 ):
     """Multi-line plot of groundwater head vs. time at selected nodes.
+
+    ``engine="plotly"`` renders an interactive version with a time
+    range-slider — save as ``.html``, or ``.png`` with kaleido; returns
+    ``(plotly Figure, None)``.
 
     Parameters
     ----------
@@ -122,12 +127,13 @@ def plot_gw_head_hydrographs(
         if end_date is None:
             end_date = specs["dates"][-1]
 
-    fig, ax = _prepare_axes(ax, figsize)
-
     node_ids = model.get_node_ids()
 
-    # Multi-layer overlay for a single node
+    # Collect (label, values) series, then render with either engine
+    series = []
+    datetimes = None
     if layers is not None and len(node_indices) == 1:
+        # Multi-layer overlay for a single node
         nidx = node_indices[0]
         nid = int(node_ids[nidx])
         for lyr in layers:
@@ -135,7 +141,7 @@ def plot_gw_head_hydrographs(
                 lyr, begin_date, end_date, factor=factor
             )
             datetimes = excel_date_to_datetime(dates_arr)
-            ax.plot(datetimes, heads[nidx, :], label=f"Node {nid} - Layer {lyr}")
+            series.append((f"Node {nid} - Layer {lyr}", heads[nidx, :]))
     else:
         # Single layer, multiple nodes
         dates_arr, heads = model.get_gw_heads_for_layer(
@@ -144,7 +150,16 @@ def plot_gw_head_hydrographs(
         datetimes = excel_date_to_datetime(dates_arr)
         for nidx in node_indices:
             nid = int(node_ids[nidx])
-            ax.plot(datetimes, heads[nidx, :], label=f"Node {nid}")
+            series.append((f"Node {nid}", heads[nidx, :]))
+
+    if engine == "plotly":
+        from . import _plotly
+        return _plotly.line_chart(datetimes, series, title, ylabel,
+                                  save_path, figsize)
+
+    fig, ax = _prepare_axes(ax, figsize)
+    for label, values in series:
+        ax.plot(datetimes, values, label=label)
 
     return _finalise(fig, ax, title, ylabel, save_path, dpi)
 
@@ -161,6 +176,7 @@ def plot_stream_flow_hydrograph(
     interval="1MON",
     fact_lt=1.0,
     fact_vl=1.0,
+    engine="matplotlib",
     title="Stream Flow Hydrograph",
     ylabel="Flow (cfs)",
     ax=None,
@@ -195,8 +211,6 @@ def plot_stream_flow_hydrograph(
         if end_date is None:
             end_date = specs["dates"][-1]
 
-    fig, ax = _prepare_axes(ax, figsize)
-
     # Identify the flow hydrograph type
     hyd_types = model.get_hydrograph_type_list()
     flow_type = None
@@ -209,6 +223,8 @@ def plot_stream_flow_hydrograph(
 
     stream_ids = model.get_stream_node_ids()
 
+    series = []
+    datetimes = None
     for sn_idx in stream_node_indices:
         sn_id = int(stream_ids[sn_idx])
         dates_arr, values = model.get_hydrograph(
@@ -216,7 +232,16 @@ def plot_stream_flow_hydrograph(
             fact_lt=fact_lt, fact_vl=fact_vl,
         )
         datetimes = excel_date_to_datetime(dates_arr)
-        ax.plot(datetimes, values, label=f"Stream Node {sn_id}")
+        series.append((f"Stream Node {sn_id}", values))
+
+    if engine == "plotly":
+        from . import _plotly
+        return _plotly.line_chart(datetimes, series, title, ylabel,
+                                  save_path, figsize)
+
+    fig, ax = _prepare_axes(ax, figsize)
+    for label, values in series:
+        ax.plot(datetimes, values, label=label)
 
     return _finalise(fig, ax, title, ylabel, save_path, dpi)
 
@@ -233,6 +258,7 @@ def plot_stream_stage_hydrograph(
     interval="1MON",
     fact_lt=1.0,
     fact_vl=1.0,
+    engine="matplotlib",
     title="Stream Stage Hydrograph",
     ylabel="Stage (ft)",
     ax=None,
@@ -264,8 +290,6 @@ def plot_stream_stage_hydrograph(
         if end_date is None:
             end_date = specs["dates"][-1]
 
-    fig, ax = _prepare_axes(ax, figsize)
-
     # Identify the stage hydrograph type
     hyd_types = model.get_hydrograph_type_list()
     stage_type = None
@@ -279,6 +303,8 @@ def plot_stream_stage_hydrograph(
 
     stream_ids = model.get_stream_node_ids()
 
+    series = []
+    datetimes = None
     for sn_idx in stream_node_indices:
         sn_id = int(stream_ids[sn_idx])
         dates_arr, values = model.get_hydrograph(
@@ -286,7 +312,16 @@ def plot_stream_stage_hydrograph(
             fact_lt=fact_lt, fact_vl=fact_vl,
         )
         datetimes = excel_date_to_datetime(dates_arr)
-        ax.plot(datetimes, values, label=f"Stream Node {sn_id}")
+        series.append((f"Stream Node {sn_id}", values))
+
+    if engine == "plotly":
+        from . import _plotly
+        return _plotly.line_chart(datetimes, series, title, ylabel,
+                                  save_path, figsize)
+
+    fig, ax = _prepare_axes(ax, figsize)
+    for label, values in series:
+        ax.plot(datetimes, values, label=label)
 
     return _finalise(fig, ax, title, ylabel, save_path, dpi)
 
@@ -308,6 +343,7 @@ def plot_budget_timeseries(
     fact_ar=1.0,
     fact_vl=CUFT_TO_AF,
     combine_storage=True,
+    engine="matplotlib",
     title=None,
     ylabel="Volume (AF)",
     ax=None,
@@ -316,6 +352,10 @@ def plot_budget_timeseries(
     dpi=150,
 ):
     """Plot budget components as a stacked area chart or multi-line chart.
+
+    ``engine="plotly"`` renders an interactive version (hover across all
+    components, unified tooltip) — save as ``.html``, or ``.png`` with
+    kaleido; returns ``(plotly Figure, None)``.
 
     Parameters
     ----------
@@ -382,6 +422,18 @@ def plot_budget_timeseries(
         col_names, values = combine_storage_terms(col_names, values)
 
     datetimes = excel_date_to_datetime(dates_arr)
+
+    if title is None:
+        title = f"Budget: {budget_type} (Location {location})"
+
+    if engine == "plotly":
+        from . import _plotly
+        series = [(n, values[:, j]) for j, n in enumerate(col_names)]
+        if stacked:
+            return _plotly.stacked_area(datetimes, series, title, ylabel,
+                                        save_path, figsize)
+        return _plotly.line_chart(datetimes, series, title, ylabel,
+                                  save_path, figsize)
 
     fig, ax = _prepare_axes(ax, figsize)
 
