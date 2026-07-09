@@ -45,7 +45,7 @@ def plot_water_balance_sankey(names, values, title="Water Balance",
     f_names, f_values = zip(*filtered)
 
     # Normalize for Sankey (positive = in, negative = out)
-    sankey = Sankey(ax=ax, unit="", format="%.0f", scale=1.0 / max(abs(v) for v in f_values))
+    sankey = Sankey(ax=ax, unit="", format="%.3g", scale=1.0 / max(abs(v) for v in f_values))
     sankey.add(
         flows=list(f_values),
         labels=list(f_names),
@@ -87,10 +87,29 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
     if combine_storage:
         from . import combine_storage_terms
         titles, values = combine_storage_terms(titles, values)
-    avg_vals = values.mean(axis=0)
+
+    # IWFM budget values are magnitudes; direction is in the labels.
+    # Sign them so outflows actually leave the diagram.
+    from . import sign_budget_components
+    titles, signed = sign_budget_components(titles, values.mean(axis=0))
+
+    # Group minor flows so labels stay readable
+    mags = np.abs(signed)
+    thresh = 0.02 * mags.max() if len(mags) else 0.0
+    keep = mags >= thresh
+    names_f = [t for t, k in zip(titles, keep) if k]
+    vals_f = [float(v) for v, k in zip(signed, keep) if k]
+    other_in = float(sum(v for v, k in zip(signed, keep) if not k and v > 0))
+    other_out = float(sum(v for v, k in zip(signed, keep) if not k and v < 0))
+    if other_in > 0:
+        names_f.append("Other inflows")
+        vals_f.append(other_in)
+    if other_out < 0:
+        names_f.append("Other outflows")
+        vals_f.append(other_out)
 
     return plot_water_balance_sankey(
-        titles, avg_vals.tolist(),
+        names_f, vals_f,
         title=f"Water Balance Sankey — Location {location}",
         ax=ax, figsize=figsize, save_path=save_path,
     )
@@ -173,10 +192,13 @@ def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
     if combine_storage:
         from . import combine_storage_terms
         titles, values = combine_storage_terms(titles, values)
-    avg_vals = values.mean(axis=0)
+
+    # Sign magnitudes by their label direction so outflows go left
+    from . import sign_budget_components
+    titles, signed = sign_budget_components(titles, values.mean(axis=0))
 
     return plot_butterfly_chart(
-        titles, avg_vals.tolist(),
+        titles, signed.tolist(),
         title=f"Butterfly Chart — Location {location}",
         ax=ax, figsize=figsize, save_path=save_path,
     )
@@ -217,11 +239,15 @@ def plot_cumulative_departure(model, budget_type, location,
     dates = excel_date_to_datetime(ts["dates"])
     values = np.asarray(ts["values"])
 
-    # Only combine when columns are auto-classified — explicit indices
+    # Only transform when columns are auto-classified — explicit indices
     # refer to the original column layout
-    if combine_storage and inflow_cols is None and outflow_cols is None:
-        from . import combine_storage_terms
-        titles, values = combine_storage_terms(titles, values)
+    if inflow_cols is None and outflow_cols is None:
+        if combine_storage:
+            from . import combine_storage_terms
+            titles, values = combine_storage_terms(titles, values)
+        # Sign magnitudes by their label direction before classifying
+        from . import sign_budget_components
+        titles, values = sign_budget_components(titles, values)
         n_cols = len(titles)
 
     # Auto-classify columns if not specified

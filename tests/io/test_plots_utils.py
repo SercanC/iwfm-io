@@ -40,6 +40,30 @@ def test_combine_storage_terms_rows_with_extras():
     np.testing.assert_allclose(new_stds[0], [5.0, 5.0])  # quadrature 3-4-5
 
 
+def test_sign_budget_components():
+    from iwfm_io.plots import sign_budget_components
+
+    names = ["Percolation", "Change in Storage", "Deep Percolation (+)",
+             "Pumping (-)", "Discrepancy (=)"]
+    means = np.array([10.0, 4.0, 20.0, 15.0, 0.1])
+    out_names, signed = sign_budget_components(names, means)
+    assert out_names == ["Percolation", "Change in Storage",
+                         "Deep Percolation", "Pumping"]
+    # storage gain -> negative (leaves the balance); pumping -> negative;
+    # (+) and untagged stay positive; discrepancy dropped
+    np.testing.assert_allclose(signed, [10.0, -4.0, 20.0, -15.0])
+
+
+def test_sign_budget_components_2d():
+    from iwfm_io.plots import sign_budget_components
+
+    names = ["In (+)", "Out (-)"]
+    series = np.array([[1.0, 2.0], [3.0, 4.0]])
+    out_names, signed = sign_budget_components(names, series)
+    assert out_names == ["In", "Out"]
+    np.testing.assert_allclose(signed, [[1.0, -2.0], [3.0, -4.0]])
+
+
 def test_combine_storage_terms_no_pair_passthrough():
     from iwfm_io.plots import combine_storage_terms
 

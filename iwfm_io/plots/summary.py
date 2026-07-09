@@ -695,9 +695,12 @@ def plot_water_balance_summary(
     if combine_storage:
         from . import combine_storage_terms
         titles, values = combine_storage_terms(titles, values)
-        n_cols = len(titles)
 
-    means = values.mean(axis=0)
+    # Sign magnitudes by their label direction ((+)/(-) tags) so the
+    # in/out classification below is physical
+    from . import sign_budget_components
+    titles, means = sign_budget_components(titles, values.mean(axis=0))
+    n_cols = len(titles)
 
     # Separate into inflows and outflows
     inflow_idx = [i for i in range(n_cols) if means[i] > 0]

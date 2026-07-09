@@ -52,6 +52,58 @@ def iwfm_datestr_to_datetime(datestr):
 # Budget post-processing
 # ──────────────────────────────────────────────────────────────────
 
+def sign_budget_components(names, values):
+    """Convert IWFM budget magnitudes into signed in/out flows.
+
+    IWFM budget columns hold positive magnitudes; the direction lives in
+    the label — ``(+)`` inflow, ``(-)`` outflow, ``(=)`` closure residual
+    (Discrepancy). Balance-style plots (Sankey, butterfly, in/out bars)
+    need signed values instead:
+
+    - ``(+)`` components keep their magnitude (inflow),
+    - ``(-)`` components are negated (outflow),
+    - ``(=)`` components and 'Time' are dropped,
+    - 'Change in Storage' (ending − beginning) is negated: a storage
+      *gain* removes water from the balance (outflow side), a storage
+      *release* supplies it,
+    - untagged components (e.g. 'Percolation') pass through unchanged.
+
+    The direction tags are stripped from the returned names.
+
+    Parameters
+    ----------
+    names : list of str
+    values : array-like
+        One value per component (e.g. time-averaged flows), or an
+        ``(n_times, n_components)`` array.
+
+    Returns
+    -------
+    (names, signed_values)
+    """
+    values = np.asarray(values, dtype=float)
+    one_d = values.ndim == 1
+    keep_idx, out_names, signs = [], [], []
+    for i, raw in enumerate(names):
+        s = str(raw)
+        if "(=)" in s or s.strip().lower() == "time":
+            continue
+        clean = s.replace("(+)", "").replace("(-)", "").strip()
+        if "CHANGE IN STORAGE" in s.upper():
+            sign = -1.0
+        elif "(-)" in s:
+            sign = -1.0
+        else:
+            sign = 1.0
+        keep_idx.append(i)
+        out_names.append(clean)
+        signs.append(sign)
+    signs = np.asarray(signs)
+    if one_d:
+        return out_names, values[keep_idx] * signs
+    return out_names, values[:, keep_idx] * signs
+
+
 def combine_storage_terms(names, values, extras=None, component_axis=1):
     """Replace 'Beginning Storage' / 'Ending Storage' with 'Change in Storage'.
 
