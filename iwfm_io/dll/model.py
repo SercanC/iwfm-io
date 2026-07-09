@@ -1504,8 +1504,14 @@ class IWFMModel:
         _check_status(iStat, self._dll)
         nf = n_flows_out.value
         names = c_to_str_list(name_buf, loc_arr, nf)
-        flow_arr = np.frombuffer(flows, dtype=np.float64)[:nf * 12].reshape((nf, 12), order="F").copy()
-        sd_arr = np.frombuffer(sd_flows, dtype=np.float64)[:nf * 12].reshape((nf, 12), order="F").copy()
+        # The DLL fills the array at the DECLARED dimensions
+        # (max_flows x 12, column-major), so reshape the full buffer
+        # first and then slice the valid rows — taking the first nf*12
+        # flat elements would scatter the data.
+        flow_arr = np.frombuffer(flows, dtype=np.float64).reshape(
+            (max_flows, 12), order="F")[:nf, :].copy()
+        sd_arr = np.frombuffer(sd_flows, dtype=np.float64).reshape(
+            (max_flows, 12), order="F")[:nf, :].copy()
         return {"names": names, "flows": flow_arr, "std_devs": sd_arr}
 
     def get_budget_annual(self, budget_type, location, begin_date, end_date,
@@ -1534,7 +1540,10 @@ class IWFMModel:
         nf = n_flows_out.value
         nt = n_times_out.value
         names = c_to_str_list(name_buf, loc_arr, nf)
-        flow_arr = np.frombuffer(flows, dtype=np.float64)[:nf * nt].reshape((nf, nt), order="F").copy()
+        # Reshape at the declared (max_flows x max_times) stride the DLL
+        # wrote with, then slice the valid block (see monthly average).
+        flow_arr = np.frombuffer(flows, dtype=np.float64).reshape(
+            (max_flows, max_times), order="F")[:nf, :nt].copy()
         return {"names": names, "flows": flow_arr,
                 "years": np.array(years[:nt], dtype=np.int32)}
 
@@ -1566,7 +1575,10 @@ class IWFMModel:
         nf = n_flows_out.value
         nt = n_times_out.value
         names = c_to_str_list(name_buf, loc_arr, nf)
-        flow_arr = np.frombuffer(flows, dtype=np.float64)[:nf * nt].reshape((nf, nt), order="F").copy()
+        # Reshape at the declared (max_flows x max_times) stride the DLL
+        # wrote with, then slice the valid block (see monthly average).
+        flow_arr = np.frombuffer(flows, dtype=np.float64).reshape(
+            (max_flows, max_times), order="F")[:nf, :nt].copy()
         return {"names": names, "flows": flow_arr,
                 "years": np.array(years[:nt], dtype=np.int32)}
 

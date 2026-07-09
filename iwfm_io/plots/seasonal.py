@@ -192,7 +192,8 @@ def plot_polar_seasonal(monthly_values, labels=None,
 
 def plot_budget_polar_seasonal(model, budget_type, location,
                                 begin_date, end_date,
-                                components=None, ax=None,
+                                components=None, combine_storage=True,
+                                ax=None,
                                 figsize=(8, 8), save_path=None):
     """Polar seasonal plot from budget monthly averages.
 
@@ -200,12 +201,19 @@ def plot_budget_polar_seasonal(model, budget_type, location,
     ----------
     components : list of str, optional
         Component names to include. If None, uses the top 5 by magnitude.
+    combine_storage : bool
+        Replace Beginning/Ending Storage with a flux-scale
+        "Change in Storage" component (default True).
     """
     result = model.get_budget_monthly_average(
         budget_type, location, begin_date, end_date,
     )
     names = result["names"]
-    flows = result["flows"]  # (n_flows, 12)
+    flows = np.asarray(result["flows"])  # (n_flows, 12)
+
+    if combine_storage:
+        from . import combine_storage_terms
+        names, flows = combine_storage_terms(names, flows, component_axis=0)
 
     if components is None:
         # Pick top 5 by average absolute magnitude

@@ -65,12 +65,17 @@ def plot_budget_pie(
     fact_ar=1.0,
     fact_vl=1.0,
     other_threshold=0.03,
+    combine_storage=True,
     ax=None,
     figsize=(8, 8),
     save_path=None,
     title=None,
 ):
     """Pie chart of average absolute flow by budget component.
+
+    ``combine_storage=True`` (default) replaces the cumulative
+    Beginning/Ending Storage columns with a single flux-scale
+    "Change in Storage" component.
 
     Components whose fraction of total absolute flow falls below
     *other_threshold* are grouped into an "Other" slice.
@@ -126,6 +131,11 @@ def plot_budget_pie(
         fact_vl=fact_vl,
     )
     values = np.asarray(ts["values"])  # (n_times, n_cols)
+
+    if combine_storage:
+        from . import combine_storage_terms
+        titles, values = combine_storage_terms(titles, values)
+        n_cols = len(titles)
 
     # Average absolute value per component
     avg_abs = np.abs(values).mean(axis=0)
@@ -185,6 +195,7 @@ def plot_budget_monthly_average(
     end_date,
     fact_vl=1.0,
     max_components=8,
+    combine_storage=True,
     ax=None,
     figsize=(12, 6),
     save_path=None,
@@ -230,6 +241,11 @@ def plot_budget_monthly_average(
     names = result["names"]           # list[str]
     flows = np.asarray(result["flows"])       # (n_flows, 12)
     std_devs = np.asarray(result["std_devs"])  # (n_flows, 12)
+
+    if combine_storage:
+        from . import combine_storage_terms
+        names, flows, std_devs = combine_storage_terms(
+            names, flows, extras=std_devs, component_axis=0)
 
     n_flows = flows.shape[0]
 
@@ -298,6 +314,7 @@ def plot_budget_annual_bars(
     fact_vl=1.0,
     stacked=False,
     max_components=8,
+    combine_storage=True,
     ax=None,
     figsize=(14, 6),
     save_path=None,
@@ -341,6 +358,10 @@ def plot_budget_annual_bars(
     names = result["names"]                 # list[str]
     flows = np.asarray(result["flows"])     # (n_flows, n_years)
     years = np.asarray(result["years"])     # (n_years,)
+
+    if combine_storage:
+        from . import combine_storage_terms
+        names, flows = combine_storage_terms(names, flows, component_axis=0)
 
     n_flows, n_years = flows.shape
 
@@ -614,6 +635,7 @@ def plot_water_balance_summary(
     fact_lt=1.0,
     fact_ar=1.0,
     fact_vl=1.0,
+    combine_storage=True,
     ax=None,
     figsize=(10, 7),
     save_path=None,
@@ -669,6 +691,12 @@ def plot_water_balance_summary(
         fact_vl=fact_vl,
     )
     values = np.asarray(ts["values"])  # (n_times, n_cols)
+
+    if combine_storage:
+        from . import combine_storage_terms
+        titles, values = combine_storage_terms(titles, values)
+        n_cols = len(titles)
+
     means = values.mean(axis=0)
 
     # Separate into inflows and outflows

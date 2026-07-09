@@ -50,7 +50,14 @@ def _finalise(fig, ax, title, ylabel, save_path, dpi, legend=True):
     ax.set_xlabel("Date")
     ax.grid(True, linestyle="--", alpha=0.5)
     if legend:
-        ax.legend(loc="best", fontsize="small", framealpha=0.8)
+        # Deduplicate labels (e.g. a column present in both the positive
+        # and negative stacks of a stacked budget plot)
+        handles, labels = ax.get_legend_handles_labels()
+        dedup = {}
+        for h, l in zip(handles, labels):
+            dedup.setdefault(l, h)
+        ax.legend(dedup.values(), dedup.keys(), loc="best",
+                  fontsize="small", framealpha=0.8)
     _format_date_axis(ax)
     fig.tight_layout()
     if save_path:
@@ -300,6 +307,7 @@ def plot_budget_timeseries(
     fact_lt=1.0,
     fact_ar=1.0,
     fact_vl=1.0,
+    combine_storage=True,
     title=None,
     ylabel="Volume (AF)",
     ax=None,
@@ -325,6 +333,11 @@ def plot_budget_timeseries(
         Column indices to retrieve.  ``None`` retrieves all columns.
     fact_lt, fact_ar, fact_vl : float
         Unit conversion factors.
+    combine_storage : bool
+        Replace the cumulative Beginning/Ending Storage columns with a
+        single flux-scale "Change in Storage" (ending − beginning)
+        column, so storage doesn't dwarf the other components
+        (default True).
     title, ylabel : str
     ax, figsize, save_path, dpi : optional
 
@@ -339,9 +352,17 @@ def plot_budget_timeseries(
         if end_date is None:
             end_date = specs["dates"][-1]
 
+    # Column titles for legend labels (result["data_types"] holds
+    # integer type codes, not names)
+    try:
+        titles = list(model.get_budget_column_titles(budget_type, location))
+    except Exception:
+        titles = None
+
     if columns is None:
-        n_cols = model.get_budget_n_columns(budget_type, location)
-        columns = list(range(n_cols))
+        n_cols = len(titles) if titles else \
+            model.get_budget_n_columns(budget_type, location)
+        columns = list(range(1, n_cols + 1))
 
     result = model.get_budget_timeseries(
         budget_type, location, columns, begin_date, end_date,
@@ -349,10 +370,16 @@ def plot_budget_timeseries(
     )
 
     dates_arr = result["dates"]
-    values = result["values"]       # (n_times, n_cols)
-    col_names = result["data_types"] if "data_types" in result else [
-        f"Column {c}" for c in columns
-    ]
+    values = np.asarray(result["values"])       # (n_times, n_cols)
+    if titles:
+        col_names = [titles[c - 1] if 1 <= c <= len(titles) else f"Column {c}"
+                     for c in columns]
+    else:
+        col_names = [f"Column {c}" for c in columns]
+
+    if combine_storage:
+        from . import combine_storage_terms
+        col_names, values = combine_storage_terms(col_names, values)
 
     datetimes = excel_date_to_datetime(dates_arr)
 

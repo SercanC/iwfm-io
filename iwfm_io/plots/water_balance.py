@@ -65,13 +65,17 @@ def plot_water_balance_sankey(names, values, title="Water Balance",
 
 
 def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
-                       interval="1MON", ax=None, figsize=(14, 8),
+                       interval="1MON", combine_storage=True,
+                       ax=None, figsize=(14, 8),
                        save_path=None):
     """Sankey from model budget time-series averages.
 
     Parameters
     ----------
     model : IWFMModel (inquiry mode)
+    combine_storage : bool
+        Replace Beginning/Ending Storage with a flux-scale
+        "Change in Storage" component (default True).
     """
     titles = model.get_budget_column_titles(budget_type, location)
     n_cols = len(titles)
@@ -79,7 +83,11 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
         budget_type, location, list(range(1, n_cols + 1)),
         begin_date, end_date, interval,
     )
-    avg_vals = ts["values"].mean(axis=0)
+    values = np.asarray(ts["values"])
+    if combine_storage:
+        from . import combine_storage_terms
+        titles, values = combine_storage_terms(titles, values)
+    avg_vals = values.mean(axis=0)
 
     return plot_water_balance_sankey(
         titles, avg_vals.tolist(),
@@ -151,7 +159,8 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
 
 
 def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
-                           interval="1MON", ax=None, figsize=(10, 8),
+                           interval="1MON", combine_storage=True,
+                           ax=None, figsize=(10, 8),
                            save_path=None):
     """Butterfly chart from model budget time-series averages."""
     titles = model.get_budget_column_titles(budget_type, location)
@@ -160,7 +169,11 @@ def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
         budget_type, location, list(range(1, n_cols + 1)),
         begin_date, end_date, interval,
     )
-    avg_vals = ts["values"].mean(axis=0)
+    values = np.asarray(ts["values"])
+    if combine_storage:
+        from . import combine_storage_terms
+        titles, values = combine_storage_terms(titles, values)
+    avg_vals = values.mean(axis=0)
 
     return plot_butterfly_chart(
         titles, avg_vals.tolist(),
@@ -176,6 +189,7 @@ def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
 def plot_cumulative_departure(model, budget_type, location,
                                begin_date, end_date, interval="1MON",
                                inflow_cols=None, outflow_cols=None,
+                               combine_storage=True,
                                ax=None, figsize=(12, 5),
                                save_path=None):
     """Running sum of (total inflow − total outflow) over time.
@@ -201,7 +215,14 @@ def plot_cumulative_departure(model, budget_type, location,
         begin_date, end_date, interval,
     )
     dates = excel_date_to_datetime(ts["dates"])
-    values = ts["values"]
+    values = np.asarray(ts["values"])
+
+    # Only combine when columns are auto-classified — explicit indices
+    # refer to the original column layout
+    if combine_storage and inflow_cols is None and outflow_cols is None:
+        from . import combine_storage_terms
+        titles, values = combine_storage_terms(titles, values)
+        n_cols = len(titles)
 
     # Auto-classify columns if not specified
     if inflow_cols is None or outflow_cols is None:

@@ -49,6 +49,83 @@ def iwfm_datestr_to_datetime(datestr):
 
 
 # ──────────────────────────────────────────────────────────────────
+# Budget post-processing
+# ──────────────────────────────────────────────────────────────────
+
+def combine_storage_terms(names, values, extras=None, component_axis=1):
+    """Replace 'Beginning Storage' / 'Ending Storage' with 'Change in Storage'.
+
+    IWFM budget outputs report cumulative aquifer storage at the start
+    and end of each step. Those columns are orders of magnitude larger
+    than the flux terms (drowning everything else in plots) and their
+    absolute values are datum-dependent. Their difference — ending
+    minus beginning, positive = storage gain — is a flux at the same
+    scale as the other components, inserted where the pair was.
+
+    Parameters
+    ----------
+    names : list of str
+        Component names.
+    values : array-like
+        Component values, components along *component_axis*
+        (1 for ``(n_times, n_components)`` time series, 0 for
+        ``(n_components, ...)`` aggregates).
+    extras : array-like, optional
+        Companion per-component array (e.g. standard deviations),
+        combined in quadrature — an approximation, since the two
+        storage series are strongly correlated.
+    component_axis : int
+
+    Returns
+    -------
+    (names, values) — or (names, values, extras) when *extras* is
+    given. Returned unchanged when the storage pair is not present.
+    """
+    upper = [str(n).upper() for n in names]
+
+    # Running-total columns (e.g. 'Cumulative Subsidence') have the same
+    # scale problem as the storage pair and always duplicate a flux-scale
+    # twin — drop them.
+    cum = [i for i, n in enumerate(upper) if n.startswith("CUMULATIVE")]
+    if cum:
+        keep0 = [i for i in range(len(names)) if i not in cum]
+        names = [names[i] for i in keep0]
+        values = np.take(np.asarray(values, dtype=float), keep0,
+                         axis=component_axis)
+        if extras is not None:
+            extras = np.take(np.asarray(extras, dtype=float), keep0,
+                             axis=component_axis)
+        upper = [str(n).upper() for n in names]
+
+    b = next((i for i, n in enumerate(upper) if "BEGINNING STORAGE" in n), None)
+    e = next((i for i, n in enumerate(upper) if "ENDING STORAGE" in n), None)
+    values = np.asarray(values, dtype=float)
+    if b is None or e is None:
+        return (names, values) if extras is None else (names, values, extras)
+
+    begin = np.take(values, b, axis=component_axis)
+    end = np.take(values, e, axis=component_axis)
+    delta = end - begin
+
+    keep = [i for i in range(len(names)) if i not in (b, e)]
+    insert_at = sum(1 for i in keep if i < min(b, e))
+
+    new_names = [names[i] for i in keep]
+    new_names.insert(insert_at, "Change in Storage")
+    new_values = np.take(values, keep, axis=component_axis)
+    new_values = np.insert(new_values, insert_at, delta, axis=component_axis)
+
+    if extras is None:
+        return new_names, new_values
+    extras = np.asarray(extras, dtype=float)
+    combined = np.sqrt(np.take(extras, b, axis=component_axis) ** 2
+                       + np.take(extras, e, axis=component_axis) ** 2)
+    new_extras = np.take(extras, keep, axis=component_axis)
+    new_extras = np.insert(new_extras, insert_at, combined, axis=component_axis)
+    return new_names, new_values, new_extras
+
+
+# ──────────────────────────────────────────────────────────────────
 # Source resolution helpers
 # ──────────────────────────────────────────────────────────────────
 
