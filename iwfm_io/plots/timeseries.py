@@ -343,6 +343,8 @@ def plot_budget_timeseries(
     fact_ar=1.0,
     fact_vl=CUFT_TO_AF,
     combine_storage=True,
+    balance_only=True,
+    annual=True,
     engine="matplotlib",
     title=None,
     ylabel="Volume (AF)",
@@ -352,6 +354,13 @@ def plot_budget_timeseries(
     dpi=150,
 ):
     """Plot budget components as a stacked area chart or multi-line chart.
+
+    By default the plot shows **water-year totals** of the **mass-balance
+    components** in acre-feet: untagged reporting-only columns (e.g. the
+    GW budget's 'Percolation') and the '(=)' closure column are dropped
+    (``balance_only=False`` keeps everything), and monthly values are
+    summed to water years ending Sep 30 (``annual=False`` plots the
+    native interval).
 
     ``engine="plotly"`` renders an interactive version (hover across all
     components, unified tooltip) — save as ``.html``, or ``.png`` with
@@ -420,11 +429,29 @@ def plot_budget_timeseries(
     if combine_storage:
         from . import combine_storage_terms
         col_names, values = combine_storage_terms(col_names, values)
+    if balance_only:
+        # Keep mass-balance components only, then sign magnitudes by
+        # their (+)/(-) direction so inflows stack above the axis and
+        # outflows below
+        from . import filter_balance_components, sign_budget_components
+        col_names, values = filter_balance_components(col_names, values)
+        col_names, values = sign_budget_components(col_names, values)
 
     datetimes = excel_date_to_datetime(dates_arr)
 
+    if annual:
+        # Sum to water years (Oct-Sep); Change in Storage telescopes to
+        # the true annual value. Label each year by its ending Sep 30.
+        import pandas as pd
+        df = pd.DataFrame(values, index=pd.DatetimeIndex(datetimes))
+        wy = df.resample("YS-OCT").sum()
+        values = wy.to_numpy()
+        datetimes = [(ts + pd.DateOffset(months=11, days=29)).to_pydatetime()
+                     for ts in wy.index]
+
     if title is None:
-        title = f"Budget: {budget_type} (Location {location})"
+        title = (f"Budget: {budget_type} (Location {location}"
+                 + (", water-year totals)" if annual else ")"))
 
     if engine == "plotly":
         from . import _plotly
@@ -438,18 +465,28 @@ def plot_budget_timeseries(
     fig, ax = _prepare_axes(ax, figsize)
 
     if stacked:
-        # Separate positive and negative components for a clean stack
+        # Separate positive and negative components for a clean stack.
+        # One fixed color per component so its pos and neg parts match
+        # and the two stacks don't restart the color cycle.
         pos = np.clip(values, 0, None)
         neg = np.clip(values, None, 0)
 
         has_pos = pos.sum(axis=0) > 0
         has_neg = neg.sum(axis=0) < 0
 
+        cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        comp_colors, k = {}, 0
+        for j, visible in enumerate(has_pos | has_neg):
+            if visible:
+                comp_colors[j] = cycle[k % len(cycle)]
+                k += 1
+
         if has_pos.any():
             ax.stackplot(
                 datetimes,
                 pos[:, has_pos].T,
                 labels=[col_names[i] for i, hp in enumerate(has_pos) if hp],
+                colors=[comp_colors[i] for i, hp in enumerate(has_pos) if hp],
                 alpha=0.75,
             )
         if has_neg.any():
@@ -457,14 +494,12 @@ def plot_budget_timeseries(
                 datetimes,
                 neg[:, has_neg].T,
                 labels=[col_names[i] for i, hn in enumerate(has_neg) if hn],
+                colors=[comp_colors[i] for i, hn in enumerate(has_neg) if hn],
                 alpha=0.75,
             )
     else:
         for j in range(values.shape[1]):
             ax.plot(datetimes, values[:, j], label=col_names[j])
-
-    if title is None:
-        title = f"Budget: {budget_type} (Location {location})"
 
     return _finalise(fig, ax, title, ylabel, save_path, dpi)
 

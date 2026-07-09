@@ -260,9 +260,10 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
         from . import combine_storage_terms
         titles, values = combine_storage_terms(titles, values)
 
-    # IWFM budget values are magnitudes; direction is in the labels.
-    # Sign them so outflows actually leave the diagram.
-    from . import sign_budget_components
+    # Balance components only (untagged columns are reporting-only),
+    # signed by their label direction so outflows leave the diagram.
+    from . import filter_balance_components, sign_budget_components
+    titles, values = filter_balance_components(titles, values)
     titles, signed = sign_budget_components(titles, values.mean(axis=0))
 
     # Group minor flows so labels stay readable
@@ -331,14 +332,23 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
     max_len = max(len(inflows), len(outflows))
     y_pos = np.arange(max_len)
 
+    # Short bars get their label outside the bar end (centered white
+    # text on facing short bars collides across the axis)
+    span = max([v for _, v in inflows] + [v for _, v in outflows])
+    pad = span * 0.02
+
     # Inflows (positive direction — right)
     if inflows:
         in_names, in_vals = zip(*inflows)
         ax.barh(y_pos[:len(in_vals)], in_vals, color="steelblue",
                 alpha=0.8, label="Inflows")
         for i, (n, v) in enumerate(inflows):
-            ax.text(v * 0.5, i, n, ha="center", va="center",
-                    fontsize=7, color="white", fontweight="bold")
+            if v >= span * 0.25:
+                ax.text(v * 0.5, i, n, ha="center", va="center",
+                        fontsize=7, color="white", fontweight="bold")
+            else:
+                ax.text(v + pad, i, n, ha="left", va="center",
+                        fontsize=7, color="#0b0b0b")
 
     # Outflows (negative direction — left)
     if outflows:
@@ -346,8 +356,12 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
         ax.barh(y_pos[:len(out_vals)], [-v for v in out_vals],
                 color="indianred", alpha=0.8, label="Outflows")
         for i, (n, v) in enumerate(outflows):
-            ax.text(-v * 0.5, i, n, ha="center", va="center",
-                    fontsize=7, color="white", fontweight="bold")
+            if v >= span * 0.25:
+                ax.text(-v * 0.5, i, n, ha="center", va="center",
+                        fontsize=7, color="white", fontweight="bold")
+            else:
+                ax.text(-v - pad, i, n, ha="right", va="center",
+                        fontsize=7, color="#0b0b0b")
 
     ax.axvline(0, color="black", linewidth=0.8)
     ax.set_yticks([])
@@ -384,8 +398,9 @@ def plot_budget_butterfly(model, budget_type, location, begin_date, end_date,
         from . import combine_storage_terms
         titles, values = combine_storage_terms(titles, values)
 
-    # Sign magnitudes by their label direction so outflows go left
-    from . import sign_budget_components
+    # Balance components only, signed by their label direction
+    from . import filter_balance_components, sign_budget_components
+    titles, values = filter_balance_components(titles, values)
     titles, signed = sign_budget_components(titles, values.mean(axis=0))
 
     if engine == "plotly":
@@ -444,8 +459,9 @@ def plot_cumulative_departure(model, budget_type, location,
         if combine_storage:
             from . import combine_storage_terms
             titles, values = combine_storage_terms(titles, values)
-        # Sign magnitudes by their label direction before classifying
-        from . import sign_budget_components
+        # Balance components only, signed by their label direction
+        from . import filter_balance_components, sign_budget_components
+        titles, values = filter_balance_components(titles, values)
         titles, values = sign_budget_components(titles, values)
         n_cols = len(titles)
 

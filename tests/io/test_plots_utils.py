@@ -40,6 +40,32 @@ def test_combine_storage_terms_rows_with_extras():
     np.testing.assert_allclose(new_stds[0], [5.0, 5.0])  # quadrature 3-4-5
 
 
+def test_filter_balance_components():
+    from iwfm_io.plots import filter_balance_components
+
+    # Untagged 'Percolation' is reporting-only; '(=)' is closure —
+    # both drop. Tagged components and Change in Storage stay.
+    names = ["Percolation", "Change in Storage", "Deep Percolation (+)",
+             "Pumping (-)", "Discrepancy (=)"]
+    values = np.ones((3, 5)) * np.arange(5)
+    out_names, out_vals = filter_balance_components(names, values)
+    assert out_names == ["Change in Storage", "Deep Percolation (+)",
+                         "Pumping (-)"]
+    np.testing.assert_allclose(out_vals[0], [1, 2, 3])
+
+
+def test_filter_balance_components_untagged_passthrough():
+    from iwfm_io.plots import filter_balance_components
+
+    # The monthly/annual flows API returns untagged, already
+    # balance-only names — nothing may be dropped
+    names = ["Change in Storage", "Deep Percolation", "Pumping"]
+    values = np.ones((2, 3))
+    out_names, out_vals = filter_balance_components(names, values)
+    assert out_names == names
+    assert out_vals.shape == (2, 3)
+
+
 def test_sign_budget_components():
     from iwfm_io.plots import sign_budget_components
 

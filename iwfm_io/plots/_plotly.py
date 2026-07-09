@@ -14,7 +14,11 @@ Plotly-engine plot functions return ``(fig, None)`` where ``fig`` is a
 from __future__ import annotations
 
 CATEGORICAL = ["#2a78d6", "#1baf7a", "#eda100", "#008300",
-               "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"]
+               "#4a3aa7", "#e34948", "#e87ba4", "#eb6834",
+               # overflow slots for >8 series (budget tables can have
+               # 9-12 balance components); order is CVD-validated —
+               # don't rearrange without re-running the palette checks
+               "#00a3c7", "#6d8f00", "#a4459f", "#b06a1f"]
 INK = "#0b0b0b"
 INK_2 = "#52514e"
 MUTED = "#898781"
@@ -100,11 +104,15 @@ def stacked_area(x, series, title, ylabel, save_path, figsize=(12, 6)):
     go = _go()
     import numpy as np
     fig = go.Figure()
-    for i, (name, values) in enumerate(series):
+    n_visible = 0
+    for name, values in series:
         v = np.asarray(values, dtype=float)
-        c = color(i)
         pos = np.clip(v, 0, None)
         neg = np.clip(v, None, 0)
+        if not (pos.any() or neg.any()):
+            continue  # all-zero series: no trace, don't burn a color slot
+        c = color(n_visible)
+        n_visible += 1
         common = dict(x=x, name=str(name), mode="lines",
                       line=dict(width=0.5, color=c),
                       fillcolor=rgba(c, 0.55), legendgroup=str(name))

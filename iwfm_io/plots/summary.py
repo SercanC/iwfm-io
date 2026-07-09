@@ -66,6 +66,7 @@ def plot_budget_pie(
     fact_vl=CUFT_TO_AF,
     other_threshold=0.03,
     combine_storage=True,
+    balance_only=True,
     engine="matplotlib",
     ax=None,
     figsize=(8, 8),
@@ -139,7 +140,10 @@ def plot_budget_pie(
     if combine_storage:
         from . import combine_storage_terms
         titles, values = combine_storage_terms(titles, values)
-        n_cols = len(titles)
+    if balance_only:
+        from . import filter_balance_components
+        titles, values = filter_balance_components(titles, values)
+    n_cols = len(titles)
 
     # Average absolute value per component
     avg_abs = np.abs(values).mean(axis=0)
@@ -731,9 +735,10 @@ def plot_water_balance_summary(
         from . import combine_storage_terms
         titles, values = combine_storage_terms(titles, values)
 
-    # Sign magnitudes by their label direction ((+)/(-) tags) so the
+    # Balance components only, signed by their label direction so the
     # in/out classification below is physical
-    from . import sign_budget_components
+    from . import filter_balance_components, sign_budget_components
+    titles, values = filter_balance_components(titles, values)
     titles, means = sign_budget_components(titles, values.mean(axis=0))
     n_cols = len(titles)
 
@@ -800,6 +805,11 @@ def plot_water_balance_summary(
         x_text = val + offset if val >= 0 else val - offset
         ax.text(x_text, y_pos[k], f"{val:,.1f}", va="center", ha=ha,
                 fontsize=8, color="black")
+
+    # Headroom so the outside value labels don't clip at the axes edge
+    lo, hi = min(sorted_vals), max(sorted_vals)
+    span = hi - lo
+    ax.set_xlim(min(lo, 0) - 0.15 * span, max(hi, 0) + 0.15 * span)
 
     fig.tight_layout()
 

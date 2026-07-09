@@ -58,6 +58,41 @@ def iwfm_datestr_to_datetime(datestr):
 #: units (or your own factor for non-cubic-feet models).
 CUFT_TO_AF = 1.0 / 43560.0
 
+def filter_balance_components(names, values, extras=None, component_axis=1):
+    """Keep only the components that enter the mass balance.
+
+    IWFM budget outputs mix balance components — tagged ``(+)`` inflow,
+    ``(-)`` outflow, ``(=)`` closure — with untagged reporting-only
+    columns (e.g. the GW budget's 'Percolation', which informs but does
+    not enter the balance; only 'Deep Percolation (+)' does). Budget
+    plots should show the balance components:
+
+    - tagged ``(+)`` / ``(-)`` components are kept,
+    - the synthesized 'Change in Storage' is kept,
+    - untagged reporting columns and ``(=)`` closure residuals drop.
+
+    If *no* name carries a direction tag, the set came from IWFM's
+    monthly/annual flows API, which is already balance-only — it passes
+    through unchanged.
+
+    Returns ``(names, values)`` or ``(names, values, extras)``.
+    """
+    upper = [str(n).upper() for n in names]
+    if not any("(+)" in n or "(-)" in n for n in upper):
+        return (names, values) if extras is None else (names, values, extras)
+
+    keep = [i for i, n in enumerate(upper)
+            if "(+)" in n or "(-)" in n or "CHANGE IN STORAGE" in n]
+    names = [names[i] for i in keep]
+    values = np.take(np.asarray(values, dtype=float), keep,
+                     axis=component_axis)
+    if extras is None:
+        return names, values
+    extras = np.take(np.asarray(extras, dtype=float), keep,
+                     axis=component_axis)
+    return names, values, extras
+
+
 def sign_budget_components(names, values):
     """Convert IWFM budget magnitudes into signed in/out flows.
 
