@@ -291,9 +291,12 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
     raw_data = reader.skip_to_end()
 
     # Parse the basic per-diversion table from the first NRDV data rows.
-    # Column layouts vary across IWFM versions, but the first two columns
-    # (ID, export stream node — 0 means import from outside the model)
-    # and the trailing NAME token are stable.
+    # Column layouts vary across IWFM versions (older ones include an
+    # ICOLSL/FRACSL spill pair), but both ends of the row are stable:
+    # ID and IRDV lead, and the tail is always
+    # TYPDSTDL DSTDL ICOLDL FRACDL ICFSIRIG ICADJ [NAME] — so the
+    # delivery destination is read at fixed offsets from the end.
+    # TYPDSTDL: 0=outside, 2=element, 4=subregion, 6=element group.
     from iwfm.io._tokens import is_comment
     rows = []
     for line in raw_data:
@@ -302,13 +305,17 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
         toks = tokenize_data_line(line)
         if len(toks) < 3:
             continue
+        name = toks[-1] if not _is_number(toks[-1]) else ""
+        nums = toks[:-1] if name else toks
         try:
             rows.append({
-                "diversion_id": int(float(toks[0])),
-                "export_node": int(float(toks[1])),
-                "name": toks[-1] if not _is_number(toks[-1]) else "",
+                "diversion_id": int(float(nums[0])),
+                "export_node": int(float(nums[1])),
+                "dest_type": int(float(nums[-6])),
+                "dest_id": int(float(nums[-5])),
+                "name": name,
             })
-        except ValueError:
+        except (ValueError, IndexError):
             break
         if len(rows) == n_diversions:
             break

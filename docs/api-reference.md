@@ -208,8 +208,9 @@ adapter.get_aquifer_horizontal_k()     # (n_nodes, n_layers); also _vertical_k,
 adapter.get_subregion_ag_pumping_avg_depth_to_gw()   # GSE − head per subregion
 adapter.get_zbudget_timeseries("GW", zone_id=1, columns=[0, 1, 2])  # zones = subregions
 adapter.wells_df()                     # well specs: id, x, y, radius, perf top/bot, name
-adapter.diversions_df()                # id, export node, name, delivery elements,
-                                       #   recharge (recoverable-loss) elements
+adapter.diversions_df()                # id, export node, dest type/id, name,
+                                       #   delivery elements (group/subregion/element
+                                       #   destinations resolved), recharge elements
 ```
 
 Delivery element groups and recharge zones are parsed on the file

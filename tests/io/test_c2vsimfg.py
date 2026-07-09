@@ -167,12 +167,16 @@ class TestAdapterDllFree:
         assert (d["export_node"] >= 0).all()
 
     def test_element_groups(self, model):
-        # Delivery groups + recharge zones join onto diversions_df
+        # Delivery destinations resolved from TYPDSTDL/DSTDL (tail-anchored,
+        # so the optional spill columns of older formats don't matter)
         d = model.diversions_df()
         row = d[d["diversion_id"] == 2].iloc[0]
+        assert row["dest_type"] == 6 and row["dest_id"] == 2
         assert row["elements"][:2] == [306, 309]
         assert len(row["elements"]) == 52
         assert len(row["recharge_elements"]) == 52
+        # 462 element-group deliveries + 36 out-of-model exports
+        assert d["dest_type"].value_counts().to_dict() == {6: 462, 0: 36}
         # Well delivery groups (incl. group 37 whose name comment lacks
         # the leading slash in the DWR file)
         ws = model._well_spec

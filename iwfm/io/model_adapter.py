@@ -269,33 +269,46 @@ class IOModelAdapter:
     # -- Diversions ------------------------------------------------------
 
     def diversions_df(self):
-        """Return DataFrame: diversion_id, export_node, name, elements,
-        recharge_elements.
+        """Return DataFrame: diversion_id, export_node, dest_type,
+        dest_id, name, elements, recharge_elements.
 
         From the diversion specification file. ``export_node`` is the
         diverting stream node (0 = import from outside the model).
-        ``elements`` are the delivery element group's elements — filled
-        by group-id match when the file defines one delivery group per
-        diversion (models that share groups across diversions keep the
-        groups on ``DiverSpecsFile.delivery_groups``).
-        ``recharge_elements`` are the recharge zone (recoverable-loss
-        area) elements, whose ids match diversion ids by definition.
+        ``elements`` are the delivery destination resolved to element
+        ids from TYPDSTDL/DSTDL: element group (type 6) → the group's
+        elements, subregion (type 4) → the subregion's elements,
+        single element (type 2) → that element, outside (type 0) →
+        empty. ``recharge_elements`` are the recharge zone
+        (recoverable-loss area) elements; zone ids match diversion ids.
         """
         if "diversions" in self._cache:
             return self._cache["diversions"]
-        cols = ["diversion_id", "export_node", "name",
-                "elements", "recharge_elements"]
+        cols = ["diversion_id", "export_node", "dest_type", "dest_id",
+                "name", "elements", "recharge_elements"]
         if self._diver_specs is None or self._diver_specs.data is None:
             df = pd.DataFrame(columns=cols)
         else:
             df = self._diver_specs.data.copy()
-            ids = set(df["diversion_id"].astype(int))
             dg = {g["group_id"]: g["elements"]
                   for g in self._diver_specs.delivery_groups}
-            if set(dg) == ids:
-                df["elements"] = [dg[int(i)] for i in df["diversion_id"]]
-            else:
-                df["elements"] = [[] for _ in range(len(df))]
+            elems = self.elements_df()
+            sub_elems = {
+                int(s): elems.loc[elems["subregion"] == s,
+                                  "element_id"].astype(int).tolist()
+                for s in elems["subregion"].unique()
+            }
+
+            def _dest_elements(row):
+                t, d = int(row["dest_type"]), int(row["dest_id"])
+                if t == 6:
+                    return dg.get(d, [])
+                if t == 4:
+                    return sub_elems.get(d, [])
+                if t == 2:
+                    return [d]
+                return []  # 0 = outside the model
+
+            df["elements"] = df.apply(_dest_elements, axis=1)
             rz = {g["group_id"]: g["elements"]
                   for g in self._diver_specs.recharge_zones}
             df["recharge_elements"] = [rz.get(int(i), [])
