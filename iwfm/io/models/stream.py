@@ -89,9 +89,14 @@ class DiverSpecsFile:
     raw_data: list[str] = field(default_factory=list)
     #: Basic per-diversion table parsed from the first NRDV rows:
     #: diversion_id, export_node (0 = import from outside), name.
-    #: The full nested spec (element groups, recharge zones) remains
-    #: only in raw_data.
     data: Any = None
+    #: NGRP — number of delivery element groups.
+    n_groups: int = 0
+    #: Parsed delivery element groups: [{group_id, elements: [int]}, …]
+    delivery_groups: list = field(default_factory=list)
+    #: Recharge zones (recoverable-loss areas), one per diversion:
+    #: [{group_id, elements: [int], fractions: [float]}, …]
+    recharge_zones: list = field(default_factory=list)
 
 
 @dataclass

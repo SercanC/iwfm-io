@@ -163,6 +163,8 @@ class ElemPumpFile:
     data: Any = None  # DataFrame
     n_groups: int = 0
     groups_raw: list[str] = field(default_factory=list)
+    #: Parsed delivery element groups: [{group_id, elements: [int]}, …]
+    element_groups: list = field(default_factory=list)
 
 
 @dataclass
@@ -186,6 +188,9 @@ class WellSpecFile:
     n_wells: int = 0
     factors: dict = field(default_factory=dict)
     data: Any = None  # DataFrame
+    n_groups: int = 0
+    #: Parsed delivery element groups: [{group_id, elements: [int]}, …]
+    element_groups: list = field(default_factory=list)
 
 
 @dataclass

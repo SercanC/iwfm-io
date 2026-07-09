@@ -269,22 +269,37 @@ class IOModelAdapter:
     # -- Diversions ------------------------------------------------------
 
     def diversions_df(self):
-        """Return DataFrame: diversion_id, export_node, name, elements.
+        """Return DataFrame: diversion_id, export_node, name, elements,
+        recharge_elements.
 
-        Basic table from the diversion specification file
-        (``export_node`` is the diverting stream node; 0 = import from
-        outside the model). ``elements`` (served-element lists) come
-        from nested element groups the reader does not parse — they are
-        empty lists here; the raw spec is on ``DiverSpecsFile.raw_data``.
+        From the diversion specification file. ``export_node`` is the
+        diverting stream node (0 = import from outside the model).
+        ``elements`` are the delivery element group's elements — filled
+        by group-id match when the file defines one delivery group per
+        diversion (models that share groups across diversions keep the
+        groups on ``DiverSpecsFile.delivery_groups``).
+        ``recharge_elements`` are the recharge zone (recoverable-loss
+        area) elements, whose ids match diversion ids by definition.
         """
         if "diversions" in self._cache:
             return self._cache["diversions"]
+        cols = ["diversion_id", "export_node", "name",
+                "elements", "recharge_elements"]
         if self._diver_specs is None or self._diver_specs.data is None:
-            df = pd.DataFrame(
-                columns=["diversion_id", "export_node", "name", "elements"])
+            df = pd.DataFrame(columns=cols)
         else:
             df = self._diver_specs.data.copy()
-            df["elements"] = [[] for _ in range(len(df))]
+            ids = set(df["diversion_id"].astype(int))
+            dg = {g["group_id"]: g["elements"]
+                  for g in self._diver_specs.delivery_groups}
+            if set(dg) == ids:
+                df["elements"] = [dg[int(i)] for i in df["diversion_id"]]
+            else:
+                df["elements"] = [[] for _ in range(len(df))]
+            rz = {g["group_id"]: g["elements"]
+                  for g in self._diver_specs.recharge_zones}
+            df["recharge_elements"] = [rz.get(int(i), [])
+                                       for i in df["diversion_id"]]
         self._cache["diversions"] = df
         return df
 

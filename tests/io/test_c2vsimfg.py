@@ -166,6 +166,23 @@ class TestAdapterDllFree:
         assert d.iloc[0]["name"] == "DIV_001"
         assert (d["export_node"] >= 0).all()
 
+    def test_element_groups(self, model):
+        # Delivery groups + recharge zones join onto diversions_df
+        d = model.diversions_df()
+        row = d[d["diversion_id"] == 2].iloc[0]
+        assert row["elements"][:2] == [306, 309]
+        assert len(row["elements"]) == 52
+        assert len(row["recharge_elements"]) == 52
+        # Well delivery groups (incl. group 37 whose name comment lacks
+        # the leading slash in the DWR file)
+        ws = model._well_spec
+        assert ws.n_groups == 44
+        assert len(ws.element_groups) == 44
+        g1 = ws.element_groups[0]
+        assert g1["elements"][0] == 146 and len(g1["elements"]) == 207
+        g37 = next(g for g in ws.element_groups if g["group_id"] == 37)
+        assert len(g37["elements"]) == 118
+
     def test_depth_to_gw(self, model):
         import numpy as np
         d = model.get_subregion_ag_pumping_avg_depth_to_gw()

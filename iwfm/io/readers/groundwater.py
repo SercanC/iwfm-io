@@ -537,11 +537,31 @@ def read_well_spec(path: str | Path) -> WellSpecFile:
             "name": name,
         })
 
+    # The well pumping-configuration table follows; skip forward to the
+    # NGRP keyed line, then parse the delivery element groups.
+    n_groups = 0
+    element_groups: list = []
+    while not reader.eof:
+        try:
+            line = reader.next_data_line()
+        except StopIteration:
+            break
+        value, keyword = split_keyed_line(line)
+        kw = keyword.split()[0].upper() if keyword else ""
+        if kw == "NGRP":
+            n_groups = int(value)
+            break
+    if n_groups > 0:
+        from iwfm.io.readers._element_groups import parse_element_groups
+        element_groups, _ = parse_element_groups(reader.skip_to_end(), n_groups)
+
     return WellSpecFile(
         header=header,
         n_wells=n_wells,
         factors={"factxy": factxy, "factrw": factrw, "factlt": factlt},
         data=pd.DataFrame(rows),
+        n_groups=n_groups,
+        element_groups=element_groups,
     )
 
 
@@ -594,12 +614,18 @@ def read_elem_pump(path: str | Path) -> ElemPumpFile:
     n_groups, _ = reader.read_keyed_int()
     groups_raw = reader.skip_to_end()
 
+    element_groups = []
+    if n_groups > 0:
+        from iwfm.io.readers._element_groups import parse_element_groups
+        element_groups, _ = parse_element_groups(groups_raw, n_groups)
+
     return ElemPumpFile(
         header=header,
         n_sinks=n_sinks,
         data=df,
         n_groups=n_groups,
         groups_raw=groups_raw,
+        element_groups=element_groups,
     )
 
 

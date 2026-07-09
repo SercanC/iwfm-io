@@ -315,11 +315,47 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
 
     data = pd.DataFrame(rows) if len(rows) == n_diversions else None
 
+    # Delivery element groups: locate the "/ NGRP" keyed line, then read
+    # NGRP groups (ID NELEM IELEM..., wrapping over continuation lines).
+    n_groups = 0
+    delivery_groups: list = []
+    recharge_zones: list = []
+    from iwfm.io._tokens import split_keyed_line
+    from iwfm.io.readers._element_groups import parse_element_groups
+    ngrp_idx = None
+    for i, line in enumerate(raw_data):
+        if is_comment(line):
+            continue
+        value, keyword = split_keyed_line(line)
+        kw = keyword.split()[0].upper() if keyword else ""
+        if kw == "NGRP":
+            n_groups = int(value)
+            ngrp_idx = i
+            break
+    if ngrp_idx is not None:
+        rest = raw_data[ngrp_idx + 1:]
+        used = 0
+        if n_groups > 0:
+            try:
+                delivery_groups, used = parse_element_groups(rest, n_groups)
+            except ValueError:
+                delivery_groups, used = [], 0
+        # Recharge zones follow, one per diversion, with an element
+        # fraction after each element id.
+        try:
+            recharge_zones, _ = parse_element_groups(
+                rest[used:], n_diversions, with_fractions=True)
+        except ValueError:
+            recharge_zones = []
+
     return DiverSpecsFile(
         header=header,
         n_diversions=n_diversions,
         raw_data=raw_data,
         data=data,
+        n_groups=n_groups,
+        delivery_groups=delivery_groups,
+        recharge_zones=recharge_zones,
     )
 
 
