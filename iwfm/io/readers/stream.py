@@ -290,12 +290,13 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
     # Collect all remaining raw lines (data + comments)
     raw_data = reader.skip_to_end()
 
-    # Parse the basic per-diversion table from the first NRDV data rows.
-    # Column layouts vary across IWFM versions (older ones include an
-    # ICOLSL/FRACSL spill pair), but both ends of the row are stable:
-    # ID and IRDV lead, and the tail is always
-    # TYPDSTDL DSTDL ICOLDL FRACDL ICFSIRIG ICADJ [NAME] — so the
-    # delivery destination is read at fixed offsets from the end.
+    # Parse the per-diversion table from the first NRDV data rows.
+    # Row layout: ID IRDV ICDVMAX FDVMAX ICOLRL FRACRL ICOLNL FRACNL
+    # [ICOLSL FRACSL] TYPDSTDL DSTDL ICOLDL FRACDL ICFSIRIG ICADJ [NAME]
+    # — the ICOLSL/FRACSL diversion-spills pair exists only in older
+    # stream-package formats (16 numeric columns vs 14), so the head and
+    # the 6-column destination tail are read at fixed offsets and the
+    # spill pair by column count.
     # TYPDSTDL: 0=outside, 2=element, 4=subregion, 6=element group.
     from iwfm.io._tokens import is_comment
     rows = []
@@ -308,13 +309,29 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
         name = toks[-1] if not _is_number(toks[-1]) else ""
         nums = toks[:-1] if name else toks
         try:
-            rows.append({
+            row = {
                 "diversion_id": int(float(nums[0])),
                 "export_node": int(float(nums[1])),
+                "max_col": int(float(nums[2])),
+                "max_frac": float(nums[3]),
+                "recov_loss_col": int(float(nums[4])),
+                "recov_loss_frac": float(nums[5]),
+                "nonrecov_loss_col": int(float(nums[6])),
+                "nonrecov_loss_frac": float(nums[7]),
+                "spill_col": None,
+                "spill_frac": None,
                 "dest_type": int(float(nums[-6])),
                 "dest_id": int(float(nums[-5])),
+                "delivery_col": int(float(nums[-4])),
+                "delivery_frac": float(nums[-3]),
+                "irig_frac_col": int(float(nums[-2])),
+                "adjust_col": int(float(nums[-1])),
                 "name": name,
-            })
+            }
+            if len(nums) >= 16:  # older format with the spills pair
+                row["spill_col"] = int(float(nums[8]))
+                row["spill_frac"] = float(nums[9])
+            rows.append(row)
         except (ValueError, IndexError):
             break
         if len(rows) == n_diversions:

@@ -177,6 +177,12 @@ class TestAdapterDllFree:
         assert len(row["recharge_elements"]) == 52
         # 462 element-group deliveries + 36 out-of-model exports
         assert d["dest_type"].value_counts().to_dict() == {6: 462, 0: 36}
+        # v4.2 format has no ICOLSL/FRACSL spill pair; component
+        # fractions come from the stable head/tail offsets
+        import pandas as pd
+        assert pd.isna(row["spill_col"])
+        assert row["recov_loss_frac"] == 0.03
+        assert row["delivery_frac"] == 0.96
         # Well delivery groups (incl. group 37 whose name comment lacks
         # the leading slash in the DWR file)
         ws = model._well_spec

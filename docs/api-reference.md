@@ -210,7 +210,10 @@ adapter.get_zbudget_timeseries("GW", zone_id=1, columns=[0, 1, 2])  # zones = su
 adapter.wells_df()                     # well specs: id, x, y, radius, perf top/bot, name
 adapter.diversions_df()                # id, export node, dest type/id, name,
                                        #   delivery elements (group/subregion/element
-                                       #   destinations resolved), recharge elements
+                                       #   destinations resolved), recharge elements,
+                                       #   and the component column/fraction pairs
+                                       #   (max, recoverable/non-recoverable loss,
+                                       #   spills where the format has them, delivery)
 ```
 
 Delivery element groups and recharge zones are parsed on the file

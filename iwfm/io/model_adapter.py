@@ -283,7 +283,11 @@ class IOModelAdapter:
         """
         if "diversions" in self._cache:
             return self._cache["diversions"]
-        cols = ["diversion_id", "export_node", "dest_type", "dest_id",
+        cols = ["diversion_id", "export_node", "max_col", "max_frac",
+                "recov_loss_col", "recov_loss_frac", "nonrecov_loss_col",
+                "nonrecov_loss_frac", "spill_col", "spill_frac",
+                "dest_type", "dest_id", "delivery_col", "delivery_frac",
+                "irig_frac_col", "adjust_col",
                 "name", "elements", "recharge_elements"]
         if self._diver_specs is None or self._diver_specs.data is None:
             df = pd.DataFrame(columns=cols)
