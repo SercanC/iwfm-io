@@ -2,7 +2,7 @@
 Example 1: Reading IWFM Model Input Files
 ==========================================
 
-Demonstrates iwfm.io readers for IWFM text input files.
+Demonstrates iwfm_io readers for IWFM text input files.
 No DLL required — runs on any platform.
 
 Covers:
@@ -39,7 +39,7 @@ def check_sample_model():
 # ── 1. Date utilities ─────────────────────────────────────────────────────────
 
 def demo_dates():
-    from iwfm.io import parse_iwfm_date, format_iwfm_date
+    from iwfm_io import parse_iwfm_date, format_iwfm_date
     from datetime import datetime
 
     print("=== Date utilities ===")
@@ -54,7 +54,7 @@ def demo_dates():
 # ── 2. Preprocessor files ─────────────────────────────────────────────────────
 
 def demo_preprocessor():
-    from iwfm.io import read_nodes, read_elements, read_strata, read_preprocessor
+    from iwfm_io import read_nodes, read_elements, read_strata, read_preprocessor
 
     print("\n=== Preprocessor files ===")
 
@@ -83,7 +83,7 @@ def demo_preprocessor():
 # ── 3. Simulation main file ───────────────────────────────────────────────────
 
 def demo_simulation():
-    from iwfm.io import read_simulation
+    from iwfm_io import read_simulation
 
     print("\n=== Simulation main ===")
     sim = read_simulation(SIM_DIR / "Simulation_MAIN.IN")
@@ -96,7 +96,7 @@ def demo_simulation():
 # ── 4. Groundwater files ──────────────────────────────────────────────────────
 
 def demo_groundwater():
-    from iwfm.io import read_gw_main, read_bc_main, read_tile_drain
+    from iwfm_io import read_gw_main, read_bc_main, read_tile_drain
 
     print("\n=== Groundwater files ===")
 
@@ -114,7 +114,7 @@ def demo_groundwater():
 # ── 5. Stream files ───────────────────────────────────────────────────────────
 
 def demo_stream():
-    from iwfm.io import read_stream_main, read_diver_specs, read_bypass_specs
+    from iwfm_io import read_stream_main, read_diver_specs, read_bypass_specs
 
     print("\n=== Stream files ===")
 
@@ -133,7 +133,7 @@ def demo_stream():
 # ── 6. Time-series input files ────────────────────────────────────────────────
 
 def demo_timeseries():
-    from iwfm.io import read_precip, read_et
+    from iwfm_io import read_precip, read_et
 
     print("\n=== Time-series inputs ===")
 
@@ -149,7 +149,7 @@ def demo_timeseries():
 # ── 7. IOModelAdapter ─────────────────────────────────────────────────────────
 
 def demo_adapter(pp):
-    from iwfm.io import IOModelAdapter, validate_preprocessor
+    from iwfm_io import IOModelAdapter, validate_preprocessor
 
     print("\n=== IOModelAdapter ===")
     results_dir = SAMPLE_MODEL / "Results"

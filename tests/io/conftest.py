@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for iwfm.io tests."""
+"""Shared pytest fixtures for iwfm_io tests."""
 
 from pathlib import Path
 

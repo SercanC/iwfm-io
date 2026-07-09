@@ -1,10 +1,10 @@
-"""Tests for iwfm.io.open_model() discovery and describe() summaries."""
+"""Tests for iwfm_io.open_model() discovery and describe() summaries."""
 
 import json
 
 import pytest
 
-from iwfm.io import open_model, read_preprocessor
+from iwfm_io import open_model, read_preprocessor
 
 from .conftest import SAMPLE_MODEL
 

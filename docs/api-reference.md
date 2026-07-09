@@ -6,10 +6,10 @@
 
 | Class | Module | Description |
 |-------|--------|-------------|
-| `IWFMModel` | `iwfm.model` | Main model interface. Context manager. Wraps grid, GW, streams, budgets, diversions, wells, lakes, simulation control. `describe()` returns a JSON-serializable model summary. |
-| `IWFMBudget` | `iwfm.budget` | Standalone budget HDF5 reader via `IW_Budget_*` functions. |
-| `IWFMZBudget` | `iwfm.zbudget` | Standalone zone-budget reader via `IW_ZBudget_*` functions. |
-| `IWFMError` | `iwfm._errors` | Exception raised when a DLL call returns a non-zero status code. |
+| `IWFMModel` | `iwfm_io.dll.model` | Main model interface. Context manager. Wraps grid, GW, streams, budgets, diversions, wells, lakes, simulation control. `describe()` returns a JSON-serializable model summary. |
+| `IWFMBudget` | `iwfm_io.dll.budget` | Standalone budget HDF5 reader via `IW_Budget_*` functions. |
+| `IWFMZBudget` | `iwfm_io.dll.zbudget` | Standalone zone-budget reader via `IW_ZBudget_*` functions. |
+| `IWFMError` | `iwfm_io.dll._errors` | Exception raised when a DLL call returns a non-zero status code. |
 
 ### Running Models
 
@@ -48,7 +48,7 @@
 
 ---
 
-## `iwfm.io` — Pure-Python File I/O
+## `iwfm_io` — Pure-Python File I/O
 
 ### Opening a Model
 
@@ -57,7 +57,7 @@
 | `open_model(path)` | Open a model from its root folder (or a main-file path). Discovers the preprocessor/simulation main files and all HDF5 results; returns a ready `IOModelAdapter`. Accepts `preprocessor=`, `simulation=`, `results_dir=` overrides. |
 
 ```python
-from iwfm.io import open_model
+from iwfm_io import open_model
 
 model = open_model("path/to/my_model")
 model.describe()   # JSON-serializable summary: grid, streams, lakes,
@@ -152,7 +152,7 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 Every reader has a corresponding writer with the same name pattern (`read_*` → `write_*`). Writers accept the same result object returned by the reader:
 
 ```python
-from iwfm.io import read_nodes, write_nodes
+from iwfm_io import read_nodes, write_nodes
 
 result = read_nodes("NodeXY.dat")
 result.data["x"] += 100  # modify
@@ -172,7 +172,7 @@ Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`
 
 ### IOModelAdapter
 
-`IOModelAdapter` wraps `iwfm.io` reader output to present the same DataFrame API as `IWFMModel`, enabling plot functions to work without the DLL. The easiest way to get one is `open_model()` (above); you can also construct it by hand:
+`IOModelAdapter` wraps `iwfm_io` reader output to present the same DataFrame API as `IWFMModel`, enabling plot functions to work without the DLL. The easiest way to get one is `open_model()` (above); you can also construct it by hand:
 
 ```python
 adapter = IOModelAdapter(
@@ -234,7 +234,7 @@ list of `{group_id, elements, [fractions]}`.
 
 | Function | Description |
 |----------|-------------|
-| `create_scenario(base, out_dir, changes=[...])` | Copy a model's inputs (+ `Bin/`) and apply changes; returns the scenario folder ready for `iwfm.run_model()` |
+| `create_scenario(base, out_dir, changes=[...])` | Copy a model's inputs (+ `Bin/`) and apply changes; returns the scenario folder ready for `iwfm_io.run_model()` |
 | `set_keyed_value(relpath, keyword, value)` | Change factory: edit a `VALUE / KEYWORD` line (e.g. `EDT` end date) preserving layout |
 | `replace_text(relpath, old, new, count=-1)` | Change factory: literal text replacement in one file |
 
@@ -251,6 +251,6 @@ All four accept `max_workers=N` to read the runs' HDF5 files concurrently (worth
 
 ---
 
-## `iwfm.plots` — Visualization Library
+## `iwfm_io.plots` — Visualization Library
 
 See [Plot Gallery](plotting.md) for the full list of 58 functions across 13 modules.

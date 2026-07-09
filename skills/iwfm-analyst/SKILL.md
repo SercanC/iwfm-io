@@ -20,7 +20,7 @@ read code — show outcomes, not scripts.
 
 ## Setup (once per session)
 
-1. Check the package: `python -c "import iwfm; print(iwfm.__version__)"`.
+1. Check the package: `python -c "import iwfm_io; print(iwfm_io.__version__)"`.
    If missing: `pip install iwfm-io` (add `iwfm-io[geo]` if shapefile-like
    geometry output is wanted).
 2. Locate the model root — the folder containing `Preprocessor/`,
@@ -29,7 +29,7 @@ read code — show outcomes, not scripts.
 3. Always start by orienting yourself:
 
 ```python
-from iwfm.io import open_model
+from iwfm_io import open_model
 m = open_model(r"<model_root>")
 print(m.describe())   # grid size, sim period, budgets, hydrographs
 ```
@@ -86,6 +86,6 @@ and several outputs exist in both text and HDF form.
   C2VSimFG takes ~8 hours. Warn before launching anything big and run
   it in the background.
 - The Windows DLL is optional (only needed for live simulation state).
-  If a DLL task comes up: `iwfm.download_dll("2025.0.1747")`, and note
+  If a DLL task comes up: `iwfm_io.dll.download_dll("2025.0.1747")`, and note
   that `IWFMModel` takes the **preprocessor main .IN file**, not the
   `.bin`. Match DLL version to the model's IWFM version.

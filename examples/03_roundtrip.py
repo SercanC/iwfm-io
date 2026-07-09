@@ -34,7 +34,7 @@ def check_sample_model():
 # ── 1. Node file round-trip ───────────────────────────────────────────────────
 
 def demo_nodes(tmp: Path):
-    from iwfm.io import read_nodes, write_nodes
+    from iwfm_io import read_nodes, write_nodes
 
     print("=== Node file round-trip ===")
     original = read_nodes(PP_DIR / "NodeXY.dat")
@@ -52,7 +52,7 @@ def demo_nodes(tmp: Path):
 # ── 2. Element file round-trip ────────────────────────────────────────────────
 
 def demo_elements(tmp: Path):
-    from iwfm.io import read_elements, write_elements
+    from iwfm_io import read_elements, write_elements
 
     print("\n=== Element file round-trip ===")
     original = read_elements(PP_DIR / "Element.dat")
@@ -69,7 +69,7 @@ def demo_elements(tmp: Path):
 # ── 3. Precipitation scaling (climate scenario) ───────────────────────────────
 
 def demo_precip_scale(tmp: Path):
-    from iwfm.io import read_precip, write_precip
+    from iwfm_io import read_precip, write_precip
     import copy
 
     print("\n=== Precipitation scaling (drought scenario −20%) ===")
@@ -94,7 +94,7 @@ def demo_precip_scale(tmp: Path):
 # ── 4. Full preprocessor tree copy ───────────────────────────────────────────
 
 def demo_preprocessor_copy(tmp: Path):
-    from iwfm.io import read_preprocessor, write_preprocessor, read_nodes, read_elements
+    from iwfm_io import read_preprocessor, write_preprocessor, read_nodes, read_elements
 
     print("\n=== Full preprocessor tree copy ===")
     pp = read_preprocessor(PP_DIR / "PreProcessor_MAIN.IN")
@@ -116,7 +116,7 @@ def demo_preprocessor_copy(tmp: Path):
 # ── 5. Stream inflow modification ────────────────────────────────────────────
 
 def demo_stream_inflow(tmp: Path):
-    from iwfm.io import read_stream_inflow, write_stream_inflow
+    from iwfm_io import read_stream_inflow, write_stream_inflow
     import copy
 
     print("\n=== Stream inflow modification (+10% wet scenario) ===")
@@ -143,7 +143,7 @@ def demo_stream_inflow(tmp: Path):
 # ── 6. GW boundary conditions round-trip ─────────────────────────────────────
 
 def demo_gw_bc(tmp: Path):
-    from iwfm.io import read_bc_main, write_bc_main
+    from iwfm_io import read_bc_main, write_bc_main
 
     print("\n=== GW boundary conditions round-trip ===")
     path = GW_DIR / "BC_MAIN.dat"
@@ -163,7 +163,7 @@ def demo_gw_bc(tmp: Path):
 # ── 7. Stratigraphy round-trip ────────────────────────────────────────────────
 
 def demo_strata(tmp: Path):
-    from iwfm.io import read_strata, write_strata
+    from iwfm_io import read_strata, write_strata
     import numpy as np
 
     print("\n=== Stratigraphy round-trip ===")

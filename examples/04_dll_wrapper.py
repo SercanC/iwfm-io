@@ -1,4 +1,4 @@
-"""
+﻿"""
 Example 4: DLL Wrapper
 ======================
 
@@ -15,7 +15,7 @@ Covers:
   - IWFMModel: budget queries
   - IWFMBudget: standalone HDF5 budget reader
   - IWFMZBudget: standalone zone-budget reader
-  - Type-ID enums (BudgetTypeID, LocationTypeID, …)
+  - Type-ID enums (BudgetTypeID, LocationTypeID, â€¦)
 
 Usage:
     python examples/04_dll_wrapper.py
@@ -46,26 +46,26 @@ def check_environment():
         )
 
 
-# ── 1. DLL version ────────────────────────────────────────────────────────────
+# â”€â”€ 1. DLL version â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_version():
-    import iwfm
+    import iwfm_io
     print("=== DLL version ===")
-    print(f"  Installed versions: {iwfm.list_dll_versions()}")
-    dll = iwfm.load_dll()                      # uses default_version.txt / auto-discover
-    print(f"  IWFM version:       {iwfm.get_version(dll)}")
-    print(f"  Kernel version:     {iwfm.get_kernel_version(dll)}")
+    print(f"  Installed versions: {iwfm_io.dll.list_dll_versions()}")
+    dll = iwfm_io.dll.load_dll()                      # uses default_version.txt / auto-discover
+    print(f"  IWFM version:       {iwfm_io.dll.get_version(dll)}")
+    print(f"  Kernel version:     {iwfm_io.dll.get_kernel_version(dll)}")
 
 
-# ── 2. Grid and aquifer parameters ───────────────────────────────────────────
+# â”€â”€ 2. Grid and aquifer parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_grid():
-    import iwfm
+    import iwfm_io
 
     print("\n=== Grid and stratigraphy ===")
-    # dll_version is optional — omit to use default_version.txt or auto-discover
-    # with iwfm.IWFMModel(..., dll_version="2015.0.1248") as m:
-    with iwfm.IWFMModel(
+    # dll_version is optional â€” omit to use default_version.txt or auto-discover
+    # with iwfm_io.dll.IWFMModel(..., dll_version="2015.0.1248") as m:
+    with iwfm_io.dll.IWFMModel(
         preprocessor_file=str(PREPROC_BIN),
         simulation_file=str(SIM_IN),
         is_for_inquiry=True,
@@ -93,14 +93,14 @@ def demo_grid():
                   f"Sy: [{sy.min():.3f}, {sy.max():.3f}]")
 
 
-# ── 3. GW head time series ────────────────────────────────────────────────────
+# â”€â”€ 3. GW head time series â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_heads():
-    import iwfm
+    import iwfm_io
     import numpy as np
 
     print("\n=== GW head time series ===")
-    with iwfm.IWFMModel(
+    with iwfm_io.dll.IWFMModel(
         preprocessor_file=str(PREPROC_BIN),
         simulation_file=str(SIM_IN),
         is_for_inquiry=True,
@@ -109,7 +109,7 @@ def demo_heads():
             dates, heads = m.get_gw_heads_for_layer(
                 layer=lyr, begin_date=BEGIN, end_date=END,
             )
-            print(f"  Layer {lyr}: {len(dates)} timesteps × {heads.shape[1]} nodes  "
+            print(f"  Layer {lyr}: {len(dates)} timesteps Ã— {heads.shape[1]} nodes  "
                   f"head=[{heads.min():.1f}, {heads.max():.1f}] ft")
 
         # Depth to water at final timestep
@@ -120,13 +120,13 @@ def demo_heads():
               f"min={dtw.min():.1f}  max={dtw.max():.1f}  mean={dtw.mean():.1f} ft")
 
 
-# ── 4. Stream network ─────────────────────────────────────────────────────────
+# â”€â”€ 4. Stream network â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_streams():
-    import iwfm
+    import iwfm_io
 
     print("\n=== Stream network ===")
-    with iwfm.IWFMModel(
+    with iwfm_io.dll.IWFMModel(
         preprocessor_file=str(PREPROC_BIN),
         simulation_file=str(SIM_IN),
         is_for_inquiry=True,
@@ -141,13 +141,13 @@ def demo_streams():
                   f"elev=[{elev.min():.1f}, {elev.max():.1f}] ft")
 
 
-# ── 5. Hydrograph extraction ─────────────────────────────────────────────────
+# â”€â”€ 5. Hydrograph extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_hydrographs():
-    import iwfm
+    import iwfm_io
 
     print("\n=== Hydrograph extraction ===")
-    with iwfm.IWFMModel(
+    with iwfm_io.dll.IWFMModel(
         preprocessor_file=str(PREPROC_BIN),
         simulation_file=str(SIM_IN),
         is_for_inquiry=True,
@@ -167,7 +167,7 @@ def demo_hydrographs():
                 begin_date=BEGIN,
                 end_date=END,
             )
-            # Filter uninitialized entries — IW_Model_GetHydrograph reports
+            # Filter uninitialized entries â€” IW_Model_GetHydrograph reports
             # the full buffer size, leaving trailing dates uninitialized
             # (see docs/TEST_PLOTS_RESULTS.md)
             valid = dates > 0
@@ -175,13 +175,13 @@ def demo_hydrographs():
                   f"val=[{vals[valid].min():.2f}, {vals[valid].max():.2f}]")
 
 
-# ── 6. Budget queries ─────────────────────────────────────────────────────────
+# â”€â”€ 6. Budget queries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_budget():
-    import iwfm
+    import iwfm_io
 
     print("\n=== Budget queries ===")
-    with iwfm.IWFMModel(
+    with iwfm_io.dll.IWFMModel(
         preprocessor_file=str(PREPROC_BIN),
         simulation_file=str(SIM_IN),
         is_for_inquiry=True,
@@ -199,22 +199,22 @@ def demo_budget():
                 begin_date=BEGIN,
                 end_date=END,
             )
-            print(f"    {len(dates)} timesteps × {values.shape[1]} cols  "
+            print(f"    {len(dates)} timesteps Ã— {values.shape[1]} cols  "
                   f"values[0]={values[0].tolist()}")
 
 
-# ── 7. IWFMBudget standalone reader ──────────────────────────────────────────
+# â”€â”€ 7. IWFMBudget standalone reader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_iwfm_budget():
-    import iwfm
+    import iwfm_io
 
     print("\n=== IWFMBudget (standalone HDF reader) ===")
     path = RESULTS_DIR / "GW.hdf"
     if not path.exists():
-        print("  GW.hdf not found — skipping.")
+        print("  GW.hdf not found â€” skipping.")
         return
 
-    with iwfm.IWFMBudget(str(path)) as bud:
+    with iwfm_io.dll.IWFMBudget(str(path)) as bud:
         print(f"  Locations:  {bud.n_locations}")
         print(f"  Timesteps:  {bud.n_timesteps}")
         locs = bud.get_location_names()
@@ -227,20 +227,20 @@ def demo_iwfm_budget():
         print(f"  Values shape: {values.shape}")
 
 
-# ── 8. IWFMZBudget standalone reader ─────────────────────────────────────────
+# â”€â”€ 8. IWFMZBudget standalone reader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_iwfm_zbudget():
-    import iwfm
+    import iwfm_io
 
     print("\n=== IWFMZBudget (standalone zone-budget reader) ===")
     zin  = ZBUDGET_DIR / "ZBudget.in"
     zhdf = RESULTS_DIR / "GW_ZBud.hdf"
 
     if not zin.exists() or not zhdf.exists():
-        print("  ZBudget files not found — skipping.")
+        print("  ZBudget files not found â€” skipping.")
         return
 
-    with iwfm.IWFMZBudget(str(zin)) as zbud:
+    with iwfm_io.dll.IWFMZBudget(str(zin)) as zbud:
         print(f"  Zones: {zbud.n_zones}")
         zones = zbud.get_zone_list()
         names = zbud.get_zone_names()
@@ -250,14 +250,14 @@ def demo_iwfm_zbudget():
         print(f"  General columns: {cols[:4]} ...")
 
 
-# ── 9. Type-ID enums ──────────────────────────────────────────────────────────
+# â”€â”€ 9. Type-ID enums â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def demo_type_ids():
-    import iwfm
+    import iwfm_io
 
     print("\n=== Type-ID enums ===")
-    dll = iwfm.load_dll()
-    iwfm.load_all_type_ids(dll)
+    dll = iwfm_io.dll.load_dll()
+    iwfm_io.dll.load_all_type_ids(dll)
 
     for cls_name in ("BudgetTypeID", "LocationTypeID", "SupplyTypeID",
                      "DataUnitTypeID"):

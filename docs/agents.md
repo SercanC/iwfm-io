@@ -6,7 +6,7 @@ written with AI agents in mind, but equally useful for scripted analysis.
 ## Orient first: open the model and describe it
 
 ```python
-from iwfm.io import open_model
+from iwfm_io import open_model
 
 model = open_model("path/to/model_root")   # no DLL, any OS
 summary = model.describe()                 # JSON-serializable dict
@@ -49,10 +49,10 @@ model.hydrograph_df("GWHyd")        # DataFrame(DatetimeIndex)
 
 ## Modify a model (read → change → write)
 
-Every reader in `iwfm.io` has a matching writer for round-trips:
+Every reader in `iwfm_io` has a matching writer for round-trips:
 
 ```python
-from iwfm.io import read_nodes, write_nodes
+from iwfm_io import read_nodes, write_nodes
 
 nodes = read_nodes("Preprocessor/NodeXY.dat")
 nodes.data["x"] += 100.0
@@ -62,7 +62,7 @@ write_nodes(nodes, "Preprocessor/NodeXY_shifted.dat")
 Validate cross-file consistency before running IWFM:
 
 ```python
-from iwfm.io import read_preprocessor, validate_preprocessor
+from iwfm_io import read_preprocessor, validate_preprocessor
 errors = validate_preprocessor(read_preprocessor("Preprocessor/PreProcessor_MAIN.IN"))
 ```
 
@@ -71,8 +71,8 @@ errors = validate_preprocessor(read_preprocessor("Preprocessor/PreProcessor_MAIN
 The full what-if loop — copy, modify, run, compare:
 
 ```python
-from iwfm import run_model
-from iwfm.io import create_scenario, set_keyed_value, compare_models
+from iwfm_io import run_model
+from iwfm_io import create_scenario, set_keyed_value, compare_models
 
 scenario = create_scenario(
     "runs/baseline", "runs/scenario_a",
@@ -91,7 +91,7 @@ report = compare_models("runs/baseline", scenario)
 ## Compare two model versions
 
 ```python
-from iwfm.io import compare_models, diff_model_files, head_difference
+from iwfm_io import compare_models, diff_model_files, head_difference
 
 report = compare_models("runs/baseline", "runs/scenario")
 report["files"]["changed"]        # input files that were edited (checksums)
@@ -101,7 +101,7 @@ report["budgets"]["common"]       # budgets available in both
 
 # Aligned B − A frames for analysis or difference maps:
 diff = head_difference("runs/baseline", "runs/scenario", layer=1)
-from iwfm.plots import plot_contour_map
+from iwfm_io.plots import plot_contour_map
 plot_contour_map(open_model("runs/baseline"), diff.iloc[-1].values,
                  cmap="coolwarm", label="Head change (ft)")
 ```
@@ -112,12 +112,12 @@ DataFrames (`run, location, datetime, component, value`) ready for
 
 ## Plot
 
-All 58 functions in `iwfm.plots` accept the object returned by
+All 58 functions in `iwfm_io.plots` accept the object returned by
 `open_model()` (or a DLL `IWFMModel`) and return `(fig, ax)`; most take
 `save_path=` to write a PNG directly:
 
 ```python
-from iwfm.plots import maps, timeseries
+from iwfm_io.plots import maps, timeseries
 maps.plot_gw_head_contour(model, layer=1, save_path="heads.png")
 ```
 
@@ -128,9 +128,9 @@ timestep, supply/demand adjustment), use the DLL wrapper — it has the
 same `describe()` / `*_df()` interface:
 
 ```python
-import iwfm
+import iwfm_io
 
-with iwfm.IWFMModel(
+with iwfm_io.dll.IWFMModel(
     preprocessor_file="Simulation/PreProcessor.bin",
     simulation_file="Simulation/Simulation_MAIN.IN",
     is_for_inquiry=True,
@@ -143,7 +143,7 @@ with iwfm.IWFMModel(
 
 - **Dates** are strings in `MM/DD/YYYY_HH:MM` format; hour `24:00`
   means end of day (`"09/30/1990_24:00"` is the instant 1990-10-01 00:00).
-  Convert with `iwfm.io.parse_iwfm_date` / `format_iwfm_date`.
+  Convert with `iwfm_io.parse_iwfm_date` / `format_iwfm_date`.
 - **Indices are 1-based** everywhere the IWFM file formats and DLL are
   involved (node IDs, layer numbers, budget locations).
 - **Element connectivity** is 4 node IDs; `node4 == 0` means a triangle.
@@ -151,4 +151,4 @@ with iwfm.IWFMModel(
   ag crops, supply requirements, or bypass counts — the DLL raises
   `IWFMError` ("partially instantiated"). `describe()` reports those
   sections as `None` instead of raising.
-- `iwfm.io` never loads the DLL; it is safe on any OS and in sandboxes.
+- `iwfm_io` never loads the DLL; it is safe on any OS and in sandboxes.

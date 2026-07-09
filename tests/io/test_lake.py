@@ -10,7 +10,7 @@ LAKE_DIR = SIMULATION_DIR / "Lake"
 
 class TestLakeMain:
     def test_read_lake_main(self):
-        from iwfm.io.readers.lake import read_lake_main
+        from iwfm_io.readers.lake import read_lake_main
 
         path = LAKE_DIR / "Lake_MAIN.dat"
         if path.exists():
@@ -21,7 +21,7 @@ class TestLakeMain:
             assert len(lake.lake_params) == lake.n_lakes
 
     def test_lake_main_params(self):
-        from iwfm.io.readers.lake import read_lake_main
+        from iwfm_io.readers.lake import read_lake_main
 
         path = LAKE_DIR / "Lake_MAIN.dat"
         if path.exists():
@@ -30,8 +30,8 @@ class TestLakeMain:
             assert "conductance" in lake.lake_params.columns
 
     def test_lake_main_round_trip(self, tmp_output):
-        from iwfm.io.readers.lake import read_lake_main
-        from iwfm.io.writers.lake import write_lake_main
+        from iwfm_io.readers.lake import read_lake_main
+        from iwfm_io.writers.lake import write_lake_main
 
         path = LAKE_DIR / "Lake_MAIN.dat"
         if path.exists():

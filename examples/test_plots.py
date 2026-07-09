@@ -18,11 +18,11 @@ import matplotlib
 matplotlib.use("Agg")  # non-interactive backend for saving PNGs
 import matplotlib.pyplot as plt
 
-import iwfm
+import iwfm_io
 import numpy as np
 
 from pathlib import Path
-from iwfm.io.model_adapter import _find_main_file, _find_simulation_main
+from iwfm_io.model_adapter import _find_main_file, _find_simulation_main
 
 _root = Path(MODEL_ROOT)
 PP = str(_find_main_file(_root, "Preprocessor", ("preproc",)))
@@ -33,7 +33,7 @@ OUT = os.path.join(_REPO, "test_output",
 os.makedirs(OUT, exist_ok=True)
 print(f"model: {MODEL_ROOT}\npp:    {PP}\nsim:   {SIM}\nout:   {OUT}")
 
-with iwfm.IWFMModel(
+with iwfm_io.dll.IWFMModel(
     preprocessor_file=PP,
     simulation_file=SIM,
     is_for_inquiry=True,
@@ -49,7 +49,7 @@ with iwfm.IWFMModel(
     # ==================================================================
     # Shared data extraction
     # ==================================================================
-    from iwfm.plots import excel_date_to_datetime
+    from iwfm_io.plots import excel_date_to_datetime
 
     # Transect points (for profiles, cross-sections)
     x, y = m.get_node_coordinates()
@@ -82,7 +82,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 01. Grid mesh ---
-    from iwfm.plots.maps import plot_grid_mesh
+    from iwfm_io.plots.maps import plot_grid_mesh
     try:
         fig, ax = plot_grid_mesh(m, save_path=os.path.join(OUT, "01_grid.png"))
         print("01 grid mesh OK")
@@ -91,7 +91,7 @@ with iwfm.IWFMModel(
         print(f"01 grid mesh FAIL: {e}")
 
     # --- 02. Ground surface elevation ---
-    from iwfm.plots.maps import plot_ground_surface_elevation
+    from iwfm_io.plots.maps import plot_ground_surface_elevation
     try:
         fig, ax = plot_ground_surface_elevation(
             m, save_path=os.path.join(OUT, "02_gse.png"))
@@ -101,7 +101,7 @@ with iwfm.IWFMModel(
         print(f"02 GSE FAIL: {e}")
 
     # --- 03. Head contour ---
-    from iwfm.plots.maps import plot_gw_head_contour
+    from iwfm_io.plots.maps import plot_gw_head_contour
     try:
         fig, ax = plot_gw_head_contour(
             m, layer=1, time_index=-1,
@@ -113,7 +113,7 @@ with iwfm.IWFMModel(
         print(f"03 head contour FAIL: {e}")
 
     # --- 04. Stream network ---
-    from iwfm.plots.maps import plot_stream_network
+    from iwfm_io.plots.maps import plot_stream_network
     try:
         fig, ax = plot_stream_network(
             m, save_path=os.path.join(OUT, "04_streams.png"))
@@ -123,7 +123,7 @@ with iwfm.IWFMModel(
         print(f"04 stream network FAIL: {e}")
 
     # --- 05. Depth to water ---
-    from iwfm.plots.maps import plot_depth_to_water
+    from iwfm_io.plots.maps import plot_depth_to_water
     try:
         fig, ax = plot_depth_to_water(
             m, layer=1,
@@ -134,7 +134,7 @@ with iwfm.IWFMModel(
         print(f"05 DTW FAIL: {e}")
 
     # --- 06. Layer thickness ---
-    from iwfm.plots.maps import plot_layer_thickness
+    from iwfm_io.plots.maps import plot_layer_thickness
     try:
         fig, ax = plot_layer_thickness(
             m, layer=1,
@@ -145,7 +145,7 @@ with iwfm.IWFMModel(
         print(f"06 layer thickness FAIL: {e}")
 
     # --- 07. Head change ---
-    from iwfm.plots.maps import plot_head_change
+    from iwfm_io.plots.maps import plot_head_change
     try:
         fig, ax = plot_head_change(
             m, layer=1, heads_t1=heads_t1, heads_t2=heads_t2,
@@ -156,7 +156,7 @@ with iwfm.IWFMModel(
         print(f"07 head change FAIL: {e}")
 
     # --- 08. Aquifer parameter ---
-    from iwfm.plots.maps import plot_aquifer_parameter
+    from iwfm_io.plots.maps import plot_aquifer_parameter
     try:
         fig, ax = plot_aquifer_parameter(
             m, parameter="Kh", layer=1,
@@ -167,7 +167,7 @@ with iwfm.IWFMModel(
         print(f"08 aquifer parameter FAIL: {e}")
 
     # --- 09. Well locations ---
-    from iwfm.plots.maps import plot_well_locations
+    from iwfm_io.plots.maps import plot_well_locations
     try:
         fig, ax = plot_well_locations(
             m, save_path=os.path.join(OUT, "09_wells.png"))
@@ -177,7 +177,7 @@ with iwfm.IWFMModel(
         print(f"09 well locations FAIL: {e}")
 
     # --- 10. Lake and diversion elements ---
-    from iwfm.plots.maps import plot_lake_and_diversion_elements
+    from iwfm_io.plots.maps import plot_lake_and_diversion_elements
     try:
         fig, ax = plot_lake_and_diversion_elements(
             m, save_path=os.path.join(OUT, "10_lake_div.png"))
@@ -187,7 +187,7 @@ with iwfm.IWFMModel(
         print(f"10 lake & diversion FAIL: {e}")
 
     # --- 11. Tile drain locations ---
-    from iwfm.plots.maps import plot_tile_drain_locations
+    from iwfm_io.plots.maps import plot_tile_drain_locations
     try:
         fig, ax = plot_tile_drain_locations(
             m, save_path=os.path.join(OUT, "11_tile_drains.png"))
@@ -201,7 +201,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 12. Stratigraphic cross-section ---
-    from iwfm.plots.profiles import plot_stratigraphic_cross_section
+    from iwfm_io.plots.profiles import plot_stratigraphic_cross_section
     try:
         fig, ax = plot_stratigraphic_cross_section(
             m, [p1, p2],
@@ -212,7 +212,7 @@ with iwfm.IWFMModel(
         print(f"12 cross-section FAIL: {e}")
 
     # --- 13. Stream longitudinal profile ---
-    from iwfm.plots.profiles import plot_stream_longitudinal_profile
+    from iwfm_io.plots.profiles import plot_stream_longitudinal_profile
     try:
         fig, ax = plot_stream_longitudinal_profile(
             m, reach_ids=[1],
@@ -227,7 +227,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 14. GW head hydrographs ---
-    from iwfm.plots.timeseries import plot_gw_head_hydrographs
+    from iwfm_io.plots.timeseries import plot_gw_head_hydrographs
     try:
         fig, ax = plot_gw_head_hydrographs(
             m, node_indices=[1, 50, 100], layer=1,
@@ -239,7 +239,7 @@ with iwfm.IWFMModel(
         print(f"14 GW head hydrographs FAIL: {e}")
 
     # --- 15. Stream flow hydrograph ---
-    from iwfm.plots.timeseries import plot_stream_flow_hydrograph
+    from iwfm_io.plots.timeseries import plot_stream_flow_hydrograph
     try:
         fig, ax = plot_stream_flow_hydrograph(
             m, stream_node_indices=[1, 5, 10],
@@ -251,7 +251,7 @@ with iwfm.IWFMModel(
         print(f"15 stream flow hydrograph FAIL: {e}")
 
     # --- 16. Stream stage hydrograph ---
-    from iwfm.plots.timeseries import plot_stream_stage_hydrograph
+    from iwfm_io.plots.timeseries import plot_stream_stage_hydrograph
     try:
         fig, ax = plot_stream_stage_hydrograph(
             m, stream_node_indices=[1, 5, 10],
@@ -263,7 +263,7 @@ with iwfm.IWFMModel(
         print(f"16 stream stage hydrograph FAIL: {e}")
 
     # --- 17. Budget timeseries ---
-    from iwfm.plots.timeseries import plot_budget_timeseries
+    from iwfm_io.plots.timeseries import plot_budget_timeseries
     try:
         fig, ax = plot_budget_timeseries(
             m, budget_type=bt, location=1,
@@ -275,7 +275,7 @@ with iwfm.IWFMModel(
         print(f"17 budget timeseries FAIL: {e}")
 
     # --- 18. Zone budget timeseries ---
-    from iwfm.plots.timeseries import plot_zbudget_timeseries
+    from iwfm_io.plots.timeseries import plot_zbudget_timeseries
     try:
         zbudgets = m.get_zbudget_list()
         zt = zbudgets[0]["zbudget_type"] if zbudgets else None
@@ -291,7 +291,7 @@ with iwfm.IWFMModel(
         print(f"18 zbudget timeseries FAIL: {e}")
 
     # --- 19. Cumulative GW storage change ---
-    from iwfm.plots.timeseries import plot_cumulative_gw_storage_change
+    from iwfm_io.plots.timeseries import plot_cumulative_gw_storage_change
     try:
         fig, ax = plot_cumulative_gw_storage_change(
             m, subregions=1,
@@ -303,7 +303,7 @@ with iwfm.IWFMModel(
         print(f"19 cumulative GW storage FAIL: {e}")
 
     # --- 20. Land use area timeseries ---
-    from iwfm.plots.timeseries import plot_land_use_area_timeseries
+    from iwfm_io.plots.timeseries import plot_land_use_area_timeseries
     try:
         fig, ax = plot_land_use_area_timeseries(
             m, begin_date=bd, end_date=ed,
@@ -318,7 +318,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 21. Head trend map ---
-    from iwfm.plots.trends import plot_head_trend_map
+    from iwfm_io.plots.trends import plot_head_trend_map
     try:
         fig, ax = plot_head_trend_map(
             m, layer=1, begin_date=bd, end_date=ed,
@@ -329,7 +329,7 @@ with iwfm.IWFMModel(
         print(f"21 head trend FAIL: {e}")
 
     # --- 22. Seasonal amplitude map ---
-    from iwfm.plots.trends import plot_seasonal_amplitude_map
+    from iwfm_io.plots.trends import plot_seasonal_amplitude_map
     try:
         fig, ax = plot_seasonal_amplitude_map(
             m, layer=1, begin_date=bd, end_date=ed,
@@ -340,7 +340,7 @@ with iwfm.IWFMModel(
         print(f"22 seasonal amplitude FAIL: {e}")
 
     # --- 23. Drought drawdown rate ---
-    from iwfm.plots.trends import plot_drought_drawdown_rate
+    from iwfm_io.plots.trends import plot_drought_drawdown_rate
     try:
         fig, ax = plot_drought_drawdown_rate(
             m, layer=1, begin_date=bd, end_date=ed,
@@ -351,7 +351,7 @@ with iwfm.IWFMModel(
         print(f"23 drought drawdown FAIL: {e}")
 
     # --- 24. Recovery lag map ---
-    from iwfm.plots.trends import plot_recovery_lag_map
+    from iwfm_io.plots.trends import plot_recovery_lag_map
     try:
         fig, ax = plot_recovery_lag_map(
             m, layer=1, begin_date=bd, end_date=ed,
@@ -366,7 +366,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 25. Ridgeline ---
-    from iwfm.plots.seasonal import plot_ridgeline
+    from iwfm_io.plots.seasonal import plot_ridgeline
     try:
         fig, ax = plot_ridgeline(
             gw_dates, gw_values, value_label="Head",
@@ -377,7 +377,7 @@ with iwfm.IWFMModel(
         print(f"25 ridgeline FAIL: {e}")
 
     # --- 26. Calendar heatmap ---
-    from iwfm.plots.seasonal import plot_calendar_heatmap
+    from iwfm_io.plots.seasonal import plot_calendar_heatmap
     try:
         fig, ax = plot_calendar_heatmap(
             gw_dates, gw_values, value_label="Head",
@@ -388,7 +388,7 @@ with iwfm.IWFMModel(
         print(f"26 calendar heatmap FAIL: {e}")
 
     # --- 27. Polar seasonal ---
-    from iwfm.plots.seasonal import plot_polar_seasonal
+    from iwfm_io.plots.seasonal import plot_polar_seasonal
     try:
         fig, ax = plot_polar_seasonal(
             monthly_means, title="Seasonal Head Pattern",
@@ -399,7 +399,7 @@ with iwfm.IWFMModel(
         print(f"27 polar seasonal FAIL: {e}")
 
     # --- 28. Budget polar seasonal ---
-    from iwfm.plots.seasonal import plot_budget_polar_seasonal
+    from iwfm_io.plots.seasonal import plot_budget_polar_seasonal
     try:
         fig, ax = plot_budget_polar_seasonal(
             m, budget_type=bt, location=1,
@@ -415,7 +415,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 29. Sparkline grid ---
-    from iwfm.plots.spatial_patterns import plot_sparkline_grid
+    from iwfm_io.plots.spatial_patterns import plot_sparkline_grid
     try:
         fig, ax = plot_sparkline_grid(
             m, layer=1, begin_date=bd, end_date=ed,
@@ -427,7 +427,7 @@ with iwfm.IWFMModel(
         print(f"29 sparkline grid FAIL: {e}")
 
     # --- 30. Small multiples ---
-    from iwfm.plots.spatial_patterns import plot_small_multiples
+    from iwfm_io.plots.spatial_patterns import plot_small_multiples
     try:
         fig, axes = plot_small_multiples(
             m, layer=1, begin_date=bd, end_date=ed,
@@ -439,7 +439,7 @@ with iwfm.IWFMModel(
         print(f"30 small multiples FAIL: {e}")
 
     # --- 31. Head vs GSE scatter ---
-    from iwfm.plots.spatial_patterns import plot_head_vs_gse_scatter
+    from iwfm_io.plots.spatial_patterns import plot_head_vs_gse_scatter
     try:
         fig, ax = plot_head_vs_gse_scatter(
             m, layer=1,
@@ -454,7 +454,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 32. Rating curve ---
-    from iwfm.plots.summary import plot_rating_curve
+    from iwfm_io.plots.summary import plot_rating_curve
     try:
         fig, ax = plot_rating_curve(
             m, stream_nodes=[1, 5, 10],
@@ -465,7 +465,7 @@ with iwfm.IWFMModel(
         print(f"32 rating curve FAIL: {e}")
 
     # --- 33. Aquifer parameter histograms ---
-    from iwfm.plots.summary import plot_aquifer_parameter_histograms
+    from iwfm_io.plots.summary import plot_aquifer_parameter_histograms
     try:
         fig, axes = plot_aquifer_parameter_histograms(
             m, layer=1,
@@ -476,7 +476,7 @@ with iwfm.IWFMModel(
         print(f"33 parameter histograms FAIL: {e}")
 
     # --- 34. Budget pie ---
-    from iwfm.plots.summary import plot_budget_pie
+    from iwfm_io.plots.summary import plot_budget_pie
     try:
         fig, ax = plot_budget_pie(
             m, budget_type=bt, location=1,
@@ -488,7 +488,7 @@ with iwfm.IWFMModel(
         print(f"34 budget pie FAIL: {e}")
 
     # --- 35. Budget monthly average ---
-    from iwfm.plots.summary import plot_budget_monthly_average
+    from iwfm_io.plots.summary import plot_budget_monthly_average
     try:
         fig, ax = plot_budget_monthly_average(
             m, budget_type=bt, location=1,
@@ -500,7 +500,7 @@ with iwfm.IWFMModel(
         print(f"35 budget monthly avg FAIL: {e}")
 
     # --- 36. Budget annual bars ---
-    from iwfm.plots.summary import plot_budget_annual_bars
+    from iwfm_io.plots.summary import plot_budget_annual_bars
     try:
         fig, ax = plot_budget_annual_bars(
             m, budget_type=bt, location=1,
@@ -512,7 +512,7 @@ with iwfm.IWFMModel(
         print(f"36 budget annual bars FAIL: {e}")
 
     # --- 37. Water balance summary ---
-    from iwfm.plots.summary import plot_water_balance_summary
+    from iwfm_io.plots.summary import plot_water_balance_summary
     try:
         fig, ax = plot_water_balance_summary(
             m, budget_type=bt, location=1,
@@ -524,7 +524,7 @@ with iwfm.IWFMModel(
         print(f"37 water balance summary FAIL: {e}")
 
     # --- 38. Supply vs demand ---
-    from iwfm.plots.summary import plot_supply_vs_demand
+    from iwfm_io.plots.summary import plot_supply_vs_demand
     try:
         sub_ids = m.get_subregion_ids()
         fig, ax = plot_supply_vs_demand(
@@ -541,7 +541,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 39. Stream gain/loss profile ---
-    from iwfm.plots.stream_analysis import plot_stream_gain_loss_profile
+    from iwfm_io.plots.stream_analysis import plot_stream_gain_loss_profile
     try:
         fig, ax = plot_stream_gain_loss_profile(
             m, reach_ids=[1],
@@ -552,7 +552,7 @@ with iwfm.IWFMModel(
         print(f"39 stream gain/loss FAIL: {e}")
 
     # --- 40. Stream-aquifer exchange map ---
-    from iwfm.plots.stream_analysis import plot_stream_aquifer_exchange_map
+    from iwfm_io.plots.stream_analysis import plot_stream_aquifer_exchange_map
     try:
         fig, ax = plot_stream_aquifer_exchange_map(
             m, layer=1,
@@ -567,7 +567,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 41. Water balance Sankey (raw data) ---
-    from iwfm.plots.water_balance import plot_water_balance_sankey
+    from iwfm_io.plots.water_balance import plot_water_balance_sankey
     try:
         # Use budget column names and synthetic mean values
         if bt is not None:
@@ -591,7 +591,7 @@ with iwfm.IWFMModel(
         print(f"41 water balance Sankey FAIL: {e}")
 
     # --- 42. Budget Sankey ---
-    from iwfm.plots.water_balance import plot_budget_sankey
+    from iwfm_io.plots.water_balance import plot_budget_sankey
     try:
         fig, ax = plot_budget_sankey(
             m, budget_type=bt, location=1,
@@ -603,7 +603,7 @@ with iwfm.IWFMModel(
         print(f"42 budget Sankey FAIL: {e}")
 
     # --- 43. Butterfly chart (raw data) ---
-    from iwfm.plots.water_balance import plot_butterfly_chart
+    from iwfm_io.plots.water_balance import plot_butterfly_chart
     try:
         fig, ax = plot_butterfly_chart(
             sankey_names, sankey_values,
@@ -614,7 +614,7 @@ with iwfm.IWFMModel(
         print(f"43 butterfly chart FAIL: {e}")
 
     # --- 44. Budget butterfly ---
-    from iwfm.plots.water_balance import plot_budget_butterfly
+    from iwfm_io.plots.water_balance import plot_budget_butterfly
     try:
         fig, ax = plot_budget_butterfly(
             m, budget_type=bt, location=1,
@@ -626,7 +626,7 @@ with iwfm.IWFMModel(
         print(f"44 budget butterfly FAIL: {e}")
 
     # --- 45. Cumulative departure ---
-    from iwfm.plots.water_balance import plot_cumulative_departure
+    from iwfm_io.plots.water_balance import plot_cumulative_departure
     try:
         fig, ax = plot_cumulative_departure(
             m, budget_type=bt, location=1,
@@ -642,7 +642,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 46. Animate GW heads ---
-    from iwfm.plots.animations import animate_gw_heads
+    from iwfm_io.plots.animations import animate_gw_heads
     try:
         anim = animate_gw_heads(
             m, layer=1, begin_date=anim_bd, end_date=anim_ed,
@@ -654,7 +654,7 @@ with iwfm.IWFMModel(
         print(f"46 animate GW heads FAIL: {e}")
 
     # --- 47. Animate stream flows ---
-    from iwfm.plots.animations import animate_stream_flows
+    from iwfm_io.plots.animations import animate_stream_flows
     try:
         anim = animate_stream_flows(
             m, layer=1, begin_date=anim_bd, end_date=anim_ed,
@@ -666,7 +666,7 @@ with iwfm.IWFMModel(
         print(f"47 animate stream flows FAIL: {e}")
 
     # --- 48. Animate depth to water ---
-    from iwfm.plots.animations import animate_depth_to_water
+    from iwfm_io.plots.animations import animate_depth_to_water
     try:
         anim = animate_depth_to_water(
             m, layer=1, begin_date=anim_bd, end_date=anim_ed,
@@ -682,7 +682,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 49. Subsidence bowl ---
-    from iwfm.plots.subsidence import plot_subsidence_bowl
+    from iwfm_io.plots.subsidence import plot_subsidence_bowl
     try:
         subsidence = m.get_subsidence_all()
         fig, ax = plot_subsidence_bowl(
@@ -694,7 +694,7 @@ with iwfm.IWFMModel(
         print(f"49 subsidence bowl FAIL: {e}")
 
     # --- 50. Subsidence vs head ---
-    from iwfm.plots.subsidence import plot_subsidence_vs_head
+    from iwfm_io.plots.subsidence import plot_subsidence_vs_head
     try:
         # Use synthetic data from extracted head timeseries
         heads_ts = gw_values
@@ -713,7 +713,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 51. Supply gap timeline (raw data) ---
-    from iwfm.plots.supply_demand import plot_supply_gap_timeline
+    from iwfm_io.plots.supply_demand import plot_supply_gap_timeline
     try:
         # Synthesize requirement/actual from budget data
         n_ts = len(gw_dates)
@@ -728,7 +728,7 @@ with iwfm.IWFMModel(
         print(f"51 supply gap timeline FAIL: {e}")
 
     # --- 52. Budget supply gap ---
-    from iwfm.plots.supply_demand import plot_budget_supply_gap
+    from iwfm_io.plots.supply_demand import plot_budget_supply_gap
     try:
         # Use first two budget columns as supply/demand proxies
         fig, ax = plot_budget_supply_gap(
@@ -742,7 +742,7 @@ with iwfm.IWFMModel(
         print(f"52 budget supply gap FAIL: {e}")
 
     # --- 53. Pumping depth vs shortage (raw data) ---
-    from iwfm.plots.supply_demand import plot_pumping_depth_vs_shortage
+    from iwfm_io.plots.supply_demand import plot_pumping_depth_vs_shortage
     try:
         rng = np.random.default_rng(44)
         depth_to_gw = rng.uniform(10, 200, 20)
@@ -757,7 +757,7 @@ with iwfm.IWFMModel(
         print(f"53 pumping depth vs shortage FAIL: {e}")
 
     # --- 54. Subregion depth vs shortage ---
-    from iwfm.plots.supply_demand import plot_subregion_depth_vs_shortage
+    from iwfm_io.plots.supply_demand import plot_subregion_depth_vs_shortage
     try:
         fig, ax = plot_subregion_depth_vs_shortage(
             m, supply_type=1,
@@ -772,7 +772,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 55. Multi-layer head panel ---
-    from iwfm.plots.cross_sections import plot_multi_layer_head_panel
+    from iwfm_io.plots.cross_sections import plot_multi_layer_head_panel
     try:
         fig, axes = plot_multi_layer_head_panel(
             m, points=[p1, p2],
@@ -784,7 +784,7 @@ with iwfm.IWFMModel(
         print(f"55 multi-layer head panel FAIL: {e}")
 
     # --- 56. Animate cross-section ---
-    from iwfm.plots.cross_sections import animate_cross_section
+    from iwfm_io.plots.cross_sections import animate_cross_section
     try:
         anim = animate_cross_section(
             m, points=[p1, p2], layer=1,
@@ -801,7 +801,7 @@ with iwfm.IWFMModel(
     # ==================================================================
 
     # --- 57. Diversion network ---
-    from iwfm.plots.connectivity import plot_diversion_network
+    from iwfm_io.plots.connectivity import plot_diversion_network
     try:
         fig, ax = plot_diversion_network(
             m, save_path=os.path.join(OUT, "57_diversion_network.png"))
@@ -811,7 +811,7 @@ with iwfm.IWFMModel(
         print(f"57 diversion network FAIL: {e}")
 
     # --- 58. Bypass flow diagram ---
-    from iwfm.plots.connectivity import plot_bypass_flow_diagram
+    from iwfm_io.plots.connectivity import plot_bypass_flow_diagram
     try:
         fig, ax = plot_bypass_flow_diagram(
             m, save_path=os.path.join(OUT, "58_bypass_diagram.png"))

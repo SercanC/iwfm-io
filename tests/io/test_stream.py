@@ -13,7 +13,7 @@ pytestmark = pytest.mark.skipif(
 
 class TestStreamMain:
     def test_read_stream_main(self):
-        from iwfm.io.readers.stream import read_stream_main
+        from iwfm_io.readers.stream import read_stream_main
 
         sm = read_stream_main(STREAM_DIR / "Stream_MAIN.dat")
         assert sm.header is not None
@@ -22,7 +22,7 @@ class TestStreamMain:
         assert len(sm.hydrograph_specs) == sm.config["n_hydrographs"]
 
     def test_stream_main_reach_params(self):
-        from iwfm.io.readers.stream import read_stream_main
+        from iwfm_io.readers.stream import read_stream_main
 
         sm = read_stream_main(STREAM_DIR / "Stream_MAIN.dat")
         assert sm.reach_params is not None
@@ -31,8 +31,8 @@ class TestStreamMain:
         assert "conductance" in sm.reach_params.columns
 
     def test_stream_main_round_trip(self, tmp_output):
-        from iwfm.io.readers.stream import read_stream_main
-        from iwfm.io.writers.stream import write_stream_main
+        from iwfm_io.readers.stream import read_stream_main
+        from iwfm_io.writers.stream import write_stream_main
 
         sm = read_stream_main(STREAM_DIR / "Stream_MAIN.dat")
         out = tmp_output / "Stream_MAIN.dat"
@@ -46,7 +46,7 @@ class TestStreamMain:
 
 class TestStreamInflow:
     def test_read_stream_inflow(self):
-        from iwfm.io.readers.stream import read_stream_inflow
+        from iwfm_io.readers.stream import read_stream_inflow
 
         path = STREAM_DIR / "StreamInflow.dat"
         if path.exists():
@@ -56,8 +56,8 @@ class TestStreamInflow:
             assert sf.data is not None or sf.dss_pathnames
 
     def test_stream_inflow_round_trip(self, tmp_output):
-        from iwfm.io.readers.stream import read_stream_inflow
-        from iwfm.io.writers.stream import write_stream_inflow
+        from iwfm_io.readers.stream import read_stream_inflow
+        from iwfm_io.writers.stream import write_stream_inflow
 
         path = STREAM_DIR / "StreamInflow.dat"
         if path.exists():
@@ -72,7 +72,7 @@ class TestStreamInflow:
 
 class TestDiverSpecs:
     def test_read_diver_specs(self):
-        from iwfm.io.readers.stream import read_diver_specs
+        from iwfm_io.readers.stream import read_diver_specs
 
         path = STREAM_DIR / "DiverSpecs.dat"
         if path.exists():
@@ -81,8 +81,8 @@ class TestDiverSpecs:
             assert len(ds.raw_data) > 0
 
     def test_diver_specs_round_trip(self, tmp_output):
-        from iwfm.io.readers.stream import read_diver_specs
-        from iwfm.io.writers.stream import write_diver_specs
+        from iwfm_io.readers.stream import read_diver_specs
+        from iwfm_io.writers.stream import write_diver_specs
 
         path = STREAM_DIR / "DiverSpecs.dat"
         if path.exists():
@@ -96,7 +96,7 @@ class TestDiverSpecs:
 
 class TestBypassSpecs:
     def test_read_bypass_specs(self):
-        from iwfm.io.readers.stream import read_bypass_specs
+        from iwfm_io.readers.stream import read_bypass_specs
 
         path = STREAM_DIR / "BypassSpecs.dat"
         if path.exists():
@@ -104,8 +104,8 @@ class TestBypassSpecs:
             assert bs.n_bypasses >= 0
 
     def test_bypass_specs_round_trip(self, tmp_output):
-        from iwfm.io.readers.stream import read_bypass_specs
-        from iwfm.io.writers.stream import write_bypass_specs
+        from iwfm_io.readers.stream import read_bypass_specs
+        from iwfm_io.writers.stream import write_bypass_specs
 
         path = STREAM_DIR / "BypassSpecs.dat"
         if path.exists():
@@ -119,7 +119,7 @@ class TestBypassSpecs:
 
 class TestDiversions:
     def test_read_diversions(self):
-        from iwfm.io.readers.stream import read_diversions
+        from iwfm_io.readers.stream import read_diversions
 
         path = STREAM_DIR / "Diversions.dat"
         if path.exists():
@@ -128,8 +128,8 @@ class TestDiversions:
             assert dv.data is not None or dv.dss_pathnames
 
     def test_diversions_round_trip(self, tmp_output):
-        from iwfm.io.readers.stream import read_diversions
-        from iwfm.io.writers.stream import write_diversions
+        from iwfm_io.readers.stream import read_diversions
+        from iwfm_io.writers.stream import write_diversions
 
         path = STREAM_DIR / "Diversions.dat"
         if path.exists():

@@ -1,4 +1,4 @@
-"""Tests for iwfm.io simulation and timeseries readers/writers."""
+"""Tests for iwfm_io simulation and timeseries readers/writers."""
 
 from pathlib import Path
 
@@ -10,15 +10,15 @@ from tests.io.conftest import SAMPLE_MODEL, SIMULATION_DIR
 pytestmark = pytest.mark.skipif(
     not SAMPLE_MODEL.is_dir(), reason="sample model not present (.assets/sample_model)")
 
-from iwfm.io.readers.simulation import read_simulation_main
-from iwfm.io.readers.timeseries import (
+from iwfm_io.readers.simulation import read_simulation_main
+from iwfm_io.readers.timeseries import (
     read_et,
     read_irigfrac,
     read_precip,
     read_supply_adjust,
 )
-from iwfm.io.writers.simulation import write_simulation_main
-from iwfm.io.writers.timeseries import (
+from iwfm_io.writers.simulation import write_simulation_main
+from iwfm_io.writers.timeseries import (
     write_et,
     write_irigfrac,
     write_supply_adjust,

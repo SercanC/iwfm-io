@@ -64,7 +64,7 @@ small changes; worth reporting to DWR as an enhancement.
 
 **Practical guidance**: run the simulation once so the cache exists, and
 use `is_for_inquiry=False` for these getters; or read the equivalent
-static data DLL-free with `iwfm.io` (e.g. `read_tile_drain`,
+static data DLL-free with `iwfm_io` (e.g. `read_tile_drain`,
 `read_bypass_specs`, crop counts from the RootZone files).
 
 ---
@@ -136,4 +136,4 @@ zero-initialize the read buffer.
 | No queryable inquiry state | `IWFMModel` stores `_is_for_inquiry` |
 | Stream-exchange crash | `get_stream_gain_from_gw` / `_from_lakes` raise `IWFMError` in inquiry mode |
 | Garbage hydrograph tails | `get_hydrograph` masks dates *and* values by `date > 0` |
-| Partial instantiation | unchanged — the DLL's own error is already clean; use simulation mode or `iwfm.io` readers |
+| Partial instantiation | unchanged — the DLL's own error is already clean; use simulation mode or `iwfm_io` readers |

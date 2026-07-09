@@ -1,4 +1,4 @@
-"""Integration test: load the entire sample model via iwfm.io."""
+"""Integration test: load the entire sample model via iwfm_io."""
 
 import pytest
 from pathlib import Path
@@ -12,7 +12,7 @@ class TestFullModelLoad:
     """Test loading all major components of the sample model."""
 
     def test_preprocessor_full_load(self):
-        from iwfm.io.readers.preprocessor import read_preprocessor_main
+        from iwfm_io.readers.preprocessor import read_preprocessor_main
 
         path = PREPROCESSOR_DIR / "PreProcessor_MAIN.IN"
         if not path.exists():
@@ -33,7 +33,7 @@ class TestFullModelLoad:
             assert len(children["strata"].data) == 441  # one per node
 
     def test_simulation_full_load(self):
-        from iwfm.io.readers.simulation import read_simulation_main
+        from iwfm_io.readers.simulation import read_simulation_main
 
         path = SIMULATION_DIR / "Simulation_MAIN.IN"
         if not path.exists():
@@ -45,7 +45,7 @@ class TestFullModelLoad:
         assert len(sim.file_paths) >= 10
 
     def test_gw_component(self):
-        from iwfm.io.readers.groundwater import read_gw_main
+        from iwfm_io.readers.groundwater import read_gw_main
 
         path = SIMULATION_DIR / "GW" / "GW_MAIN.dat"
         if not path.exists():
@@ -55,7 +55,7 @@ class TestFullModelLoad:
         assert len(gw.aquifer_param_raw) > 0
 
     def test_stream_component(self):
-        from iwfm.io.readers.stream import read_stream_main
+        from iwfm_io.readers.stream import read_stream_main
 
         path = SIMULATION_DIR / "Stream" / "Stream_MAIN.dat"
         if not path.exists():
@@ -65,7 +65,7 @@ class TestFullModelLoad:
         assert sm.reach_params is not None
 
     def test_rootzone_component(self):
-        from iwfm.io.readers.rootzone import read_rootzone_main
+        from iwfm_io.readers.rootzone import read_rootzone_main
 
         path = SIMULATION_DIR / "RootZone" / "RootZone_MAIN.dat"
         if not path.exists():
@@ -74,7 +74,7 @@ class TestFullModelLoad:
         assert len(rz.file_paths) == 14
 
     def test_hdf5_output_files(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf, read_hydrograph_hdf, read_head_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf, read_hydrograph_hdf, read_head_hdf
 
         # GW budget
         gw_path = RESULTS_DIR / "GW.hdf"
@@ -95,7 +95,7 @@ class TestFullModelLoad:
             assert len(df.columns) == 882
 
     def test_text_output_files(self):
-        from iwfm.io.readers.text_output import (
+        from iwfm_io.readers.text_output import (
             read_hydrograph_out, read_final_state_out, read_budget_text,
         )
 

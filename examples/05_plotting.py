@@ -70,7 +70,7 @@ def _section(title):
 
 def build_adapter():
     """Build IOModelAdapter from sample model files."""
-    from iwfm.io import read_preprocessor, IOModelAdapter
+    from iwfm_io import read_preprocessor, IOModelAdapter
 
     pp = read_preprocessor(SAMPLE_MODEL / "Preprocessor" / "PreProcessor_MAIN.IN")
 
@@ -99,7 +99,7 @@ def build_adapter():
 # ── 1. Maps ───────────────────────────────────────────────────────────────────
 
 def demo_maps(adapter):
-    from iwfm.plots import maps
+    from iwfm_io.plots import maps
 
     _section("Maps (11 functions)")
 
@@ -143,7 +143,7 @@ def demo_maps(adapter):
 # ── 2. Profiles ───────────────────────────────────────────────────────────────
 
 def demo_profiles(adapter):
-    from iwfm.plots import profiles
+    from iwfm_io.plots import profiles
 
     _section("Profiles (2 functions)")
 
@@ -166,7 +166,7 @@ def demo_profiles(adapter):
 # ── 3. Time series ────────────────────────────────────────────────────────────
 
 def demo_timeseries(adapter):
-    from iwfm.plots import timeseries
+    from iwfm_io.plots import timeseries
 
     _section("Time series (7 functions)")
 
@@ -189,7 +189,7 @@ def demo_timeseries(adapter):
 # ── 4. Trends ─────────────────────────────────────────────────────────────────
 
 def demo_trends(adapter):
-    from iwfm.plots import trends
+    from iwfm_io.plots import trends
 
     _section("Trends (4 functions)")
 
@@ -211,8 +211,8 @@ def demo_trends(adapter):
 # ── 5. Seasonal patterns ──────────────────────────────────────────────────────
 
 def demo_seasonal(adapter):
-    from iwfm.plots import seasonal
-    from iwfm.io import read_hydrograph_hdf
+    from iwfm_io.plots import seasonal
+    from iwfm_io import read_hydrograph_hdf
     import numpy as np
 
     _section("Seasonal patterns (4 functions)")
@@ -251,7 +251,7 @@ def demo_seasonal(adapter):
 # ── 6. Spatial patterns ───────────────────────────────────────────────────────
 
 def demo_spatial_patterns(adapter):
-    from iwfm.plots import spatial_patterns
+    from iwfm_io.plots import spatial_patterns
 
     _section("Spatial patterns (3 functions)")
 
@@ -273,7 +273,7 @@ def demo_spatial_patterns(adapter):
 # ── 7. Summary statistics ─────────────────────────────────────────────────────
 
 def demo_summary(adapter):
-    from iwfm.plots import summary
+    from iwfm_io.plots import summary
 
     _section("Summary statistics (7 functions)")
 
@@ -287,8 +287,8 @@ def demo_summary(adapter):
 # ── 8. Water balance ──────────────────────────────────────────────────────────
 
 def demo_water_balance(adapter):
-    from iwfm.plots import water_balance
-    from iwfm.io import read_budget_hdf
+    from iwfm_io.plots import water_balance
+    from iwfm_io import read_budget_hdf
 
     _section("Water balance (5 functions)")
 
@@ -320,7 +320,7 @@ def demo_water_balance(adapter):
 # ── 9. Stream analysis ────────────────────────────────────────────────────────
 
 def demo_stream_analysis(adapter):
-    from iwfm.plots import stream_analysis
+    from iwfm_io.plots import stream_analysis
 
     _section("Stream analysis (2 functions)")
 
@@ -340,7 +340,7 @@ def demo_stream_analysis(adapter):
 # ── 10. Animations ────────────────────────────────────────────────────────────
 
 def demo_animations(adapter):
-    from iwfm.plots import animations
+    from iwfm_io.plots import animations
 
     _section("Animations (3 functions)")
 
@@ -369,7 +369,7 @@ def demo_animations(adapter):
 # ── 11. Connectivity ──────────────────────────────────────────────────────────
 
 def demo_connectivity(adapter):
-    from iwfm.plots import connectivity
+    from iwfm_io.plots import connectivity
 
     _section("Connectivity (2 functions)")
 

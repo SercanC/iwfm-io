@@ -13,8 +13,8 @@ class TestBudgetHDF:
         wrongly dropped the first data column as a 'time marker'), so
         e.g. 'Percolation' held Beginning Storage. Totals per column must
         match the Budget post-processor's text output."""
-        from iwfm.io.readers.hdf5 import read_budget_hdf
-        from iwfm.io.readers.text_output import read_budget_text
+        from iwfm_io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.text_output import read_budget_text
 
         hdf_path = RESULTS_DIR / "GW.hdf"
         txt_path = BUDGET_DIR / "GW.bud"
@@ -41,7 +41,7 @@ class TestBudgetHDF:
 
 
     def test_read_gw_budget(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "GW.hdf"
         if path.exists():
@@ -56,7 +56,7 @@ class TestBudgetHDF:
             assert df.index.name == "datetime"
 
     def test_read_strm_budget(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "StrmBud.hdf"
         if path.exists():
@@ -64,7 +64,7 @@ class TestBudgetHDF:
             assert len(result["locations"]) > 0
 
     def test_read_rootzone_budget(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "RootZone.hdf"
         if path.exists():
@@ -72,7 +72,7 @@ class TestBudgetHDF:
             assert len(result["locations"]) > 0
 
     def test_read_lake_budget(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "LakeBud.hdf"
         if path.exists():
@@ -80,7 +80,7 @@ class TestBudgetHDF:
             assert len(result["locations"]) > 0
 
     def test_read_gw_budget_data_types(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "GW.hdf"
         if not path.exists():
@@ -97,7 +97,7 @@ class TestBudgetHDF:
         assert all(dt[c] == 3 for c in end_cols), "Ending Storage should be VLE (3)"
 
     def test_read_gw_budget_monthly(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "GW.hdf"
         if not path.exists():
@@ -154,7 +154,7 @@ class TestBudgetHDF:
                 "Volumetric rate should be summed"
 
     def test_read_gw_budget_yearly(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "GW.hdf"
         if not path.exists():
@@ -167,7 +167,7 @@ class TestBudgetHDF:
         assert len(yr_df) == 11
 
     def test_read_lwu_budget_monthly(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "LWU.hdf"
         if not path.exists():
@@ -201,7 +201,7 @@ class TestBudgetHDF:
             assert len(mon_df) >= 119
 
     def test_read_budget_invalid_interval(self):
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
 
         path = RESULTS_DIR / "GW.hdf"
         if not path.exists():
@@ -213,7 +213,7 @@ class TestBudgetHDF:
 
 class TestHydrographHDF:
     def test_read_gw_hydrograph(self):
-        from iwfm.io.readers.hdf5 import read_hydrograph_hdf
+        from iwfm_io.readers.hdf5 import read_hydrograph_hdf
 
         path = RESULTS_DIR / "GWHyd.hdf"
         if path.exists():
@@ -223,7 +223,7 @@ class TestHydrographHDF:
             assert len(df.columns) > 0
 
     def test_read_strm_hydrograph(self):
-        from iwfm.io.readers.hdf5 import read_hydrograph_hdf
+        from iwfm_io.readers.hdf5 import read_hydrograph_hdf
 
         path = RESULTS_DIR / "StrmHyd.hdf"
         if path.exists():
@@ -231,7 +231,7 @@ class TestHydrographHDF:
             assert len(df) > 0
 
     def test_read_subsidence_hdf(self):
-        from iwfm.io.readers.hdf5 import read_hydrograph_hdf
+        from iwfm_io.readers.hdf5 import read_hydrograph_hdf
 
         path = RESULTS_DIR / "Subsidence.hdf"
         if path.exists():
@@ -239,7 +239,7 @@ class TestHydrographHDF:
             assert len(df) > 0
 
     def test_read_tiledrain_hdf(self):
-        from iwfm.io.readers.hdf5 import read_hydrograph_hdf
+        from iwfm_io.readers.hdf5 import read_hydrograph_hdf
 
         path = RESULTS_DIR / "TileDrainFlows.hdf"
         if path.exists():
@@ -249,7 +249,7 @@ class TestHydrographHDF:
 
 class TestHeadHDF:
     def test_read_head_generic(self):
-        from iwfm.io.readers.hdf5 import read_head_hdf
+        from iwfm_io.readers.hdf5 import read_head_hdf
 
         path = RESULTS_DIR / "GWHeadAll.hdf"
         if path.exists():
@@ -258,7 +258,7 @@ class TestHeadHDF:
             assert df.index.name == "datetime"
 
     def test_read_head_named_columns(self):
-        from iwfm.io.readers.hdf5 import read_head_hdf
+        from iwfm_io.readers.hdf5 import read_head_hdf
 
         path = RESULTS_DIR / "GWHeadAll.hdf"
         if path.exists():

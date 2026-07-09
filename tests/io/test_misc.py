@@ -8,7 +8,7 @@ from tests.io.conftest import SIMULATION_DIR
 
 class TestSWShed:
     def test_read_swshed(self):
-        from iwfm.io.readers.misc import read_swshed
+        from iwfm_io.readers.misc import read_swshed
 
         path = SIMULATION_DIR / "SWShed.dat"
         if path.exists():
@@ -19,8 +19,8 @@ class TestSWShed:
             assert "factq" in sw.config
 
     def test_swshed_round_trip(self, tmp_output):
-        from iwfm.io.readers.misc import read_swshed
-        from iwfm.io.writers.misc import write_swshed
+        from iwfm_io.readers.misc import read_swshed
+        from iwfm_io.writers.misc import write_swshed
 
         path = SIMULATION_DIR / "SWShed.dat"
         if path.exists():
@@ -35,7 +35,7 @@ class TestSWShed:
 
 class TestUnsatZone:
     def test_read_unsatzone(self):
-        from iwfm.io.readers.misc import read_unsatzone
+        from iwfm_io.readers.misc import read_unsatzone
 
         path = SIMULATION_DIR / "UnsatZone.dat"
         if path.exists():
@@ -45,8 +45,8 @@ class TestUnsatZone:
             assert uz.convergence > 0
 
     def test_unsatzone_round_trip(self, tmp_output):
-        from iwfm.io.readers.misc import read_unsatzone
-        from iwfm.io.writers.misc import write_unsatzone
+        from iwfm_io.readers.misc import read_unsatzone
+        from iwfm_io.writers.misc import write_unsatzone
 
         path = SIMULATION_DIR / "UnsatZone.dat"
         if path.exists():

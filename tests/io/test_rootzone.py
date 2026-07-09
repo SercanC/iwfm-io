@@ -10,7 +10,7 @@ RZ_DIR = SIMULATION_DIR / "RootZone"
 
 class TestRootZoneMain:
     def test_read_rootzone_main(self):
-        from iwfm.io.readers.rootzone import read_rootzone_main
+        from iwfm_io.readers.rootzone import read_rootzone_main
 
         path = RZ_DIR / "RootZone_MAIN.dat"
         if path.exists():
@@ -21,7 +21,7 @@ class TestRootZoneMain:
             assert len(rz.file_paths) == 14
 
     def test_rootzone_file_paths(self):
-        from iwfm.io.readers.rootzone import read_rootzone_main
+        from iwfm_io.readers.rootzone import read_rootzone_main
 
         path = RZ_DIR / "RootZone_MAIN.dat"
         if path.exists():
@@ -31,8 +31,8 @@ class TestRootZoneMain:
             assert "native_veg" in rz.file_paths
 
     def test_rootzone_round_trip(self, tmp_output):
-        from iwfm.io.readers.rootzone import read_rootzone_main
-        from iwfm.io.writers.rootzone import write_rootzone_main
+        from iwfm_io.readers.rootzone import read_rootzone_main
+        from iwfm_io.writers.rootzone import write_rootzone_main
 
         path = RZ_DIR / "RootZone_MAIN.dat"
         if path.exists():

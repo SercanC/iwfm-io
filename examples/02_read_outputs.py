@@ -2,7 +2,7 @@
 Example 2: Reading IWFM Model Output Files
 ==========================================
 
-Demonstrates iwfm.io readers for HDF5 and text output files produced
+Demonstrates iwfm_io readers for HDF5 and text output files produced
 by an IWFM simulation run.  No DLL required — runs on any platform.
 
 Covers:
@@ -42,7 +42,7 @@ def _skip(name):
 # ── 1. Budget HDF ─────────────────────────────────────────────────────────────
 
 def demo_budget_hdf():
-    from iwfm.io import read_budget_hdf
+    from iwfm_io import read_budget_hdf
 
     print("=== Budget HDF (GW.hdf) ===")
     path = RESULTS_DIR / "GW.hdf"
@@ -69,7 +69,7 @@ def demo_budget_hdf():
 # ── 2. GW heads at all nodes ─────────────────────────────────────────────────
 
 def demo_head_hdf():
-    from iwfm.io import read_head_hdf
+    from iwfm_io import read_head_hdf
 
     print("\n=== GW Heads HDF (GWHeadAll.hdf) ===")
     path = RESULTS_DIR / "GWHeadAll.hdf"
@@ -89,7 +89,7 @@ def demo_head_hdf():
 # ── 3. Hydrograph HDF ────────────────────────────────────────────────────────
 
 def demo_hydrograph_hdf():
-    from iwfm.io import read_hydrograph_hdf
+    from iwfm_io import read_hydrograph_hdf
 
     print("\n=== Hydrograph HDF files ===")
 
@@ -106,7 +106,7 @@ def demo_hydrograph_hdf():
 # ── 4. Zone budget HDF ───────────────────────────────────────────────────────
 
 def demo_zbudget_hdf():
-    from iwfm.io import read_zbudget_hdf, read_zone_def
+    from iwfm_io import read_zbudget_hdf, read_zone_def
 
     print("\n=== Zone Budget HDF (GW_ZBud.hdf) ===")
     path = RESULTS_DIR / "GW_ZBud.hdf"
@@ -130,7 +130,7 @@ def demo_zbudget_hdf():
 # ── 5. Text hydrograph output ─────────────────────────────────────────────────
 
 def demo_hydrograph_out():
-    from iwfm.io import read_hydrograph_out, read_hydrograph_out_with_metadata
+    from iwfm_io import read_hydrograph_out, read_hydrograph_out_with_metadata
 
     print("\n=== Hydrograph text output (GWHyd.out) ===")
     path = RESULTS_DIR / "GWHyd.out"
@@ -150,7 +150,7 @@ def demo_hydrograph_out():
 # ── 6. Final state output ─────────────────────────────────────────────────────
 
 def demo_final_state():
-    from iwfm.io import read_final_state_out
+    from iwfm_io import read_final_state_out
 
     print("\n=== Final state files ===")
 
@@ -166,7 +166,7 @@ def demo_final_state():
 # ── 7. Budget text files ──────────────────────────────────────────────────────
 
 def demo_budget_text():
-    from iwfm.io import read_budget_text
+    from iwfm_io import read_budget_text
 
     print("\n=== Budget text files ===")
 
@@ -181,7 +181,7 @@ def demo_budget_text():
 # ── 8. Flow and velocity output ───────────────────────────────────────────────
 
 def demo_flow_out():
-    from iwfm.io import read_flow_out, read_velocity_out
+    from iwfm_io import read_flow_out, read_velocity_out
 
     print("\n=== Flow and velocity output ===")
 

@@ -8,8 +8,8 @@ from tests.io.conftest import PREPROCESSOR_DIR
 
 class TestValidation:
     def test_validate_nodes(self):
-        from iwfm.io.readers.preprocessor import read_nodes
-        from iwfm.io._validation import validate_nodes
+        from iwfm_io.readers.preprocessor import read_nodes
+        from iwfm_io._validation import validate_nodes
 
         path = PREPROCESSOR_DIR / "NodeXY.dat"
         if path.exists():
@@ -20,8 +20,8 @@ class TestValidation:
             assert len(errors) == 0
 
     def test_validate_elements(self):
-        from iwfm.io.readers.preprocessor import read_nodes, read_elements
-        from iwfm.io._validation import validate_elements
+        from iwfm_io.readers.preprocessor import read_nodes, read_elements
+        from iwfm_io._validation import validate_elements
 
         node_path = PREPROCESSOR_DIR / "NodeXY.dat"
         elem_path = PREPROCESSOR_DIR / "Element.dat"
@@ -33,8 +33,8 @@ class TestValidation:
             assert len(errors) == 0
 
     def test_validate_preprocessor(self):
-        from iwfm.io.readers.preprocessor import read_preprocessor_main
-        from iwfm.io._validation import validate_preprocessor
+        from iwfm_io.readers.preprocessor import read_preprocessor_main
+        from iwfm_io._validation import validate_preprocessor
 
         path = PREPROCESSOR_DIR / "PreProcessor_MAIN.IN"
         if path.exists():

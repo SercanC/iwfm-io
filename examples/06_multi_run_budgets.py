@@ -17,7 +17,7 @@ Output shape (long form):
 Usage:
     python examples/06_multi_run_budgets.py
 
-No DLL required — uses iwfm.io HDF5 readers only.
+No DLL required — uses iwfm_io HDF5 readers only.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from iwfm.io import collect_budgets as _collect_budgets
+from iwfm_io import collect_budgets as _collect_budgets
 
 REPO_ROOT    = Path(__file__).resolve().parent.parent
 SAMPLE_MODEL = REPO_ROOT / ".assets" / "sample_model"
@@ -63,7 +63,7 @@ BUDGET_FILES: Dict[str, str] = {
 # Core collector
 # ─────────────────────────────────────────────────────────────────────────────
 
-# collect_budgets is provided by iwfm.io — imported above as _collect_budgets.
+# collect_budgets is provided by iwfm_io — imported above as _collect_budgets.
 # A thin wrapper is kept here to add console progress output for the demo.
 
 def collect_budgets(
@@ -74,8 +74,8 @@ def collect_budgets(
     begin_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Thin demo wrapper around ``iwfm.io.collect_budgets`` with console output."""
-    from iwfm.io import read_budget_hdf
+    """Thin demo wrapper around ``iwfm_io.collect_budgets`` with console output."""
+    from iwfm_io import read_budget_hdf
 
     active_types = budget_types or list(budget_files.keys())
     for run_label, results_dir in runs.items():

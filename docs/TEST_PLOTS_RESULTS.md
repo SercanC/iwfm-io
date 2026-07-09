@@ -13,7 +13,7 @@
 > mode**, where 10 functions hit permanent DLL limitations (analyzed in
 > `docs/DLL_INQUIRY_MODE_LIMITS.md`). Every one of those functions also
 > has a **DLL-free path** through `IOModelAdapter`
-> (`iwfm.io.open_model`), which serves the same data from the model's
+> (`iwfm_io.open_model`), which serves the same data from the model's
 > input and budget-output files. Run it with
 > `python examples/test_plots_dllfree.py [model_root]`:
 >
@@ -274,7 +274,7 @@ propagates into `plot_zbudget_timeseries` (18).
    exchange, open the model with `is_for_inquiry=False` after a
    simulation run.
 4. Head/budget-based plots work DLL-free via
-   `iwfm.io.open_model()` + `IOModelAdapter`.
+   `iwfm_io.open_model()` + `IOModelAdapter`.
 
 ### For developers
 1. Filter `dates > 0` when consuming `get_hydrograph()` output.

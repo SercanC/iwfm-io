@@ -3,17 +3,17 @@
 ## Dates
 - IWFM date strings: `MM/DD/YYYY_HH:MM`, and **hour 24:00 means end of
   day** (`09/30/2021_24:00` == 2021-10-01 00:00). Use
-  `iwfm.io._tokens.parse_iwfm_date` / `format_iwfm_date`, never bare
+  `iwfm_io._tokens.parse_iwfm_date` / `format_iwfm_date`, never bare
   `strptime`.
 - DLL date arrays are Excel serial days (days since 1899-12-30);
-  convert with `iwfm.plots.excel_date_to_datetime`.
+  convert with `iwfm_io.plots.excel_date_to_datetime`.
 
 ## Text input files
 - Comment lines start with `C`, `c`, `*`, or `/` **in column 1 only** —
   a line starting with whitespace is data even if a `/` appears later.
 - Data lines end with `/ KEYWORD description`; the same section can
   have different entries across IWFM versions (2015 vs 2024+), so
-  `iwfm.io` readers match keywords, not positions.
+  `iwfm_io` readers match keywords, not positions.
 - Child-file paths inside component files are relative to the
   **Simulation working directory**, not the component file's folder.
 - Element rows list 4 nodes; `node4 == 0` means a triangle.

@@ -11,7 +11,7 @@ ZBUDGET_DIR = SAMPLE_MODEL / "ZBudget"
 
 class TestReadZoneDef:
     def test_read_zone_def_horizontal(self):
-        from iwfm.io.readers.hdf5 import read_zone_def
+        from iwfm_io.readers.hdf5 import read_zone_def
 
         path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
         if not path.exists():
@@ -33,7 +33,7 @@ class TestReadZoneDef:
         assert len(zone2) == 200
 
     def test_read_zone_def_vertical(self):
-        from iwfm.io.readers.hdf5 import read_zone_def
+        from iwfm_io.readers.hdf5 import read_zone_def
 
         path = ZBUDGET_DIR / "ZoneDef_SRs_L1.dat"
         if not path.exists():
@@ -48,7 +48,7 @@ class TestReadZoneDef:
         assert len(zd.element_zones) == 400
 
     def test_read_zone_def_subset(self):
-        from iwfm.io.readers.hdf5 import read_zone_def
+        from iwfm_io.readers.hdf5 import read_zone_def
 
         path = ZBUDGET_DIR / "ZoneDef_E1_E10.dat"
         if not path.exists():
@@ -65,7 +65,7 @@ class TestReadZoneDef:
 
 class TestReadZBudgetRaw:
     def test_read_zbudget_raw(self):
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "GW_ZBud.hdf"
         if not path.exists():
@@ -93,7 +93,7 @@ class TestReadZBudgetRaw:
         assert len(gw_df.columns) == 400
 
     def test_read_zbudget_lwu(self):
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "LWU_ZBud.hdf"
         if not path.exists():
@@ -109,7 +109,7 @@ class TestReadZBudgetRaw:
 
 class TestReadZBudgetAggregated:
     def test_read_zbudget_aggregated(self):
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "GW_ZBud.hdf"
         zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
@@ -143,7 +143,7 @@ class TestReadZBudgetAggregated:
             assert len(ff_df) == 3653
 
     def test_read_zbudget_monthly(self):
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "GW_ZBud.hdf"
         zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
@@ -158,7 +158,7 @@ class TestReadZBudgetAggregated:
         assert len(r1_df) >= 119  # at least 119 months in 10 years
 
     def test_read_zbudget_with_zone_def_object(self):
-        from iwfm.io.readers.hdf5 import read_zone_def, read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zone_def, read_zbudget_hdf
 
         path = RESULTS_DIR / "GW_ZBud.hdf"
         zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
@@ -176,7 +176,7 @@ class TestReadZBudgetTypeAware:
     def test_subsurface_flow_columns(self):
         """Verify face-flow-derived subsurface inflow/outflow columns appear
         in zone DataFrames and conserve mass between zones."""
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "GW_ZBud.hdf"
         zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
@@ -210,7 +210,7 @@ class TestReadZBudgetTypeAware:
 
     def test_subsurface_flow_monthly_conservation(self):
         """Verify monthly resampling preserves subsurface flow conservation."""
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "GW_ZBud.hdf"
         zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
@@ -228,7 +228,7 @@ class TestReadZBudgetTypeAware:
 
     def test_read_zbudget_monthly_type_aware(self):
         """Verify that monthly aggregation uses data-type-aware resampling."""
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "GW_ZBud.hdf"
         zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
@@ -257,7 +257,7 @@ class TestReadZBudgetTypeAware:
 
     def test_read_lwu_zbudget_monthly(self):
         """Verify LWU ZBudget monthly aggregation uses type-aware resampling."""
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "LWU_ZBud.hdf"
         zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
@@ -292,7 +292,7 @@ class TestReadZBudgetTypeAware:
 
     def test_read_lwu_zbudget_raw_monthly(self):
         """Verify LWU ZBudget raw mode monthly uses type-aware resampling."""
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "LWU_ZBud.hdf"
         if not path.exists():
@@ -338,7 +338,7 @@ class TestReadZBudgetTypeAware:
 class TestZoneBalance:
     def test_zone_balance(self):
         """Verify inflow - outflow balance using ErrorInCols/ErrorOutCols."""
-        from iwfm.io.readers.hdf5 import read_zbudget_hdf
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
 
         path = RESULTS_DIR / "GW_ZBud.hdf"
         zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"

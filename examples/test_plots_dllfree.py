@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from iwfm.io import open_model
+from iwfm_io import open_model
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ROOT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_REPO, ".assets", "sample_model")
@@ -37,13 +37,13 @@ def run(tag, fn):
         results.append((tag, f"FAIL: {type(e).__name__}: {e}"))
         print(f"[FAIL] {tag}: {type(e).__name__}: {str(e)[:130]}")
 
-from iwfm.plots.maps import plot_aquifer_parameter, plot_tile_drain_locations
-from iwfm.plots.summary import plot_aquifer_parameter_histograms, plot_supply_vs_demand
-from iwfm.plots.timeseries import plot_land_use_area_timeseries
-from iwfm.plots.stream_analysis import (plot_stream_gain_loss_profile,
+from iwfm_io.plots.maps import plot_aquifer_parameter, plot_tile_drain_locations
+from iwfm_io.plots.summary import plot_aquifer_parameter_histograms, plot_supply_vs_demand
+from iwfm_io.plots.timeseries import plot_land_use_area_timeseries
+from iwfm_io.plots.stream_analysis import (plot_stream_gain_loss_profile,
                                         plot_stream_aquifer_exchange_map)
-from iwfm.plots.supply_demand import plot_subregion_depth_vs_shortage
-from iwfm.plots.connectivity import plot_bypass_flow_diagram
+from iwfm_io.plots.supply_demand import plot_subregion_depth_vs_shortage
+from iwfm_io.plots.connectivity import plot_bypass_flow_diagram
 
 run("08 aquifer parameter (Kh)", lambda: plot_aquifer_parameter(
     m, parameter="Kh", layer=1, log_scale=True,

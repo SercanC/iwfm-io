@@ -2,7 +2,7 @@
 
 import pytest
 
-from iwfm.io import (
+from iwfm_io import (
     create_scenario,
     read_simulation,
     replace_text,

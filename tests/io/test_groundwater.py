@@ -13,7 +13,7 @@ GW_DIR = SIMULATION_DIR / "GW"
 
 class TestGWMain:
     def test_read_gw_main(self):
-        from iwfm.io.readers.groundwater import read_gw_main
+        from iwfm_io.readers.groundwater import read_gw_main
 
         gw = read_gw_main(GW_DIR / "GW_MAIN.dat")
         assert gw.header is not None
@@ -23,7 +23,7 @@ class TestGWMain:
         assert len(gw.hydrographs) == gw.n_hydrographs
 
     def test_gw_main_file_paths(self):
-        from iwfm.io.readers.groundwater import read_gw_main
+        from iwfm_io.readers.groundwater import read_gw_main
 
         gw = read_gw_main(GW_DIR / "GW_MAIN.dat")
         assert "bc_main" in gw.file_paths
@@ -31,8 +31,8 @@ class TestGWMain:
         assert "tile_drain" in gw.file_paths
 
     def test_gw_main_round_trip(self, tmp_output):
-        from iwfm.io.readers.groundwater import read_gw_main
-        from iwfm.io.writers.groundwater import write_gw_main
+        from iwfm_io.readers.groundwater import read_gw_main
+        from iwfm_io.writers.groundwater import write_gw_main
 
         gw = read_gw_main(GW_DIR / "GW_MAIN.dat")
         out_path = tmp_output / "GW_MAIN.dat"
@@ -46,7 +46,7 @@ class TestGWMain:
 
 class TestBCMain:
     def test_read_bc_main(self):
-        from iwfm.io.readers.groundwater import read_gw_main, read_bc_main
+        from iwfm_io.readers.groundwater import read_gw_main, read_bc_main
 
         gw = read_gw_main(GW_DIR / "GW_MAIN.dat")
         bc_path = gw.file_paths.get("bc_main")
@@ -58,7 +58,7 @@ class TestBCMain:
 
 class TestSpecHeadBC:
     def test_read_spec_head_bc(self):
-        from iwfm.io.readers.groundwater import read_spec_head_bc
+        from iwfm_io.readers.groundwater import read_spec_head_bc
 
         path = GW_DIR / "SpecHeadBC.dat"
         if path.exists():
@@ -68,8 +68,8 @@ class TestSpecHeadBC:
             assert len(shbc.data) == shbc.n_nodes
 
     def test_spec_head_round_trip(self, tmp_output):
-        from iwfm.io.readers.groundwater import read_spec_head_bc
-        from iwfm.io.writers.groundwater import write_spec_head_bc
+        from iwfm_io.readers.groundwater import read_spec_head_bc
+        from iwfm_io.writers.groundwater import write_spec_head_bc
 
         path = GW_DIR / "SpecHeadBC.dat"
         if path.exists():
@@ -82,7 +82,7 @@ class TestSpecHeadBC:
 
 class TestTileDrain:
     def test_read_tile_drain(self):
-        from iwfm.io.readers.groundwater import read_tile_drain
+        from iwfm_io.readers.groundwater import read_tile_drain
 
         path = GW_DIR / "TileDrain.dat"
         if path.exists():
@@ -92,8 +92,8 @@ class TestTileDrain:
             assert len(td.data) == td.n_tile_drains
 
     def test_tile_drain_round_trip(self, tmp_output):
-        from iwfm.io.readers.groundwater import read_tile_drain
-        from iwfm.io.writers.groundwater import write_tile_drain
+        from iwfm_io.readers.groundwater import read_tile_drain
+        from iwfm_io.writers.groundwater import write_tile_drain
 
         path = GW_DIR / "TileDrain.dat"
         if path.exists():
@@ -106,7 +106,7 @@ class TestTileDrain:
 
 class TestElemPump:
     def test_read_elem_pump(self):
-        from iwfm.io.readers.groundwater import read_elem_pump
+        from iwfm_io.readers.groundwater import read_elem_pump
 
         path = GW_DIR / "ElemPump.dat"
         if path.exists():
@@ -117,7 +117,7 @@ class TestElemPump:
 
 class TestSubsidence:
     def test_read_subsidence(self):
-        from iwfm.io.readers.groundwater import read_subsidence
+        from iwfm_io.readers.groundwater import read_subsidence
 
         path = GW_DIR / "Subsidence.dat"
         if path.exists():

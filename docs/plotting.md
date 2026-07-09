@@ -3,7 +3,7 @@
 58 visualization functions across 13 modules. All accept either an `IWFMModel` or `IOModelAdapter` instance and return `(fig, ax)`. Most accept an optional `save_path` parameter.
 
 ```python
-from iwfm.plots import maps, timeseries, water_balance  # etc.
+from iwfm_io.plots import maps, timeseries, water_balance  # etc.
 ```
 
 ## Maps (11 functions)

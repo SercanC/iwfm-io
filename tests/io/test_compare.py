@@ -5,7 +5,7 @@ import shutil
 import numpy as np
 import pytest
 
-from iwfm.io import (
+from iwfm_io import (
     budget_difference,
     compare_models,
     diff_model_files,

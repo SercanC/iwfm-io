@@ -14,14 +14,14 @@ needs_exes = pytest.mark.skipif(
 
 
 def test_unknown_step_raises():
-    from iwfm.run import run_step
+    from iwfm_io.run import run_step
     with pytest.raises((ValueError, OSError)):
         run_step("nosuchstep", SAMPLE_MODEL)
 
 
 @needs_exes
 def test_missing_bin_dir_raises(tmp_path):
-    from iwfm import run_preprocessor
+    from iwfm_io import run_preprocessor
     with pytest.raises(FileNotFoundError):
         run_preprocessor(SAMPLE_MODEL, bin_dir=tmp_path / "nope")
 
@@ -29,8 +29,8 @@ def test_missing_bin_dir_raises(tmp_path):
 @needs_exes
 def test_run_preprocessor_on_scenario(tmp_path):
     """Full preprocessor run on a scenario copy of the sample model."""
-    from iwfm import run_preprocessor
-    from iwfm.io import create_scenario
+    from iwfm_io import run_preprocessor
+    from iwfm_io import create_scenario
 
     scen = create_scenario(SAMPLE_MODEL, tmp_path / "scen",
                            subdirs=("Preprocessor", "Simulation", "Bin"))

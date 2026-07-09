@@ -39,7 +39,7 @@ The package resolves the DLL automatically. You can also set the `IWFM_DLL_VERSI
 
 ## 1. Reading IWFM Files (no DLL required)
 
-The `iwfm.io` subpackage reads and writes all IWFM text input files and HDF5/text output files. It returns pandas DataFrames and (optionally) geopandas GeoDataFrames.
+The `iwfm_io` subpackage reads and writes all IWFM text input files and HDF5/text output files. It returns pandas DataFrames and (optionally) geopandas GeoDataFrames.
 
 ### Open a model in one call
 
@@ -48,7 +48,7 @@ The easiest way to start: point `open_model` at the model's root folder
 finds the main input files and all HDF5 result files for you:
 
 ```python
-from iwfm.io import open_model
+from iwfm_io import open_model
 
 model = open_model(".assets/sample_model")
 
@@ -68,7 +68,7 @@ never have to guess what to pass to `budget_df()`.
 ### Read the preprocessor
 
 ```python
-from iwfm.io import read_preprocessor
+from iwfm_io import read_preprocessor
 
 pp = read_preprocessor(".assets/sample_model/Preprocessor/PreProcessor_MAIN.IN")
 
@@ -90,7 +90,7 @@ print(pp.nodes.head())
 You don't have to go through the main file — read any file directly:
 
 ```python
-from iwfm.io import read_nodes, read_elements, read_strata
+from iwfm_io import read_nodes, read_elements, read_strata
 
 nodes    = read_nodes(".assets/sample_model/Preprocessor/NodeXY.dat")
 elements = read_elements(".assets/sample_model/Preprocessor/Element.dat")
@@ -103,7 +103,7 @@ print(f"{strata.n_layers} aquifer layers")
 ### Read the simulation configuration
 
 ```python
-from iwfm.io import read_simulation
+from iwfm_io import read_simulation
 
 sim = read_simulation(".assets/sample_model/Simulation/Simulation_MAIN.IN")
 print(f"Period: {sim.sim_begin} → {sim.sim_end}")
@@ -113,7 +113,7 @@ print(f"Time step: {sim.time_step}")
 ### Read groundwater and stream files
 
 ```python
-from iwfm.io import read_gw_main, read_stream_main
+from iwfm_io import read_gw_main, read_stream_main
 
 gw = read_gw_main(".assets/sample_model/Simulation/GW/GW_MAIN.dat")
 print(f"{gw.n_hydrographs} GW hydrograph sites")
@@ -125,7 +125,7 @@ print(f"{sm.reach_params.shape[0]} stream reaches")
 ### Read HDF5 output files
 
 ```python
-from iwfm.io import read_budget_hdf, read_head_hdf
+from iwfm_io import read_budget_hdf, read_head_hdf
 
 # Groundwater budget
 gw_bud = read_budget_hdf(".assets/sample_model/Results/GW.hdf")
@@ -147,7 +147,7 @@ print(head_df.shape)  # (timesteps, nodes)
 ### Read text output files
 
 ```python
-from iwfm.io import read_hydrograph_out, read_final_state_out
+from iwfm_io import read_hydrograph_out, read_final_state_out
 
 # GW hydrograph text file
 hyd = read_hydrograph_out(".assets/sample_model/Results/GWHyd.out")
@@ -163,7 +163,7 @@ print(final.head())
 IWFM uses the format `MM/DD/YYYY_HH:MM` where `24:00` means end of day:
 
 ```python
-from iwfm.io import parse_iwfm_date, format_iwfm_date
+from iwfm_io import parse_iwfm_date, format_iwfm_date
 from datetime import datetime
 
 dt = parse_iwfm_date("09/30/1990_24:00")
@@ -178,7 +178,7 @@ print(s)   # "10/01/1990_00:00"
 Every reader has a matching writer. Read a file, modify it, write it back:
 
 ```python
-from iwfm.io import read_nodes, write_nodes
+from iwfm_io import read_nodes, write_nodes
 import tempfile, os
 
 nodes = read_nodes(".assets/sample_model/Preprocessor/NodeXY.dat")
@@ -194,7 +194,7 @@ print(f"Written to {out_path}")
 ### Validate model files
 
 ```python
-from iwfm.io import read_preprocessor, validate_preprocessor
+from iwfm_io import read_preprocessor, validate_preprocessor
 
 pp = read_preprocessor(".assets/sample_model/Preprocessor/PreProcessor_MAIN.IN")
 errors = validate_preprocessor(pp)
@@ -215,18 +215,18 @@ The `iwfm` package wraps the IWFM Fortran DLL via ctypes. All calls go through `
 ### Check available DLL versions
 
 ```python
-import iwfm
+import iwfm_io
 
-print(iwfm.list_dll_versions())
+print(iwfm_io.dll.list_dll_versions())
 # ['2015.0.1248', '2020.0.1193']
 ```
 
 ### Open a model
 
 ```python
-import iwfm
+import iwfm_io
 
-with iwfm.IWFMModel(
+with iwfm_io.dll.IWFMModel(
     preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
     simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
     is_for_inquiry=True,
@@ -250,7 +250,7 @@ with iwfm.IWFMModel(
 ### Query time-series data
 
 ```python
-with iwfm.IWFMModel(..., is_for_inquiry=True) as model:
+with iwfm_io.dll.IWFMModel(..., is_for_inquiry=True) as model:
     # GW heads at specific nodes
     dates, heads = model.get_gw_heads_at_node(
         node_id=50, layer=1,
@@ -271,9 +271,9 @@ with iwfm.IWFMModel(..., is_for_inquiry=True) as model:
 You don't need to open the full model to read budget HDF files:
 
 ```python
-import iwfm
+import iwfm_io
 
-with iwfm.IWFMBudget(".assets/sample_model/Results/GW.hdf") as bud:
+with iwfm_io.dll.IWFMBudget(".assets/sample_model/Results/GW.hdf") as bud:
     n_loc = bud.get_n_locations()
     names = bud.get_location_names()
     print(f"{n_loc} locations: {names}")
@@ -290,9 +290,9 @@ with iwfm.IWFMBudget(".assets/sample_model/Results/GW.hdf") as bud:
 ### Read zone budgets
 
 ```python
-import iwfm
+import iwfm_io
 
-with iwfm.IWFMZBudget(".assets/sample_model/Results/GW_ZBud.hdf") as zb:
+with iwfm_io.dll.IWFMZBudget(".assets/sample_model/Results/GW_ZBud.hdf") as zb:
     zone_names = zb.get_zone_names(
         zone_def_file=".assets/sample_model/ZBudget/ZoneDef_SRs.dat"
     )
@@ -312,15 +312,15 @@ with iwfm.IWFMZBudget(".assets/sample_model/Results/GW_ZBud.hdf") as zb:
 
 ```python
 # On the model
-with iwfm.IWFMModel(..., dll_version="2015.0.1248") as model:
+with iwfm_io.dll.IWFMModel(..., dll_version="2015.0.1248") as model:
     ...
 
 # On budget readers
-with iwfm.IWFMBudget("GW.hdf", dll_version="2015.0.1248") as bud:
+with iwfm_io.dll.IWFMBudget("GW.hdf", dll_version="2015.0.1248") as bud:
     ...
 
 # Or pass an explicit path
-with iwfm.IWFMModel(..., dll_path="/path/to/IWFM_C_x64.dll") as model:
+with iwfm_io.dll.IWFMModel(..., dll_path="/path/to/IWFM_C_x64.dll") as model:
     ...
 ```
 
@@ -333,7 +333,7 @@ The `iwfm/plots/` library has 58 plotting functions across 13 modules. They work
 ### Set up IOModelAdapter (no DLL)
 
 ```python
-from iwfm.io import read_preprocessor, IOModelAdapter
+from iwfm_io import read_preprocessor, IOModelAdapter
 
 pp = read_preprocessor(".assets/sample_model/Preprocessor/PreProcessor_MAIN.IN")
 
@@ -352,7 +352,7 @@ print(f"Nodes: {adapter.n_nodes}, Elements: {adapter.n_elements}")
 ### Plot the model grid
 
 ```python
-from iwfm.plots import maps
+from iwfm_io.plots import maps
 
 fig, ax = maps.plot_element_map(adapter)
 fig.savefig("grid.png", dpi=150)
@@ -368,7 +368,7 @@ fig.savefig("streams.png", dpi=150)
 ### Plot groundwater head hydrographs
 
 ```python
-from iwfm.plots import timeseries
+from iwfm_io.plots import timeseries
 
 fig, ax = timeseries.plot_gw_head_hydrographs(
     adapter,
@@ -383,7 +383,7 @@ fig.savefig("head_hydrographs.png", dpi=150)
 ### Plot a water budget
 
 ```python
-from iwfm.plots import water_balance
+from iwfm_io.plots import water_balance
 
 fig, ax = water_balance.plot_budget_sankey(adapter, budget_type="GW", location=1)
 fig.savefig("sankey.png", dpi=150)
@@ -421,7 +421,7 @@ python examples/test_plots.py
 Use `collect_budgets` to build a unified DataFrame from multiple model runs:
 
 ```python
-from iwfm.io import collect_budgets
+from iwfm_io import collect_budgets
 
 runs = {
     "baseline": "runs/baseline/Results/GW.hdf",
@@ -443,4 +443,4 @@ See `examples/06_multi_run_budgets.py` for a full example.
 - Browse the [API Reference](api-reference.md) for all public functions
 - Explore the [Plot Gallery](plotting.md) for visualization examples
 - Run `examples/01_read_inputs.py` through `06_multi_run_budgets.py` for hands-on demos
-- See `docs/TEST_PLOTS_RESULTS.md` for known DLL/inquiry-mode limitations
+- Check `CLAUDE.md` in the repo root for architecture details and conventions

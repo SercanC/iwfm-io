@@ -23,7 +23,7 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from iwfm.io import (
+from iwfm_io import (
     budget_difference,
     compare_models,
     diff_model_files,
@@ -83,7 +83,7 @@ print(f"  annual GW budget difference: {bdiff.shape}")
 
 # To map a head difference between two real runs:
 #
-#   from iwfm.plots import plot_contour_map
+#   from iwfm_io.plots import plot_contour_map
 #   diff = head_difference("runs/baseline", "runs/scenario", layer=1)
 #   plot_contour_map(open_model("runs/baseline"), diff.iloc[-1].values,
 #                    cmap="coolwarm", label="Head change (ft)",

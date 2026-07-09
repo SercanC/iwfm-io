@@ -1,4 +1,4 @@
-"""Tests for iwfm.io preprocessor readers and writers."""
+"""Tests for iwfm_io preprocessor readers and writers."""
 
 from pathlib import Path
 
@@ -10,7 +10,7 @@ from tests.io.conftest import PREPROCESSOR_DIR, SAMPLE_MODEL
 pytestmark = pytest.mark.skipif(
     not SAMPLE_MODEL.is_dir(), reason="sample model not present (.assets/sample_model)")
 
-from iwfm.io.readers.preprocessor import (
+from iwfm_io.readers.preprocessor import (
     read_elements,
     read_lake_geom,
     read_nodes,
@@ -18,7 +18,7 @@ from iwfm.io.readers.preprocessor import (
     read_strata,
     read_stream_geom,
 )
-from iwfm.io.writers.preprocessor import (
+from iwfm_io.writers.preprocessor import (
     write_elements,
     write_lake_geom,
     write_nodes,

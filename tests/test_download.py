@@ -1,8 +1,8 @@
-"""Tests for iwfm.download_dll (no network required)."""
+"""Tests for iwfm_io.dll.download_dll (no network required)."""
 
 import pytest
 
-from iwfm.download import KNOWN_DLLS, _RELEASE_URL, download_dll
+from iwfm_io.dll.download import KNOWN_DLLS, _RELEASE_URL, download_dll
 
 
 def test_unknown_version_raises_with_available_list():

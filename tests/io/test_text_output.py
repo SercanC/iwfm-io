@@ -8,7 +8,7 @@ from tests.io.conftest import RESULTS_DIR, BUDGET_DIR
 
 class TestHydrographOut:
     def test_read_gw_hydrograph_out(self):
-        from iwfm.io.readers.text_output import read_hydrograph_out
+        from iwfm_io.readers.text_output import read_hydrograph_out
 
         path = RESULTS_DIR / "GWHyd.out"
         if path.exists():
@@ -18,7 +18,7 @@ class TestHydrographOut:
             assert len(df.columns) > 1
 
     def test_read_strm_hydrograph_out(self):
-        from iwfm.io.readers.text_output import read_hydrograph_out
+        from iwfm_io.readers.text_output import read_hydrograph_out
 
         path = RESULTS_DIR / "StrmHyd.out"
         if path.exists():
@@ -27,7 +27,7 @@ class TestHydrographOut:
             assert "date" in df.columns
 
     def test_read_with_metadata(self):
-        from iwfm.io.readers.text_output import read_hydrograph_out_with_metadata
+        from iwfm_io.readers.text_output import read_hydrograph_out_with_metadata
 
         path = RESULTS_DIR / "GWHyd.out"
         if path.exists():
@@ -37,7 +37,7 @@ class TestHydrographOut:
             assert len(result["data"]) > 0
 
     def test_read_subsidence_out(self):
-        from iwfm.io.readers.text_output import read_hydrograph_out
+        from iwfm_io.readers.text_output import read_hydrograph_out
 
         path = RESULTS_DIR / "Subsidence.out"
         if path.exists():
@@ -47,7 +47,7 @@ class TestHydrographOut:
 
 class TestFlowOut:
     def test_read_boundary_flow(self):
-        from iwfm.io.readers.text_output import read_flow_out
+        from iwfm_io.readers.text_output import read_flow_out
 
         path = RESULTS_DIR / "BoundaryFlow.out"
         if path.exists():
@@ -56,7 +56,7 @@ class TestFlowOut:
             assert "date" in df.columns
 
     def test_read_tile_drain_flows(self):
-        from iwfm.io.readers.text_output import read_flow_out
+        from iwfm_io.readers.text_output import read_flow_out
 
         path = RESULTS_DIR / "TileDrainFlows.out"
         if path.exists():
@@ -66,7 +66,7 @@ class TestFlowOut:
 
 class TestHeadAllOut:
     def test_read_head_all(self):
-        from iwfm.io.readers.text_output import read_head_all_out
+        from iwfm_io.readers.text_output import read_head_all_out
 
         path = RESULTS_DIR / "GWHeadAll.out"
         if path.exists():
@@ -79,7 +79,7 @@ class TestHeadAllOut:
 
 class TestFinalState:
     def test_read_final_gw_heads(self):
-        from iwfm.io.readers.text_output import read_final_state_out
+        from iwfm_io.readers.text_output import read_final_state_out
 
         path = RESULTS_DIR / "FinalGWHeads.out"
         if path.exists():
@@ -89,7 +89,7 @@ class TestFinalState:
             assert len(df) >= 400
 
     def test_read_final_lake_elev(self):
-        from iwfm.io.readers.text_output import read_final_state_out
+        from iwfm_io.readers.text_output import read_final_state_out
 
         path = RESULTS_DIR / "FinalLakeElev.out"
         if path.exists():
@@ -99,7 +99,7 @@ class TestFinalState:
 
 class TestBudgetText:
     def test_read_gw_budget(self):
-        from iwfm.io.readers.text_output import read_budget_text
+        from iwfm_io.readers.text_output import read_budget_text
 
         path = BUDGET_DIR / "GW.bud"
         if path.exists():
@@ -111,7 +111,7 @@ class TestBudgetText:
                 assert len(df) > 0
 
     def test_read_strm_budget(self):
-        from iwfm.io.readers.text_output import read_budget_text
+        from iwfm_io.readers.text_output import read_budget_text
 
         path = BUDGET_DIR / "Strm.bud"
         if path.exists():
@@ -119,7 +119,7 @@ class TestBudgetText:
             assert len(result) > 0
 
     def test_read_rootzone_budget(self):
-        from iwfm.io.readers.text_output import read_budget_text
+        from iwfm_io.readers.text_output import read_budget_text
 
         path = BUDGET_DIR / "RootZone.bud"
         if path.exists():

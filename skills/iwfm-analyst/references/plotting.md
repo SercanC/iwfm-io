@@ -1,4 +1,4 @@
-# iwfm.plots catalog — 58 functions by user intent
+# iwfm_io.plots catalog — 58 functions by user intent
 
 Every function accepts the `open_model()` adapter (no DLL needed),
 returns `(fig, ax)`, and takes `save_path=` to write a PNG.
@@ -6,7 +6,7 @@ Gallery from a real model:
 https://github.com/SercanC/iwfm-io/blob/main/docs/GALLERY.md
 
 ```python
-from iwfm.plots import maps, timeseries, trends, seasonal, profiles, \
+from iwfm_io.plots import maps, timeseries, trends, seasonal, profiles, \
     spatial_patterns, summary, stream_analysis, water_balance, \
     animations, subsidence, supply_demand, cross_sections, connectivity
 ```

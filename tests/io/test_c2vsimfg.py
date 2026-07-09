@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def model():
-    from iwfm.io import open_model
+    from iwfm_io import open_model
     return open_model(C2VSIMFG)
 
 
@@ -50,7 +50,7 @@ class TestOpenModel:
 
 class TestPreprocessor:
     def test_lakes_none_when_absent(self):
-        from iwfm.io import read_preprocessor
+        from iwfm_io import read_preprocessor
         pp = read_preprocessor(C2VSIMFG / "Preprocessor" / "C2VSimFG_Preprocessor.in")
         assert pp.lakes is None
         assert len(pp.nodes) == 30179
@@ -60,7 +60,7 @@ class TestPreprocessor:
 
 class TestSimulationMain:
     def test_read(self):
-        from iwfm.io.readers.simulation import read_simulation_main
+        from iwfm_io.readers.simulation import read_simulation_main
         sm = read_simulation_main(C2VSIMFG / "Simulation" / "C2VSimFG.in")
         # 11-entry file list: no crop_coeff in 2024.x mains
         assert "crop_coeff" not in sm.file_paths
@@ -74,7 +74,7 @@ class TestSimulationMain:
 
 class TestGroundwater:
     def test_gw_main(self):
-        from iwfm.io.readers.groundwater import read_gw_main
+        from iwfm_io.readers.groundwater import read_gw_main
         gw = read_gw_main(
             C2VSIMFG / "Simulation" / "Groundwater" / "C2VSimFG_Groundwater1974.dat")
         assert gw.n_hydrographs == 54544
@@ -88,7 +88,7 @@ class TestGroundwater:
         assert gw.face_flow_out_file is None
 
     def test_subsidence(self):
-        from iwfm.io.readers.groundwater import read_subsidence
+        from iwfm_io.readers.groundwater import read_subsidence
         sb = read_subsidence(
             C2VSIMFG / "Simulation" / "Groundwater" / "C2VSimFG_Subsidence.dat")
         assert sb.n_hydrographs == 608
@@ -99,7 +99,7 @@ class TestGroundwater:
 
 class TestStreams:
     def test_stream_main(self):
-        from iwfm.io.readers.stream import read_stream_main
+        from iwfm_io.readers.stream import read_stream_main
         st = read_stream_main(
             C2VSIMFG / "Simulation" / "Streams" / "C2VSimFG_Streams.dat")
         assert len(st.hydrograph_specs) == 63
@@ -110,7 +110,7 @@ class TestStreams:
         assert st.config["intrctype"] == 1
 
     def test_stream_inflow(self):
-        from iwfm.io.readers.stream import read_stream_inflow
+        from iwfm_io.readers.stream import read_stream_inflow
         si = read_stream_inflow(
             C2VSIMFG / "Simulation" / "Streams" / "C2VSimFG_StreamInflow.dat")
         # Single-token assignment lines: column ids are implicit
@@ -203,7 +203,7 @@ class TestAdapterDllFree:
 
 class TestResults:
     def test_budget_text(self):
-        from iwfm.io.readers.text_output import read_budget_text
+        from iwfm_io.readers.text_output import read_budget_text
         b = read_budget_text(C2VSIMFG / "Results" / "C2VSimFG_GW_Budget.bud")
         assert len(b) == 22  # 21 subregions + entire model
         first = next(iter(b.values()))
@@ -220,7 +220,7 @@ class TestResultsHDF:
     def gw_budget(self):
         if not self.HDF.exists():
             pytest.skip("budget HDFs absent — run the simulation to create them")
-        from iwfm.io.readers.hdf5 import read_budget_hdf
+        from iwfm_io.readers.hdf5 import read_budget_hdf
         return read_budget_hdf(self.HDF)
 
     def test_monthly_index_uses_calendar_months(self, gw_budget):
@@ -234,7 +234,7 @@ class TestResultsHDF:
         # Regression: column labels were shifted one left vs the data
         import numpy as np
         import pandas as pd
-        from iwfm.io.readers.text_output import read_budget_text
+        from iwfm_io.readers.text_output import read_budget_text
         txt = read_budget_text(C2VSIMFG / "Results" / "C2VSimFG_GW_Budget.bud")
         txt_sr1 = txt[next(k for k in txt if "Subregion 1 " in k)]
         hdf_sr1 = gw_budget["data"]["Subregion 1 (SR1)"]

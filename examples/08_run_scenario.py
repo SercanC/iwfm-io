@@ -26,8 +26,8 @@ if os.name != "nt" or not (SAMPLE_MODEL / "Bin").is_dir():
     raise SystemExit("Running models requires Windows and the IWFM "
                      "executables in the sample model's Bin/ folder.")
 
-from iwfm import run_model
-from iwfm.io import compare_models, create_scenario, open_model, set_keyed_value
+from iwfm_io import run_model
+from iwfm_io import compare_models, create_scenario, open_model, set_keyed_value
 
 
 # ── 1. Create the scenario ────────────────────────────────────────────────────

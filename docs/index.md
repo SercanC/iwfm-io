@@ -24,7 +24,7 @@ Python file I/O, DLL wrapper, and visualization library for the **Integrated Wat
 │  iwfm              DLL wrapper (Windows x64 only)    │
 │                    IWFMModel · IWFMBudget · IWFMZBud │
 ├──────────────────────────────────────────────────────┤
-│  iwfm.io           Pure-Python file I/O              │
+│  iwfm_io           Pure-Python file I/O              │
 │                    Readers · Writers · IOModelAdapter │
 │                    (cross-platform, no DLL needed)    │
 └──────────────────────────────────────────────────────┘
@@ -32,8 +32,8 @@ Python file I/O, DLL wrapper, and visualization library for the **Integrated Wat
 
 **Choose your path:**
 
-- **Just need to read/write IWFM files?** Use `iwfm.io` — works on any OS, no DLL required.
-- **Need live model queries?** Use `iwfm.IWFMModel` — requires Windows + the IWFM DLL.
+- **Just need to read/write IWFM files?** Use `iwfm_io` — works on any OS, no DLL required.
+- **Need live model queries?** Use `iwfm_io.dll.IWFMModel` — requires Windows + the IWFM DLL.
 - **Want visualizations?** The plot library works with either `IWFMModel` or `IOModelAdapter`.
 
 ## Examples
@@ -42,7 +42,7 @@ Runnable scripts in the `examples/` directory:
 
 | File | Requires | What it shows |
 |------|----------|---------------|
-| `01_read_inputs.py` | .assets/sample_model | All `iwfm.io` input file readers |
+| `01_read_inputs.py` | .assets/sample_model | All `iwfm_io` input file readers |
 | `02_read_outputs.py` | .assets/sample_model/Results | HDF5 and text output readers |
 | `03_roundtrip.py` | .assets/sample_model | Read → modify → write round-trips |
 | `04_dll_wrapper.py` | Windows + DLL | `IWFMModel`, `IWFMBudget`, `IWFMZBudget` |
