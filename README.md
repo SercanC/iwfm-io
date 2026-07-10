@@ -45,7 +45,7 @@ Python file I/O, DLL wrapper, and visualization library for the Integrated Water
   iwfm_io.dll.download_dll("2025.0.1747")   # → ~/.iwfm/dlls/2025.0.1747/IWFM_C_x64.dll
   ```
 
-  Other builds ship with IWFM from the [DWR IWFM site](https://water.ca.gov/Library/Modeling-and-Analysis/Modeling-Platforms/Integrated-Water-Flow-Model) — place them in `dlls/<version>/` or `~/.iwfm/dlls/<version>/` and select with `load_dll(version=...)` / `IWFMModel(..., dll_version=...)`. The DLL is version-sensitive: match it to your model's IWFM version.
+  Published builds (sha256-verified): `2025.0.1747`, `2025.0.1688`, `2024.2.1594` (C2VSimFG v1.5), `2015.3.1443`, `2015.1.1273`, `2015.0.1403` — all official DWR builds from the [CNRA Open Data release archive](https://data.cnra.ca.gov/dataset/iwfm-integrated-water-flow-model). The DLL is version-sensitive: match it to your model's IWFM version. Other builds ship with IWFM from the [DWR IWFM site](https://water.ca.gov/Library/Modeling-and-Analysis/Modeling-Platforms/Integrated-Water-Flow-Model) — place them in `dlls/<version>/` or `~/.iwfm/dlls/<version>/` and select with `load_dll(version=...)` / `IWFMModel(..., dll_version=...)`.
 
 ### Install
 

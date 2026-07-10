@@ -27,9 +27,23 @@ _RELEASE_URL = ("https://github.com/SercanC/iwfm-io/releases/download/"
                 "dll-{version}/IWFM_C_x64-{version}.zip")
 
 #: Published DLL builds and the sha256 of their release zip.
+#: All are official DWR builds from the CNRA Open Data release archive
+#: (https://data.cnra.ca.gov/dataset/iwfm-integrated-water-flow-model),
+#: repackaged unmodified. The 2015-line DLLs ship from DWR as
+#: IWFM2015_C_x64.dll and are renamed to the canonical IWFM_C_x64.dll.
 KNOWN_DLLS = {
     "2025.0.1747":
         "c59c2f2e6aac17fec2920e229db5924e858c2b648b18a2ca43c1fbae24709915",
+    "2025.0.1688":
+        "1158af91c32aa1b92a9f727aa926be498f202cadf6e4bdc74b64f0f201daeb41",
+    "2024.2.1594":
+        "dfa00a85fb2633335394b5add60a02a5d8210e985d6125432dec0bf04749750c",
+    "2015.3.1443":
+        "f699023cbcd2573e9dbf7b6c052259b309e04a32b4207ab895082652cadc4846",
+    "2015.1.1273":
+        "2469a359b9da0889e0e7dde60c9e26d749cae70ec3ba6f5e2d82ef54f9d3a85e",
+    "2015.0.1403":
+        "a25825fd35935782cbb97d5b50393e870424699ae3d66d92361c8e10fadc0176",
 }
 
 DEFAULT_VERSION = "2025.0.1747"

@@ -46,7 +46,10 @@ def _safe_register(dll, name, argtypes):
 # Internal helpers for version-based DLL discovery
 # ---------------------------------------------------------------------------
 
-_DLL_NAMES = ("IWFM_C_x64.dll", "IWFM_C_x64_D.dll")
+# Canonical names first; the 2015 line ships from DWR as
+# IWFM2015_C_x64.dll, accepted for manually placed copies.
+_DLL_NAMES = ("IWFM_C_x64.dll", "IWFM_C_x64_D.dll",
+              "IWFM2015_C_x64.dll", "IWFM2015_C_x64_D.dll")
 # Repo root: this file lives at <root>/iwfm_io/dll/_dll.py
 _REPO_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
