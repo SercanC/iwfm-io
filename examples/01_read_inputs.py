@@ -88,7 +88,7 @@ def demo_simulation():
     print("\n=== Simulation main ===")
     sim = read_simulation(SIM_DIR / "Simulation_MAIN.IN")
     print(f"  Period:    {sim.sim_begin}  →  {sim.sim_end}")
-    print(f"  Time step: {sim.time_step}")
+    print(f"  Time step: {sim.time_unit}")
     print(f"  File refs: {len(sim.file_paths)}")
     return sim
 
@@ -101,10 +101,12 @@ def demo_groundwater():
     print("\n=== Groundwater files ===")
 
     gw = read_gw_main(GW_DIR / "GW_MAIN.dat")
-    print(f"  GW main:       {gw.n_hydrographs} hydrograph sites")
+    print(f"  GW main:       {gw.n_hydrographs} hydrograph sites, "
+          f"NGROUP={gw.ngroup}, initial heads for "
+          f"{len(gw.initial_heads)} nodes")
 
     bc = read_bc_main(GW_DIR / "BC_MAIN.dat")
-    print(f"  BC main:       {bc.n_nodes} boundary nodes")
+    print(f"  BC main:       {bc.n_bc_hydrographs} boundary flow hydrographs")
 
     td = read_tile_drain(GW_DIR / "TileDrain.dat")
     print(f"  Tile drains:   {len(td.data)} nodes  "
@@ -123,10 +125,11 @@ def demo_stream():
           f"{sm.config['n_hydrographs']} hydrograph sites")
 
     divers = read_diver_specs(STRM_DIR / "DiverSpecs.dat")
-    print(f"  Diver specs:   loaded (version={divers.header.version})")
+    print(f"  Diver specs:   {divers.n_diversions} diversions, "
+          f"{len(divers.recharge_zones_df)} recharge-zone rows")
 
     bypass = read_bypass_specs(STRM_DIR / "BypassSpecs.dat")
-    n = len(bypass.bypass_data["bypass_id"]) if bypass.bypass_data else 0
+    n = len(bypass.bypass_data) if bypass.bypass_data is not None else 0
     print(f"  Bypass specs:  {n} bypasses")
 
 
@@ -137,13 +140,19 @@ def demo_timeseries():
 
     print("\n=== Time-series inputs ===")
 
-    precip = read_precip(SIM_DIR / "Precip.dat")
-    print(f"  Precip: {len(precip.data)} timesteps × {precip.spec.n_columns} cols  "
-          f"({precip.data.index[0].date()} → {precip.data.index[-1].date()})")
-    print(f"  First 3 rows:\n{precip.data.head(3)}")
+    def describe(name, ts):
+        if ts.data is not None:
+            print(f"  {name}: {len(ts.data)} timesteps × "
+                  f"{ts.spec.n_columns} cols (inline data)")
+        else:
+            # DSS input: the file lists HEC-DSS pathnames instead
+            print(f"  {name}: {ts.spec.n_columns} cols from DSS file "
+                  f"{ts.spec.dss_file!r}")
+            for col, pathname in ts.dss_pathnames[:2]:
+                print(f"    col {col}: {pathname}")
 
-    et = read_et(SIM_DIR / "ET.dat")
-    print(f"\n  ET:     {len(et.data)} timesteps × {et.spec.n_columns} cols")
+    describe("Precip", read_precip(SIM_DIR / "Precip.dat"))
+    describe("ET    ", read_et(SIM_DIR / "ET.dat"))
 
 
 # ── 7. IOModelAdapter ─────────────────────────────────────────────────────────
@@ -201,6 +210,8 @@ def demo_adapter(pp):
 
 
 if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding="utf-8")  # arrows in redirected output
     check_sample_model()
     demo_dates()
     pp = demo_preprocessor()

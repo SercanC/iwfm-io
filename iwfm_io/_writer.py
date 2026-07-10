@@ -101,14 +101,19 @@ class IWFMFileWriter:
     ) -> None:
         """Write a file-path keyed value.
 
-        If *path* is None, writes a blank value (optional file).
+        If *path* is None, writes a blank value (optional file).  When
+        *base_dir* is given, the path is written relative to it — pass
+        the simulation working directory (the folder of the simulation
+        main file), which is what IWFM resolves referenced paths
+        against.  ``..`` traversals are supported (``..\\Results\\...``).
         """
         if path is None:
             val_str = ""
         elif base_dir is not None:
+            import os
             try:
-                val_str = str(Path(path).relative_to(Path(base_dir)))
-            except ValueError:
+                val_str = os.path.relpath(path, base_dir)
+            except ValueError:  # e.g. different drive on Windows
                 val_str = str(path)
         else:
             val_str = str(path)

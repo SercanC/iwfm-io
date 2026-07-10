@@ -110,7 +110,7 @@ def validate_stratigraphy(strata_file: Any, node_file: Any | None = None) -> lis
 
     Checks:
     - All node IDs in stratigraphy exist in node file (if provided).
-    - Layer elevations decrease monotonically for each node.
+    - Aquitard/aquifer thicknesses are non-negative.
 
     Parameters
     ----------
@@ -139,19 +139,17 @@ def validate_stratigraphy(strata_file: Any, node_file: Any | None = None) -> lis
                 f"{bad_nodes['node_id'].tolist()[:10]}"
             )
 
-    # Check monotonic layer elevations (elevation should decrease)
+    # The per-layer columns hold aquitard/aquifer THICKNESSES (layer
+    # bottoms = elevation minus cumulative thickness), so the
+    # structural requirement is that they are non-negative.
     layer_cols = [c for c in df.columns if c not in ("node_id", "elevation")]
-    if "elevation" in df.columns and layer_cols:
-        all_elev_cols = ["elevation"] + layer_cols
-        for _, row in df.iterrows():
-            elevs = [row[c] for c in all_elev_cols if c in row.index]
-            for i in range(1, len(elevs)):
-                if elevs[i] > elevs[i - 1]:
-                    errors.append(
-                        f"Node {row.get('node_id', '?')}: layer elevations "
-                        f"not monotonically decreasing at index {i}"
-                    )
-                    break
+    for col in layer_cols:
+        bad = df[df[col] < 0]
+        for node_id in bad["node_id"].tolist():
+            errors.append(
+                f"Node {int(node_id)}: negative thickness in column "
+                f"'{col}'"
+            )
 
     return errors
 

@@ -96,6 +96,128 @@ class TestGroundwater:
         # Trailing "/ comment" stripped from hydrograph names
         assert sb.hydrographs.iloc[0]["name"] == "InSAR01"
 
+    def test_gw_main_parameter_tail(self):
+        from iwfm_io.readers.groundwater import read_gw_main
+        gw = read_gw_main(
+            C2VSIMFG / "Simulation" / "Groundwater" / "C2VSimFG_Groundwater1974.dat")
+        # NGROUP=0: per-node table, 30179 nodes x 4 layers, long format
+        assert gw.ngroup == 0
+        assert len(gw.aquifer_params) == 30179 * 4
+        assert gw.aquifer_params["node_id"].nunique() == 30179
+        assert set(gw.aquifer_params["layer"]) == {1, 2, 3, 4}
+        # Kh anomaly overrides
+        assert gw.anomaly_nebk == 71
+        assert len(gw.kh_anomalies) == 71
+        assert gw.kh_anomalies["element_id"].iloc[0] == 32299
+        # This format variant has no return-flow section
+        assert gw.iflagrf is None
+        # Initial heads at every node
+        assert len(gw.initial_heads) == 30179
+        assert gw.initial_heads["head_layer_1"].iloc[0] == pytest.approx(480.47)
+
+    def test_subsidence_parameter_tail(self):
+        from iwfm_io.readers.groundwater import read_subsidence
+        sb = read_subsidence(
+            C2VSIMFG / "Simulation" / "Groundwater" / "C2VSimFG_Subsidence.dat")
+        assert sb.ngroup == 0
+        assert len(sb.subsidence_params) == 30179 * 4
+        assert sb.subsidence_params["hc"].iloc[0] == pytest.approx(99999.0)
+
+    def test_well_spec_pump_config(self):
+        from iwfm_io.readers.groundwater import read_well_spec
+        ws = read_well_spec(
+            C2VSIMFG / "Simulation" / "Groundwater" / "C2VSimFG_WellSpec.dat")
+        assert ws.n_wells == 937
+        assert len(ws.pump_config) == 937
+        # icolwl points at a column of the time-series pumping file
+        assert ws.pump_config["icolwl"].iloc[0] == 43
+        assert ws.n_groups == 44
+        df = ws.element_groups_df
+        assert len(df) == 3871
+        assert list(df.columns) == ["group_id", "element_id"]
+
+    def test_constrained_head_bc(self):
+        from iwfm_io.readers.groundwater import read_constrained_head_bc
+        cb = read_constrained_head_bc(
+            C2VSIMFG / "Simulation" / "Groundwater" / "C2VSimFG_ConstrainedHeadBC.dat")
+        assert cb.n_nodes == 109
+        assert len(cb.data) == 109
+        assert cb.data["node_id"].iloc[0] == 2767
+        assert cb.data["name"].iloc[0] == "Black Butte Lake"
+
+
+class TestMiscComponents:
+    def test_unsatzone(self):
+        from iwfm_io.readers.misc import read_unsatzone
+        uz = read_unsatzone(C2VSIMFG / "Simulation" / "C2VSimFG_Unsat.dat")
+        assert uz.ngroup == 0
+        assert len(uz.element_params) == 32537 * 2
+        assert len(uz.initial_moisture) == 32537
+
+    def test_small_watersheds(self):
+        from iwfm_io.readers.misc import read_swshed
+        sw = read_swshed(
+            C2VSIMFG / "Simulation" / "SmallWatersheds" / "C2VSimFG_SWatersheds.dat")
+        assert sw.n_watersheds == 957
+        assert len(sw.watershed_data) == 957
+        assert len(sw.watershed_nodes) == 12755
+        assert len(sw.rootzone_params) == 957
+        assert len(sw.aquifer_params) == 957
+        assert len(sw.initial_conditions) == 957
+
+
+class TestRootZoneComponents:
+    def test_rootzone_main_v411(self):
+        from iwfm_io.readers.rootzone import read_rootzone_main
+        rz = read_rootzone_main(
+            C2VSIMFG / "Simulation" / "RootZone" / "C2VSimFG_RootZone.dat")
+        # v4.11: FNSMFL instead of ARSCLFL/DESTFL, inline TYPDEST/DEST
+        assert rz.file_paths["final_moisture"].endswith(
+            "C2VSimFG_RZ_FinalCond.out")
+        assert "surface_flow_dest" not in rz.file_paths
+        assert len(rz.element_params) == 32537
+        assert "typdest" in rz.element_params.columns
+        assert rz.element_params["dest"].iloc[0] == 2711
+
+    def test_nonponded_crop(self):
+        from iwfm_io.readers.rootzone import read_nonponded_ag_main
+        np_ = read_nonponded_ag_main(
+            C2VSIMFG / "Simulation" / "RootZone" / "C2VSimFG_NonPondedCrop.dat")
+        assert np_.n_crops == 20
+        assert np_.crop_codes[0] == "GR" and np_.crop_codes[-1] == "ID"
+        assert len(np_.curve_numbers) == 32537
+        assert len(np_.et_columns) == 32537
+        # Supply requirement row is padded with extra zeros in this
+        # file; extra tokens are ignored like a Fortran list read
+        assert len(np_.supply_req_columns) == 1
+        assert len(np_.irig_period_columns) == 32537
+        assert len(np_.return_flow_columns) == 32537
+        assert np_.min_perc_columns is None  # DPFL blank
+        assert len(np_.initial_conditions) == 32537
+
+    def test_ponded_crop(self):
+        from iwfm_io.readers.rootzone import read_ponded_ag_main
+        pa = read_ponded_ag_main(
+            C2VSIMFG / "Simulation" / "RootZone" / "C2VSimFG_PondedCrop.dat")
+        assert pa.n_budget_crops == 5
+        assert len(pa.curve_numbers) == 32537
+        assert len(pa.initial_conditions) == 32537
+
+    def test_urban(self):
+        from iwfm_io.readers.rootzone import read_urban_main
+        ur = read_urban_main(
+            C2VSIMFG / "Simulation" / "RootZone" / "C2VSimFG_Urban.dat")
+        assert len(ur.element_params) == 32537
+        assert ur.element_params["perv_fraction"].iloc[0] == pytest.approx(0.62)
+
+    def test_native_veg(self):
+        from iwfm_io.readers.rootzone import read_native_veg_main
+        nv = read_native_veg_main(
+            C2VSIMFG / "Simulation" / "RootZone" / "C2VSimFG_NativeVeg.dat")
+        assert nv.root_depth_native == pytest.approx(4.0)
+        assert nv.root_depth_riparian == pytest.approx(5.0)
+        assert len(nv.element_params) == 32537
+
 
 class TestStreams:
     def test_stream_main(self):
@@ -108,6 +230,10 @@ class TestStreams:
         assert len(st.reach_params) == 4634
         assert "col_5" in st.reach_params.columns
         assert st.config["intrctype"] == 1
+        # Stream evaporation table: one row per stream node with
+        # lookup columns into the ET file and STARFL
+        assert len(st.evaporation) == 4634
+        assert st.evaporation["icetst"].iloc[0] == 756
 
     def test_stream_inflow(self):
         from iwfm_io.readers.stream import read_stream_inflow

@@ -32,12 +32,11 @@ def write_stream_main(
     sm : StreamMain
     path : str or Path
     base_dir : str or Path, optional
-        Base directory for relativising file paths.  Defaults to the
-        directory containing *path*.
+        Base directory for relativising file paths.  IWFM resolves the
+        referenced paths against the simulation working directory (the
+        folder of the simulation main file), so pass that folder here.
+        When omitted, absolute paths are written — always valid.
     """
-    if base_dir is None:
-        base_dir = Path(path).parent
-
     w = IWFMFileWriter(path)
     w.write_header(sm.header)
 
@@ -103,6 +102,14 @@ def write_stream_main(
     # ---- Stream evaporation STARFL ----
     w.write_keyed_path(cfg.get("starfl"), "STARFL", base_dir=base_dir)
 
+    # ---- Stream evaporation node table ----
+    if sm.evaporation is not None and len(sm.evaporation) > 0:
+        for _, row in sm.evaporation.iterrows():
+            w.write_data_line(
+                [int(row["stream_node"]), int(row["icetst"]),
+                 int(row["icarst"])],
+                widths=[10, 8, 8])
+
     w.flush()
 
 
@@ -137,21 +144,61 @@ def write_stream_inflow(sf: StreamInflowFile, path: str | Path) -> None:
 def write_diver_specs(ds: DiverSpecsFile, path: str | Path) -> None:
     """Write an IWFM diversion specification file.
 
-    The body beyond the ``NRDV`` header line is written back from the
-    raw lines stored during reading, preserving exact formatting.
+    The per-diversion table, delivery element groups, and recharge
+    zones are regenerated from the parsed data.
 
     Parameters
     ----------
     ds : DiverSpecsFile
     path : str or Path
     """
+    from iwfm_io.writers._param_blocks import fmt_num, write_element_groups
+
     w = IWFMFileWriter(path)
     w.write_header(ds.header)
 
     w.write_keyed_value(ds.n_diversions, "NRDV")
 
-    for line in ds.raw_data:
-        w.write_raw(line)
+    if ds.data is None and ds.n_diversions > 0:
+        raise ValueError(
+            "DiverSpecsFile.data was not parsed — cannot regenerate the "
+            "diversion table")
+
+    if ds.data is not None:
+        for _, row in ds.data.iterrows():
+            tokens = [
+                int(row["diversion_id"]), int(row["export_node"]),
+                int(row["max_col"]), fmt_num(row["max_frac"]),
+                int(row["recov_loss_col"]), fmt_num(row["recov_loss_frac"]),
+                int(row["nonrecov_loss_col"]),
+                fmt_num(row["nonrecov_loss_frac"]),
+            ]
+            if row.get("spill_col") is not None and not pd.isna(
+                    row.get("spill_col")):
+                tokens += [int(row["spill_col"]), fmt_num(row["spill_frac"])]
+            tokens += [
+                int(row["dest_type"]), int(row["dest_id"]),
+                int(row["delivery_col"]), fmt_num(row["delivery_frac"]),
+                int(row["irig_frac_col"]), int(row["adjust_col"]),
+            ]
+            line = "".join(str(t).rjust(wd) for t, wd in zip(
+                tokens, [8] + [10] * (len(tokens) - 1)))
+            name = row.get("name") or ""
+            if name:
+                line += f"    /{name}"
+            w.write_raw(line)
+
+    w.write_comment("C  Delivery Element Groups")
+    w.write_keyed_value(ds.n_groups, "NGRP")
+    write_element_groups(w, ds.delivery_groups)
+
+    w.write_comment("C  Recharge Zone for Each Diversion")
+    write_element_groups(w, ds.recharge_zones, with_fractions=True)
+
+    # Spill locations exist only in older stream-package formats
+    if ds.spill_locations:
+        w.write_comment("C  Diversion Spill Locations")
+        write_element_groups(w, ds.spill_locations, with_fractions=True)
 
     w.flush()
 

@@ -24,6 +24,32 @@ from iwfm_io._tokens import (
 from iwfm_io.models.base import FileHeader, TimeSeriesSpec
 
 
+def resolve_child_path(value: str, base_dir: str | Path) -> str:
+    """Resolve a child-file reference from an IWFM input file.
+
+    IWFM resolves referenced paths against the simulation working
+    directory, which for component mains in a subfolder is the parent
+    of the file's own folder — but a file opened standalone can't know
+    the working directory, so candidates are ranked by evidence:
+
+    1. the candidate that exists as a file (inputs),
+    2. the candidate whose parent directory exists (outputs that the
+       run has not created yet, e.g. ``..\\Results\\*.hdf`` in a fresh
+       scenario copy),
+    3. the file's own folder as a last resort.
+    """
+    rel = value.replace("\\", "/")
+    base = Path(base_dir)
+    candidates = [base / rel, base.parent / rel]
+    for cand in candidates:
+        if cand.exists():
+            return str(cand)
+    for cand in candidates:
+        if cand.parent.exists():
+            return str(cand)
+    return str(candidates[0])
+
+
 class IWFMFileReader:
     """Sequential reader for IWFM text files.
 
@@ -161,19 +187,9 @@ class IWFMFileReader:
         value_str, keyword = self.read_keyed_value()
         if not value_str or value_str == "*":
             return None, keyword
-        # Normalise backslash to forward slash
-        value_str = value_str.replace("\\", "/")
         if base_dir is not None:
-            base = Path(base_dir)
-            resolved = base / value_str
-            # IWFM resolves child-file paths against the simulation
-            # working directory; for component mains in a subfolder
-            # (e.g. Simulation/Groundwater/GW_MAIN) that is the parent
-            # of this file's own folder. Prefer whichever exists.
-            if not resolved.exists() and (base.parent / value_str).exists():
-                resolved = base.parent / value_str
-            return str(resolved), keyword
-        return value_str, keyword
+            return resolve_child_path(value_str, base_dir), keyword
+        return value_str.replace("\\", "/"), keyword
 
     # ------------------------------------------------------------------
     # Tabular data reading

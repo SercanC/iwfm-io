@@ -201,8 +201,29 @@ def read_stream_main(path: str | Path) -> StreamMain:
     starfl, _ = reader.read_keyed_path(base_dir)
     config["starfl"] = starfl
 
-    # Remaining lines (stream evaporation node table) are not parsed;
-    # they follow after STARFL and only matter when STARFL is non-blank.
+    # ---- Stream evaporation node table (blank when not simulated) ----
+    # IR (stream node), ICETST (column in the ET file; 0 = no
+    # evaporation), ICARST (column in STARFL; 0 = computed from wetted
+    # perimeter x stream length).
+    evap_rows: list[dict] = []
+    while not reader.eof:
+        line = reader.peek_data_line()
+        if line is None:
+            break
+        tokens = tokenize_data_line(line)
+        if len(tokens) < 3:
+            break
+        try:
+            row = {
+                "stream_node": int(float(tokens[0])),
+                "icetst": int(float(tokens[1])),
+                "icarst": int(float(tokens[2])),
+            }
+        except ValueError:
+            break
+        reader.next_data_line()
+        evap_rows.append(row)
+    evaporation = pd.DataFrame(evap_rows) if evap_rows else None
 
     return StreamMain(
         header=header,
@@ -211,6 +232,7 @@ def read_stream_main(path: str | Path) -> StreamMain:
         hydrograph_specs=hydrograph_specs,
         node_budget_nodes=node_budget_nodes,
         reach_params=reach_params if reach_rows else None,
+        evaporation=evaporation,
     )
 
 
@@ -269,10 +291,8 @@ def read_stream_inflow(path: str | Path) -> StreamInflowFile:
 def read_diver_specs(path: str | Path) -> DiverSpecsFile:
     """Read an IWFM diversion specification file (e.g. ``DiverSpecs.dat``).
 
-    The diversion spec format is complex (nested element groups, recharge
-    zones, spill locations) and varies non-trivially with model
-    configuration.  Only the ``NRDV`` header line is parsed; all remaining
-    data lines are stored verbatim for lossless round-trip writing.
+    Parses the per-diversion table, the delivery element groups, and
+    the per-diversion recharge zones.
 
     Parameters
     ----------
@@ -298,6 +318,7 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
     # the 6-column destination tail are read at fixed offsets and the
     # spill pair by column count.
     # TYPDSTDL: 0=outside, 2=element, 4=subregion, 6=element group.
+    import re
     from iwfm_io._tokens import is_comment
     rows = []
     for line in raw_data:
@@ -306,8 +327,15 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
         toks = tokenize_data_line(line)
         if len(toks) < 3:
             continue
-        name = toks[-1] if not _is_number(toks[-1]) else ""
-        nums = toks[:-1] if name else toks
+        # The name rides either in a trailing "/ name" comment or as a
+        # bare trailing token
+        m = re.search(r"\s/(.+)$", line)
+        if m:
+            name = m.group(1).strip().lstrip("/").strip()
+            nums = toks
+        else:
+            name = toks[-1] if not _is_number(toks[-1]) else ""
+            nums = toks[:-1] if name else toks
         try:
             row = {
                 "diversion_id": int(float(nums[0])),
@@ -356,6 +384,7 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
             n_groups = int(value)
             ngrp_idx = i
             break
+    spill_locations: list = []
     if ngrp_idx is not None:
         rest = raw_data[ngrp_idx + 1:]
         used = 0
@@ -366,20 +395,29 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
                 delivery_groups, used = [], 0
         # Recharge zones follow, one per diversion, with an element
         # fraction after each element id.
+        rz_used = 0
         try:
-            recharge_zones, _ = parse_element_groups(
+            recharge_zones, rz_used = parse_element_groups(
                 rest[used:], n_diversions, with_fractions=True)
         except ValueError:
             recharge_zones = []
+        # Older stream-package formats (the ones whose diversion rows
+        # carry the ICOLSL/FRACSL spill pair) end with a spill-location
+        # section: ID NSPILL ISPILL FSPILL per diversion.
+        try:
+            spill_locations, _ = parse_element_groups(
+                rest[used + rz_used:], n_diversions, with_fractions=True)
+        except ValueError:
+            spill_locations = []
 
     return DiverSpecsFile(
         header=header,
         n_diversions=n_diversions,
-        raw_data=raw_data,
         data=data,
         n_groups=n_groups,
         delivery_groups=delivery_groups,
         recharge_zones=recharge_zones,
+        spill_locations=spill_locations,
     )
 
 

@@ -139,10 +139,11 @@ def demo_hydrograph_out():
 
     df = read_hydrograph_out(path)
     print(f"  Shape:      {df.shape}")
-    print(f"  Date range: {df.index[0]}  →  {df.index[-1]}")
+    print(f"  Date range: {df['date'].iloc[0]}  →  {df['date'].iloc[-1]}")
     print(df.head(3).to_string())
 
-    df2, meta = read_hydrograph_out_with_metadata(path)
+    result = read_hydrograph_out_with_metadata(path)
+    meta = result.get("metadata")
     if meta:
         print(f"\n  Metadata keys: {list(meta.keys())}")
 
@@ -197,6 +198,8 @@ def demo_flow_out():
 
 
 if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding="utf-8")  # arrows in redirected output
     check_results()
     demo_budget_hdf()
     demo_head_hdf()

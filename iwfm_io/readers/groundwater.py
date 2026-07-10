@@ -14,12 +14,20 @@ import pandas as pd
 from iwfm_io._parser import IWFMFileReader
 from iwfm_io._tokens import split_keyed_line, tokenize_data_line
 from iwfm_io.models.base import FileHeader, TimeSeriesSpec
+from iwfm_io.readers._param_blocks import (
+    LineCursor,
+    parse_node_layer_table,
+    parse_param_block,
+)
 from iwfm_io.models.groundwater import (
     BCMain,
     BoundaryTSFile,
+    ConstrainedHeadBCFile,
     ElemPumpFile,
+    GeneralHeadBCFile,
     GWMain,
     PumpMain,
+    SpecifiedFlowBCFile,
     SpecifiedHeadFile,
     SubsidenceFile,
     TileDrainFile,
@@ -192,14 +200,8 @@ def read_gw_main(
     def _resolve(value: str) -> str | None:
         if not value or value == "*":
             return None
-        rel = value.replace("\\", "/")
-        resolved = base_dir / rel
-        # IWFM resolves child paths against the simulation working
-        # directory (the parent folder when this main file lives in a
-        # component subfolder) — prefer whichever candidate exists.
-        if not resolved.exists() and (base_dir.parent / rel).exists():
-            resolved = base_dir.parent / rel
-        return str(resolved)
+        from iwfm_io._parser import resolve_child_path
+        return resolve_child_path(value, base_dir)
 
     # Keyed header block, identified by keyword rather than position:
     # real-world files comment out optional entries (e.g. C2VSimFG has no
@@ -288,8 +290,8 @@ def read_gw_main(
     face_flow_cols = ["id", "layer", "node_a", "node_b", "name"]
     face_flows = _read_hydrograph_table(reader, n_face_flows, face_flow_cols)
 
-    # Aquifer parameter section: capture everything to EOF verbatim
-    aquifer_param_raw = reader.skip_to_end()
+    # Aquifer parameter section: fully parsed into DataFrames
+    tail = _parse_gw_param_tail(reader.skip_to_end())
 
     return GWMain(
         header=header,
@@ -302,8 +304,111 @@ def read_gw_main(
         n_face_flows=n_face_flows,
         face_flow_out_file=face_flow_out_file,
         face_flows=face_flows,
-        aquifer_param_raw=aquifer_param_raw,
+        **tail,
     )
+
+
+def _parse_gw_param_tail(raw_lines: list[str]) -> dict:
+    """Parse the GW main tail: aquifer parameters, Kh anomalies, the
+    optional groundwater return-flow section, and initial heads.
+
+    Sections are recognized by their keyed lines (NEBK, IFLAGRF, FACTHP)
+    because the return-flow block exists only in some format variants
+    (the sample model has it, C2VSimFG does not).  Any parse failure
+    keeps what was read so far — the raw lines remain available on the
+    dataclass either way.
+    """
+    out: dict = {
+        "ngroup": None,
+        "param_factors": {},
+        "param_time_units": {},
+        "aquifer_params": None,
+        "parametric_grids": [],
+        "anomaly_nebk": 0,
+        "anomaly_factor": 1.0,
+        "anomaly_time_unit": "",
+        "kh_anomalies": None,
+        "iflagrf": None,
+        "return_flow": None,
+        "facthp": None,
+        "initial_heads": None,
+    }
+    cursor = LineCursor(raw_lines)
+    try:
+        block = parse_param_block(
+            cursor,
+            param_names=["kh", "ss", "sy", "aquitard_kv", "kv"],
+            factor_names=["fx", "fkh", "fs", "fn", "fv", "fl"],
+        )
+        out["ngroup"] = block["ngroup"]
+        out["param_factors"] = block["factors"]
+        out["param_time_units"] = block["time_units"]
+        out["aquifer_params"] = block["node_params"]
+        out["parametric_grids"] = block["parametric_grids"]
+
+        # ---- Anomaly in hydraulic conductivity ----
+        if cursor.peek_keyword() == "NEBK":
+            nebk = int(cursor.read_keyed_value()[0])
+            out["anomaly_nebk"] = nebk
+            if cursor.peek_keyword() == "FACT":
+                out["anomaly_factor"] = float(cursor.read_keyed_value()[0])
+            if cursor.peek_keyword() == "TUNITH":
+                out["anomaly_time_unit"] = cursor.read_keyed_value()[0]
+            rows = []
+            for _ in range(nebk):
+                toks = tokenize_data_line(cursor.next())
+                row = {"ic": int(float(toks[0])),
+                       "element_id": int(float(toks[1]))}
+                for i, v in enumerate(toks[2:], start=1):
+                    row[f"kh_layer_{i}"] = float(v)
+                rows.append(row)
+            if rows:
+                out["kh_anomalies"] = pd.DataFrame(rows)
+
+        # ---- Groundwater return flow (only in newer format variants) ----
+        if cursor.peek_keyword() == "IFLAGRF":
+            out["iflagrf"] = int(cursor.read_keyed_value()[0])
+            rows = []
+            while not cursor.eof and cursor.peek_keyword() != "FACTHP":
+                toks = tokenize_data_line(cursor.peek())
+                if len(toks) != 3:
+                    break
+                try:
+                    rows.append({
+                        "node_id": int(float(toks[0])),
+                        "dest_type": int(float(toks[1])),
+                        "dest": int(float(toks[2])),
+                    })
+                except ValueError:
+                    break
+                cursor.next()
+            if rows:
+                out["return_flow"] = pd.DataFrame(rows)
+
+        # ---- Initial groundwater heads ----
+        if cursor.peek_keyword() == "FACTHP":
+            out["facthp"] = float(cursor.read_keyed_value()[0])
+            rows = []
+            while not cursor.eof:
+                toks = tokenize_data_line(cursor.peek())
+                try:
+                    node_id = int(float(toks[0]))
+                    heads = [float(t) for t in toks[1:]]
+                except (ValueError, IndexError):
+                    break
+                cursor.next()
+                row = {"node_id": node_id}
+                for i, h in enumerate(heads, start=1):
+                    row[f"head_layer_{i}"] = h
+                rows.append(row)
+            if rows:
+                out["initial_heads"] = pd.DataFrame(rows)
+    except (StopIteration, ValueError, IndexError) as exc:
+        import warnings
+        warnings.warn(
+            f"GW main aquifer-parameter tail only partially parsed ({exc}); "
+            "unparsed sections will be missing from written output")
+    return out
 
 
 # ------------------------------------------------------------------
@@ -404,6 +509,154 @@ def read_spec_head_bc(path: str | Path) -> SpecifiedHeadFile:
 
 
 # ------------------------------------------------------------------
+# Specified Flow BC
+# ------------------------------------------------------------------
+
+def read_spec_flow_bc(path: str | Path) -> SpecifiedFlowBCFile:
+    """Read a specified flow boundary conditions file.
+
+    Follows the standard IWFM template layout: NQB, FACT, TUNIT, then
+    one row per node: NODE LAYER ITSCOL FLOW.
+
+    Parameters
+    ----------
+    path : str or Path
+
+    Returns
+    -------
+    SpecifiedFlowBCFile
+    """
+    reader = IWFMFileReader(path)
+    header = reader.read_header()
+
+    n_nodes, _ = reader.read_keyed_int()
+    factor, _ = reader.read_keyed_float()
+    time_unit, _ = reader.read_keyed_value()
+
+    rows = reader.read_data_table(n_nodes, n_cols=4)
+    df = pd.DataFrame({
+        "node_id": [int(r[0]) for r in rows],
+        "layer": [int(r[1]) for r in rows],
+        "itscol": [int(r[2]) for r in rows],
+        "flow": [float(r[3]) for r in rows],
+    })
+
+    return SpecifiedFlowBCFile(
+        header=header,
+        n_nodes=n_nodes,
+        factor=factor,
+        time_unit=time_unit,
+        data=df,
+    )
+
+
+# ------------------------------------------------------------------
+# General Head BC
+# ------------------------------------------------------------------
+
+def read_general_head_bc(path: str | Path) -> GeneralHeadBCFile:
+    """Read a general head boundary conditions file.
+
+    Follows the standard IWFM template layout: NGB, FACTH, FACTC,
+    TUNITC, then one row per node: NODE LAYER ITSCOL BH BC.
+
+    Parameters
+    ----------
+    path : str or Path
+
+    Returns
+    -------
+    GeneralHeadBCFile
+    """
+    reader = IWFMFileReader(path)
+    header = reader.read_header()
+
+    n_nodes, _ = reader.read_keyed_int()
+    facth, _ = reader.read_keyed_float()
+    factc, _ = reader.read_keyed_float()
+    time_unit, _ = reader.read_keyed_value()
+
+    rows = reader.read_data_table(n_nodes, n_cols=5)
+    df = pd.DataFrame({
+        "node_id": [int(r[0]) for r in rows],
+        "layer": [int(r[1]) for r in rows],
+        "itscol": [int(r[2]) for r in rows],
+        "head": [float(r[3]) for r in rows],
+        "conductance": [float(r[4]) for r in rows],
+    })
+
+    return GeneralHeadBCFile(
+        header=header,
+        n_nodes=n_nodes,
+        facth=facth,
+        factc=factc,
+        time_unit=time_unit,
+        data=df,
+    )
+
+
+# ------------------------------------------------------------------
+# Constrained General Head BC
+# ------------------------------------------------------------------
+
+def read_constrained_head_bc(path: str | Path) -> ConstrainedHeadBCFile:
+    """Read a constrained general head boundary conditions file.
+
+    Row layout: NODE LAYER ITSCOL BH BC LBH ITSCOLF CFLOW [/ name].
+    ITSCOL/ITSCOLF reference data columns in the time-series boundary
+    conditions file.
+
+    Parameters
+    ----------
+    path : str or Path
+
+    Returns
+    -------
+    ConstrainedHeadBCFile
+    """
+    reader = IWFMFileReader(path)
+    header = reader.read_header()
+
+    n_nodes, _ = reader.read_keyed_int()
+    facth, _ = reader.read_keyed_float()
+    factvl, _ = reader.read_keyed_float()
+    tunitvl, _ = reader.read_keyed_value()
+    factc, _ = reader.read_keyed_float()
+    tunitc, _ = reader.read_keyed_value()
+
+    rows = []
+    for _ in range(n_nodes):
+        line = reader.next_data_line()
+        toks = tokenize_data_line(line)
+        name = ""
+        m = re.search(r"\s/(.+)$", line)
+        if m:
+            name = m.group(1).strip().lstrip("/").strip()
+        rows.append({
+            "node_id": int(float(toks[0])),
+            "layer": int(float(toks[1])),
+            "itscol": int(float(toks[2])),
+            "head": float(toks[3]),
+            "conductance": float(toks[4]),
+            "limiting_head": float(toks[5]),
+            "itscolf": int(float(toks[6])),
+            "max_flow": float(toks[7]),
+            "name": name,
+        })
+
+    return ConstrainedHeadBCFile(
+        header=header,
+        n_nodes=n_nodes,
+        facth=facth,
+        factvl=factvl,
+        tunitvl=tunitvl,
+        factc=factc,
+        tunitc=tunitc,
+        data=pd.DataFrame(rows),
+    )
+
+
+# ------------------------------------------------------------------
 # Boundary Time Series
 # ------------------------------------------------------------------
 
@@ -498,9 +751,10 @@ def read_pump_main(
 def read_well_spec(path: str | Path) -> WellSpecFile:
     """Read a well specification file (e.g. ``WellSpec.dat``).
 
-    Parses NWELL, the conversion factors, and the well location table
-    (ID, XWELL, YWELL, RWELL, PERFT, PERFB, optional ``/name`` comment).
-    The pumping-configuration sections that follow are not parsed.
+    Parses NWELL, the conversion factors, the well location table
+    (ID, XWELL, YWELL, RWELL, PERFT, PERFB, optional ``/name`` comment),
+    the per-well pumping-configuration table, and the delivery element
+    groups.
 
     Parameters
     ----------
@@ -537,8 +791,27 @@ def read_well_spec(path: str | Path) -> WellSpecFile:
             "name": name,
         })
 
-    # The well pumping-configuration table follows; skip forward to the
-    # NGRP keyed line, then parse the delivery element groups.
+    # Well pumping-configuration table: one row per well.
+    # ID ICOLWL FRACWL IOPTWL TYPDSTWL DSTWL ICFIRIGWL ICADJWL ICWLMAX FWLMAX
+    pump_cols = [
+        "id", "icolwl", "fracwl", "ioptwl", "typdstwl", "dstwl",
+        "icfirigwl", "icadjwl", "icwlmax", "fwlmax",
+    ]
+    pump_rows: list[dict] = []
+    for _ in range(n_wells):
+        line = reader.next_data_line()
+        toks = tokenize_data_line(line)
+        row = {col: (toks[i] if i < len(toks) else None)
+               for i, col in enumerate(pump_cols)}
+        pump_rows.append(row)
+    pump_config = pd.DataFrame(pump_rows, columns=pump_cols)
+    for col in ["id", "icolwl", "ioptwl", "typdstwl", "dstwl",
+                "icfirigwl", "icadjwl", "icwlmax"]:
+        pump_config[col] = pd.to_numeric(pump_config[col], errors="coerce")
+    for col in ["fracwl", "fwlmax"]:
+        pump_config[col] = pd.to_numeric(pump_config[col], errors="coerce")
+
+    # Delivery element groups (NGRP keyed line, then group definitions)
     n_groups = 0
     element_groups: list = []
     while not reader.eof:
@@ -560,6 +833,7 @@ def read_well_spec(path: str | Path) -> WellSpecFile:
         n_wells=n_wells,
         factors={"factxy": factxy, "factrw": factrw, "factlt": factlt},
         data=pd.DataFrame(rows),
+        pump_config=pump_config,
         n_groups=n_groups,
         element_groups=element_groups,
     )
@@ -612,19 +886,18 @@ def read_elem_pump(path: str | Path) -> ElemPumpFile:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     n_groups, _ = reader.read_keyed_int()
-    groups_raw = reader.skip_to_end()
 
     element_groups = []
     if n_groups > 0:
         from iwfm_io.readers._element_groups import parse_element_groups
-        element_groups, _ = parse_element_groups(groups_raw, n_groups)
+        element_groups, _ = parse_element_groups(
+            reader.skip_to_end(), n_groups)
 
     return ElemPumpFile(
         header=header,
         n_sinks=n_sinks,
         data=df,
         n_groups=n_groups,
-        groups_raw=groups_raw,
         element_groups=element_groups,
     )
 
@@ -727,8 +1000,40 @@ def read_tile_drain(path: str | Path) -> TileDrainFile:
     else:
         si_data = pd.DataFrame(columns=si_col_names)
 
-    # Hydrograph output section: capture raw for round-trip
+    # Hydrograph print control section
     hyd_raw = reader.skip_to_end()
+
+    n_hydrographs = 0
+    hyd_factvlou = 1.0
+    hyd_unitvlou = ""
+    hyd_out_file = None
+    hydrographs = None
+    try:
+        cursor = LineCursor(hyd_raw)
+        if cursor.peek_keyword() == "NOUTTD":
+            n_hydrographs = int(cursor.read_keyed_value()[0])
+            if cursor.peek_keyword() == "FACTVLOU":
+                hyd_factvlou = float(cursor.read_keyed_value()[0])
+            if cursor.peek_keyword() == "UNITVLOU":
+                hyd_unitvlou = cursor.read_keyed_value()[0]
+            if cursor.peek_keyword() == "TDOUTFL":
+                value = cursor.read_keyed_value()[0]
+                hyd_out_file = value if value and value != "*" else None
+            rows = []
+            for _ in range(n_hydrographs):
+                toks = tokenize_data_line(cursor.next())
+                rows.append({
+                    "id": int(float(toks[0])),
+                    "idtyp": int(float(toks[1])),
+                    "name": " ".join(toks[2:]),
+                })
+            if rows:
+                hydrographs = pd.DataFrame(rows)
+    except (StopIteration, ValueError, IndexError) as exc:
+        import warnings
+        warnings.warn(
+            f"Tile drain hydrograph section only partially parsed ({exc}); "
+            "unparsed entries will be missing from written output")
 
     return TileDrainFile(
         header=header,
@@ -742,7 +1047,11 @@ def read_tile_drain(path: str | Path) -> TileDrainFile:
         factcdcsi=factcdcsi,
         tunit_si=tunit_si,
         sub_irrig_data=si_data,
-        hyd_raw=hyd_raw,
+        n_hydrographs=n_hydrographs,
+        hyd_factvlou=hyd_factvlou,
+        hyd_unitvlou=hyd_unitvlou,
+        hyd_out_file=hyd_out_file,
+        hydrographs=hydrographs,
     )
 
 
@@ -771,14 +1080,8 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
     def _resolve(value: str) -> str | None:
         if not value or value == "*":
             return None
-        rel = value.replace("\\", "/")
-        resolved = base_dir / rel
-        # IWFM resolves child paths against the simulation working
-        # directory (the parent folder when this main file lives in a
-        # component subfolder) — prefer whichever candidate exists.
-        if not resolved.exists() and (base_dir.parent / rel).exists():
-            resolved = base_dir.parent / rel
-        return str(resolved)
+        from iwfm_io._parser import resolve_child_path
+        return resolve_child_path(value, base_dir)
 
     # Keyed header block, identified by keyword rather than position:
     # optional entries may be commented out entirely (e.g. C2VSimFG has
@@ -823,8 +1126,28 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
     hyd_cols = ["id", "subtyp", "layer", "x", "y", "node", "name"]
     hydrographs = _read_hydrograph_table(reader, n_hydrographs, hyd_cols)
 
-    # Subsidence parameter section: capture everything to EOF verbatim
+    # Subsidence parameter section: fully parsed into DataFrames
     subsidence_param_raw = reader.skip_to_end()
+
+    ngroup = None
+    param_factors: dict = {}
+    subsidence_params = None
+    parametric_grids: list = []
+    try:
+        block = parse_param_block(
+            LineCursor(subsidence_param_raw),
+            param_names=["sce", "sci", "dc", "dcmin", "hc"],
+            factor_names=["fx", "fsce", "fsci", "fdc", "fdcmin", "fhc"],
+        )
+        ngroup = block["ngroup"]
+        param_factors = block["factors"]
+        subsidence_params = block["node_params"]
+        parametric_grids = block["parametric_grids"]
+    except (StopIteration, ValueError, IndexError) as exc:
+        import warnings
+        warnings.warn(
+            f"Subsidence parameter tail only partially parsed ({exc}); "
+            "unparsed sections will be missing from written output")
 
     return SubsidenceFile(
         header=header,
@@ -834,5 +1157,8 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
         hydrograph_factxy=hydrograph_factxy,
         hydrograph_out_file=hydrograph_out_file,
         hydrographs=hydrographs,
-        subsidence_param_raw=subsidence_param_raw,
+        ngroup=ngroup,
+        param_factors=param_factors,
+        subsidence_params=subsidence_params,
+        parametric_grids=parametric_grids,
     )

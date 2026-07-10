@@ -69,32 +69,37 @@ def demo_elements(tmp: Path):
 # ── 3. Precipitation scaling (climate scenario) ───────────────────────────────
 
 def demo_precip_scale(tmp: Path):
-    from iwfm_io import read_precip, write_precip
+    from iwfm_io import read_et, write_et
     import copy
 
-    print("\n=== Precipitation scaling (drought scenario −20%) ===")
-    original = read_precip(SIM_DIR / "Precip.dat")
-    orig_mean = original.data.iloc[:, 0].mean()
-    print(f"  Original mean col_1 = {orig_mean:.4f}")
+    # The sample's Precip.dat reads from DSS (no inline data), so the
+    # scaling demo uses the ET file, which carries inline time series.
+    print("\n=== ET scaling (climate scenario −20%) ===")
+    original = read_et(SIM_DIR / "ET.dat")
+    value_cols = [c for c in original.data.columns if c != "date"]
+    orig_mean = original.data[value_cols[0]].mean()
+    print(f"  Original mean {value_cols[0]} = {orig_mean:.4f}")
 
-    # Deep copy so original is unchanged
+    # Deep copy so original is unchanged; scale only the value columns
     modified = copy.deepcopy(original)
-    modified.data = original.data * 0.80
+    modified.data[value_cols] = original.data[value_cols] * 0.80
 
-    out_path = tmp / "Precip_drought.dat"
-    write_precip(modified, out_path)
+    out_path = tmp / "ET_scaled.dat"
+    write_et(modified, out_path)
 
-    verify = read_precip(out_path)
-    ratio = verify.data.iloc[:, 0].mean() / orig_mean
+    verify = read_et(out_path)
+    ratio = verify.data[value_cols[0]].mean() / orig_mean
     assert abs(ratio - 0.80) < 1e-5, f"Expected 0.80 ratio, got {ratio:.6f}"
-    print(f"  Scaled mean = {verify.data.iloc[:, 0].mean():.4f}  "
+    print(f"  Scaled mean = {verify.data[value_cols[0]].mean():.4f}  "
           f"ratio = {ratio:.4f}  OK")
 
 
 # ── 4. Full preprocessor tree copy ───────────────────────────────────────────
 
 def demo_preprocessor_copy(tmp: Path):
-    from iwfm_io import read_preprocessor, write_preprocessor, read_nodes, read_elements
+    from iwfm_io import (read_preprocessor, write_preprocessor,
+                         write_nodes, write_elements,
+                         read_nodes, read_elements)
 
     print("\n=== Full preprocessor tree copy ===")
     pp = read_preprocessor(PP_DIR / "PreProcessor_MAIN.IN")
@@ -102,9 +107,14 @@ def demo_preprocessor_copy(tmp: Path):
     orig_elems = len(pp.children["element"].data)
     print(f"  Loaded: {orig_nodes} nodes, {orig_elems} elements")
 
+    # write_preprocessor writes the main file; children are written
+    # with their own writers
     out_dir = tmp / "preprocessor_copy"
     out_dir.mkdir()
-    write_preprocessor(pp, out_dir / "PreProcessor_MAIN_copy.IN")
+    write_preprocessor(pp, out_dir / "PreProcessor_MAIN_copy.IN",
+                       base_dir=out_dir)
+    write_nodes(pp.children["node"], out_dir / "NodeXY.dat")
+    write_elements(pp.children["element"], out_dir / "Element.dat")
 
     node_copy = read_nodes(out_dir / "NodeXY.dat")
     elem_copy = read_elements(out_dir / "Element.dat")
@@ -126,16 +136,21 @@ def demo_stream_inflow(tmp: Path):
         return
 
     original = read_stream_inflow(path)
-    print(f"  Read: {len(original.data)} timesteps × {len(original.data.columns)} cols")
+    if original.data is None:
+        print("  Stream inflows come from DSS — skipping.")
+        return
+    value_cols = [c for c in original.data.columns if c != "date"]
+    print(f"  Read: {len(original.data)} timesteps × {len(value_cols)} cols")
 
     modified = copy.deepcopy(original)
-    modified.data = original.data * 1.10
+    modified.data[value_cols] = original.data[value_cols] * 1.10
 
     out_path = tmp / "StreamInflow_wet.dat"
     write_stream_inflow(modified, out_path)
 
     verify = read_stream_inflow(out_path)
-    ratio = verify.data.sum().sum() / original.data.sum().sum()
+    ratio = (verify.data[value_cols].sum().sum()
+             / original.data[value_cols].sum().sum())
     assert abs(ratio - 1.10) < 1e-4, f"Expected 1.10, got {ratio:.6f}"
     print(f"  Wet scenario written, total ratio = {ratio:.4f}  OK")
 
@@ -156,8 +171,8 @@ def demo_gw_bc(tmp: Path):
     write_bc_main(bc, out_path)
 
     bc2 = read_bc_main(out_path)
-    assert bc2.n_nodes == bc.n_nodes, "node count mismatch"
-    print(f"  Round-trip OK: {bc.n_nodes} boundary nodes")
+    assert bc2.n_bc_hydrographs == bc.n_bc_hydrographs, "count mismatch"
+    print(f"  Round-trip OK: {bc.n_bc_hydrographs} BC flow hydrographs")
 
 
 # ── 7. Stratigraphy round-trip ────────────────────────────────────────────────
@@ -186,6 +201,8 @@ def demo_strata(tmp: Path):
 
 
 if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding="utf-8")  # arrows in redirected output
     check_sample_model()
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)

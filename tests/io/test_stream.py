@@ -78,7 +78,8 @@ class TestDiverSpecs:
         if path.exists():
             ds = read_diver_specs(path)
             assert ds.n_diversions >= 0
-            assert len(ds.raw_data) > 0
+            assert ds.data is not None
+            assert len(ds.data) == ds.n_diversions
 
     def test_diver_specs_round_trip(self, tmp_output):
         from iwfm_io.readers.stream import read_diver_specs

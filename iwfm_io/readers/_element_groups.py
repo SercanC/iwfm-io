@@ -18,6 +18,29 @@ from __future__ import annotations
 from iwfm_io._tokens import is_comment, tokenize_data_line
 
 
+def element_groups_to_df(groups):
+    """Flatten parsed element groups into a long-format DataFrame.
+
+    Columns: ``group_id``, ``element_id`` and, when the groups carry
+    fractions (recharge-zone layout), ``fraction``.  Returns an empty
+    DataFrame when *groups* is empty.
+    """
+    import pandas as pd
+
+    has_fractions = any("fractions" in g for g in groups)
+    records = []
+    for g in groups:
+        fractions = g.get("fractions") or []
+        for i, elem in enumerate(g["elements"]):
+            row = {"group_id": g["group_id"], "element_id": elem}
+            if has_fractions:
+                row["fraction"] = fractions[i] if i < len(fractions) else None
+            records.append(row)
+    columns = ["group_id", "element_id"] + (
+        ["fraction"] if has_fractions else [])
+    return pd.DataFrame(records, columns=columns)
+
+
 def parse_element_groups(lines, n_groups, with_fractions=False):
     """Parse *n_groups* element groups from IWFM data *lines*.
 
@@ -45,10 +68,10 @@ def parse_element_groups(lines, n_groups, with_fractions=False):
     lines_used = 0
     it = iter(lines)
 
-    def _need(n):
-        """Ensure at least n tokens are buffered; raise on EOF."""
+    def _next_line_tokens() -> list[str]:
+        """Numeric tokens of the next non-comment line (may be empty)."""
         nonlocal lines_used
-        while len(tokens) < n:
+        while True:
             line = next(it)  # StopIteration -> ValueError below
             lines_used += 1
             if is_comment(line):
@@ -61,15 +84,28 @@ def parse_element_groups(lines, n_groups, with_fractions=False):
             # ("37 118 29567 NKWSD - CLASS 1"), so numbers stop at the
             # first non-numeric token.
             line = line.split("/", 1)[0]
+            toks: list[str] = []
             for tok in tokenize_data_line(line):
                 try:
                     float(tok)
                 except ValueError:
                     break
-                tokens.append(tok)
+                toks.append(tok)
+            if toks:
+                return toks
+
+    def _need(n):
+        """Ensure at least n tokens are buffered; raise on EOF."""
+        while len(tokens) < n:
+            tokens.extend(_next_line_tokens())
 
     try:
         for _ in range(n_groups):
+            # Fortran list-directed reads start each group on a fresh
+            # line and discard leftover tokens of the previous one —
+            # e.g. a zero-element recharge zone "4  0  0  0.0" carries
+            # a dummy pair that must not bleed into the next group.
+            tokens = _next_line_tokens()
             _need(2)
             group_id = int(float(tokens.pop(0)))
             n_elem = int(float(tokens.pop(0)))

@@ -318,4 +318,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding="utf-8")  # arrows in redirected output
     main()

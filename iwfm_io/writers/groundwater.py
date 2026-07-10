@@ -1,9 +1,9 @@
 """
 Writers for IWFM groundwater component input files.
 
-Serialize groundwater dataclasses back to IWFM text format.
-Complex files (GWMain, SubsidenceFile) write parsed sections directly and
-emit stored raw lines for unparsed sections (aquifer/subsidence parameters).
+Serialize groundwater dataclasses back to IWFM text format.  All
+sections — including aquifer/subsidence parameters, anomalies, and
+initial conditions — are regenerated from the parsed DataFrames.
 """
 
 from __future__ import annotations
@@ -21,6 +21,13 @@ from iwfm_io.models.groundwater import (
     SubsidenceFile,
     TileDrainFile,
     TSPumpingFile,
+    WellSpecFile,
+)
+from iwfm_io.writers._param_blocks import (
+    fmt_num,
+    write_element_groups,
+    write_param_block,
+    write_table_rows,
 )
 
 
@@ -113,9 +120,54 @@ def write_gw_main(
                 widths=[6, 8, 12, 12, 12],
             )
 
-    # Aquifer parameter section: emit raw lines verbatim
-    for line in gw.aquifer_param_raw:
-        w.write_raw(line)
+    # Aquifer parameter section, regenerated from the parsed data
+    w.write_comment("C  Aquifer Parameters")
+    write_param_block(
+        w,
+        ngroup=gw.ngroup if gw.ngroup is not None else 0,
+        factors=gw.param_factors,
+        factor_names=["fx", "fkh", "fs", "fn", "fv", "fl"],
+        param_names=["kh", "ss", "sy", "aquitard_kv", "kv"],
+        node_params=gw.aquifer_params,
+        parametric_grids=gw.parametric_grids,
+        time_units={
+            "TUNITKH": gw.param_time_units.get("TUNITKH", "1day"),
+            "TUNITV": gw.param_time_units.get("TUNITV", "1day"),
+            "TUNITL": gw.param_time_units.get("TUNITL", "1day"),
+        },
+    )
+
+    # Anomaly in hydraulic conductivity
+    w.write_comment("C  Anomaly in Hydraulic Conductivity")
+    w.write_keyed_value(gw.anomaly_nebk, "NEBK")
+    w.write_keyed_value(fmt_num(gw.anomaly_factor), "FACT")
+    w.write_keyed_value(gw.anomaly_time_unit or "1day", "TUNITH")
+    if gw.kh_anomalies is not None and len(gw.kh_anomalies) > 0:
+        cols = ["ic", "element_id"] + [
+            c for c in gw.kh_anomalies.columns
+            if c.startswith("kh_layer_")]
+        write_table_rows(w, gw.kh_anomalies, cols,
+                         widths=[8, 10] + [14] * (len(cols) - 2))
+
+    # Groundwater return flow (only in format variants that have it)
+    if gw.iflagrf is not None:
+        w.write_comment("C  Simulation of Groundwater Return Flow")
+        w.write_keyed_value(gw.iflagrf, "IFLAGRF")
+        if gw.return_flow is not None and len(gw.return_flow) > 0:
+            write_table_rows(w, gw.return_flow,
+                             ["node_id", "dest_type", "dest"],
+                             widths=[10, 8, 8])
+
+    # Initial groundwater heads
+    w.write_comment("C  Initial Groundwater Head Values")
+    w.write_keyed_value(fmt_num(gw.facthp if gw.facthp is not None else 1.0),
+                        "FACTHP")
+    if gw.initial_heads is not None and len(gw.initial_heads) > 0:
+        cols = ["node_id"] + [
+            c for c in gw.initial_heads.columns
+            if c.startswith("head_layer_")]
+        write_table_rows(w, gw.initial_heads, cols,
+                         widths=[10] + [14] * (len(cols) - 1))
 
     w.flush()
 
@@ -297,9 +349,56 @@ def write_elem_pump(ep: ElemPumpFile, path: str | Path) -> None:
             w.write_data_line(tokens, widths[: len(tokens)])
 
     w.write_keyed_value(ep.n_groups, "NGRP")
+    write_element_groups(w, ep.element_groups)
 
-    for line in ep.groups_raw:
-        w.write_raw(line)
+    w.flush()
+
+
+# ------------------------------------------------------------------
+# Well Specifications
+# ------------------------------------------------------------------
+
+def write_well_spec(ws: WellSpecFile, path: str | Path) -> None:
+    """Write a well specification file.
+
+    Parameters
+    ----------
+    ws : WellSpecFile
+    path : str or Path
+    """
+    w = IWFMFileWriter(path)
+    w.write_header(ws.header)
+
+    w.write_keyed_value(ws.n_wells, "NWELL")
+    w.write_keyed_value(fmt_num(ws.factors.get("factxy", 1.0)), "FACTXY")
+    w.write_keyed_value(fmt_num(ws.factors.get("factrw", 1.0)), "FACTRW")
+    w.write_keyed_value(fmt_num(ws.factors.get("factlt", 1.0)), "FACTLT")
+
+    if ws.data is not None:
+        for _, row in ws.data.iterrows():
+            line_vals = [
+                int(row["well_id"]),
+                fmt_num(row["x"]), fmt_num(row["y"]),
+                fmt_num(row["radius"]),
+                fmt_num(row["perf_top"]), fmt_num(row["perf_bot"]),
+            ]
+            widths = [8, 16, 16, 10, 12, 12]
+            name = row.get("name") or ""
+            parts = "".join(str(v).rjust(wd)
+                            for v, wd in zip(line_vals, widths))
+            if name:
+                parts += f"    /{name}"
+            w.write_raw(parts)
+
+    w.write_comment("C  Well Pumping Configuration")
+    if ws.pump_config is not None:
+        cols = ["id", "icolwl", "fracwl", "ioptwl", "typdstwl", "dstwl",
+                "icfirigwl", "icadjwl", "icwlmax", "fwlmax"]
+        write_table_rows(w, ws.pump_config, cols,
+                         widths=[8, 8, 8, 8, 8, 10, 10, 8, 8, 8])
+
+    w.write_keyed_value(ws.n_groups, "NGRP")
+    write_element_groups(w, ws.element_groups)
 
     w.flush()
 
@@ -383,9 +482,18 @@ def write_tile_drain(td: TileDrainFile, path: str | Path) -> None:
                 widths=[6, 8, 12, 12],
             )
 
-    # Hydrograph output section: emit raw lines verbatim
-    for line in td.hyd_raw:
-        w.write_raw(line)
+    # Hydrograph print control section
+    w.write_comment("C  Hydrograph Print Control")
+    w.write_keyed_value(td.n_hydrographs, "NOUTTD")
+    w.write_keyed_value(fmt_num(td.hyd_factvlou), "FACTVLOU")
+    w.write_keyed_value(td.hyd_unitvlou, "UNITVLOU")
+    w.write_keyed_value(td.hyd_out_file or "", "TDOUTFL")
+    if td.hydrographs is not None and len(td.hydrographs) > 0:
+        for _, row in td.hydrographs.iterrows():
+            w.write_data_line(
+                [int(row["id"]), int(row["idtyp"]), row["name"]],
+                widths=[8, 8, 16],
+            )
 
     w.flush()
 
@@ -438,8 +546,16 @@ def write_subsidence(
                 widths=[6, 8, 10, 14, 14, 14, 12],
             )
 
-    # Subsidence parameter section: emit raw lines verbatim
-    for line in sub.subsidence_param_raw:
-        w.write_raw(line)
+    # Subsidence parameter section, regenerated from the parsed data
+    w.write_comment("C  Subsidence Parameters")
+    write_param_block(
+        w,
+        ngroup=sub.ngroup if sub.ngroup is not None else 0,
+        factors=sub.param_factors,
+        factor_names=["fx", "fsce", "fsci", "fdc", "fdcmin", "fhc"],
+        param_names=["sce", "sci", "dc", "dcmin", "hc"],
+        node_params=sub.subsidence_params,
+        parametric_grids=sub.parametric_grids,
+    )
 
     w.flush()

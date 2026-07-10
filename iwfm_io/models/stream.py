@@ -31,6 +31,11 @@ class StreamMain:
     reach_params : pd.DataFrame
         Columns: reach_id (int), conductance (float), width (float),
         bed_thickness (float).
+    evaporation : pd.DataFrame or None
+        Stream evaporation table (None when evaporation is not
+        simulated).  Columns: stream_node, icetst (column in the ET
+        file; 0 = none), icarst (column in the stream surface area
+        file STARFL; 0 = computed from wetted perimeter).
     """
 
     header: FileHeader = field(default_factory=FileHeader)
@@ -39,6 +44,7 @@ class StreamMain:
     hydrograph_specs: list[dict] = field(default_factory=list)
     node_budget_nodes: list[int] = field(default_factory=list)
     reach_params: Any = None  # DataFrame
+    evaporation: Any = None  # DataFrame
 
 
 @dataclass
@@ -70,25 +76,23 @@ class StreamInflowFile:
 class DiverSpecsFile:
     """Parsed surface water diversion specification file (e.g. ``DiverSpecs.dat``).
 
-    The diversion spec format is complex and varies significantly with the
-    number of element groups, recharge zones, and spill locations per
-    diversion, so the body beyond the ``NRDV`` header line is stored as
-    raw text lines for lossless round-trip preservation.
-
     Attributes
     ----------
     header : FileHeader
     n_diversions : int
         Number of diversions (NRDV).
-    raw_data : list[str]
-        All data lines following the NRDV keyed line, preserved verbatim.
     """
 
     header: FileHeader = field(default_factory=FileHeader)
     n_diversions: int = 0
-    raw_data: list[str] = field(default_factory=list)
-    #: Basic per-diversion table parsed from the first NRDV rows:
-    #: diversion_id, export_node (0 = import from outside), name.
+    #: Per-diversion table: diversion_id, export_node (0 = import from
+    #: outside), max_col/max_frac (max-diversion column in the
+    #: diversions data file + fraction), recov_loss_col/frac,
+    #: nonrecov_loss_col/frac, spill_col/frac (older formats only),
+    #: dest_type (0=outside, 2=element, 4=subregion, 6=element group),
+    #: dest_id, delivery_col/frac, irig_frac_col (column in the
+    #: irrigation fractions file), adjust_col (column in the supply
+    #: adjustment file), name.
     data: Any = None
     #: NGRP — number of delivery element groups.
     n_groups: int = 0
@@ -97,6 +101,31 @@ class DiverSpecsFile:
     #: Recharge zones (recoverable-loss areas), one per diversion:
     #: [{group_id, elements: [int], fractions: [float]}, …]
     recharge_zones: list = field(default_factory=list)
+    #: Diversion spill locations (older stream-package formats only),
+    #: one per diversion: [{group_id, elements: [stream nodes],
+    #: fractions: [float]}, …]; empty in newer formats.
+    spill_locations: list = field(default_factory=list)
+
+    @property
+    def delivery_groups_df(self):
+        """Delivery element groups as a long-format DataFrame
+        (columns: group_id, element_id)."""
+        from iwfm_io.readers._element_groups import element_groups_to_df
+        return element_groups_to_df(self.delivery_groups)
+
+    @property
+    def recharge_zones_df(self):
+        """Recharge zones as a long-format DataFrame
+        (columns: group_id = diversion id, element_id, fraction)."""
+        from iwfm_io.readers._element_groups import element_groups_to_df
+        return element_groups_to_df(self.recharge_zones)
+
+    @property
+    def spill_locations_df(self):
+        """Spill locations as a long-format DataFrame (columns:
+        group_id = diversion id, element_id = stream node, fraction)."""
+        from iwfm_io.readers._element_groups import element_groups_to_df
+        return element_groups_to_df(self.spill_locations)
 
 
 @dataclass
@@ -129,6 +158,20 @@ class BypassSpecsFile:
     bypass_data: Any = None  # DataFrame
     rating_tables: dict = field(default_factory=dict)
     seepage_zones: list[dict] = field(default_factory=list)
+
+    @property
+    def seepage_zones_df(self):
+        """Seepage zones as a long-format DataFrame
+        (columns: bypass_id, element_id, fraction)."""
+        import pandas as pd
+        records = [
+            {"bypass_id": z["bypass_id"],
+             "element_id": e["element_id"],
+             "fraction": e["fraction"]}
+            for z in self.seepage_zones for e in z["elements"]
+        ]
+        return pd.DataFrame(
+            records, columns=["bypass_id", "element_id", "fraction"])
 
 
 @dataclass

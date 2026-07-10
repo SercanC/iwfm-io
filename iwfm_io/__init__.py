@@ -90,8 +90,12 @@ from iwfm_io.readers.groundwater import (
     read_gw_main,
     read_bc_main,
     read_spec_head_bc,
+    read_spec_flow_bc,
+    read_general_head_bc,
+    read_constrained_head_bc,
     read_boundary_ts,
     read_pump_main,
+    read_well_spec,
     read_elem_pump,
     read_ts_pumping,
     read_tile_drain,
@@ -111,7 +115,13 @@ from iwfm_io.readers.stream import (
 from iwfm_io.readers.lake import read_lake_main
 
 # Root zone readers
-from iwfm_io.readers.rootzone import read_rootzone_main
+from iwfm_io.readers.rootzone import (
+    read_rootzone_main,
+    read_nonponded_ag_main,
+    read_ponded_ag_main,
+    read_urban_main,
+    read_native_veg_main,
+)
 
 # Misc readers
 from iwfm_io.readers.misc import read_swshed, read_unsatzone
@@ -162,6 +172,7 @@ from iwfm_io.writers.groundwater import (
     write_spec_head_bc,
     write_boundary_ts,
     write_pump_main,
+    write_well_spec,
     write_elem_pump,
     write_ts_pumping,
     write_tile_drain,
@@ -247,8 +258,12 @@ __all__ = [
     "read_gw_main",
     "read_bc_main",
     "read_spec_head_bc",
+    "read_spec_flow_bc",
+    "read_general_head_bc",
+    "read_constrained_head_bc",
     "read_boundary_ts",
     "read_pump_main",
+    "read_well_spec",
     "read_elem_pump",
     "read_ts_pumping",
     "read_tile_drain",
@@ -263,6 +278,10 @@ __all__ = [
     "read_lake_main",
     # Root zone readers
     "read_rootzone_main",
+    "read_nonponded_ag_main",
+    "read_ponded_ag_main",
+    "read_urban_main",
+    "read_native_veg_main",
     # Misc readers
     "read_swshed",
     "read_unsatzone",
@@ -299,6 +318,7 @@ __all__ = [
     "write_spec_head_bc",
     "write_boundary_ts",
     "write_pump_main",
+    "write_well_spec",
     "write_elem_pump",
     "write_ts_pumping",
     "write_tile_drain",

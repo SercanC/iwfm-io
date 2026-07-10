@@ -96,21 +96,25 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 
 | Function | Input file |
 |----------|-----------|
-| `read_gw_main(path)` | `GW_MAIN.dat` |
+| `read_gw_main(path)` | `GW_MAIN.dat` — incl. aquifer parameters (per-node or parametric grid), Kh anomalies, return-flow specs, initial heads |
 | `read_bc_main(path)` | `BC_MAIN.dat` |
 | `read_spec_head_bc(path)` | `SpecHeadBC.dat` |
+| `read_spec_flow_bc(path)` | Specified flow BC file |
+| `read_general_head_bc(path)` | General head BC file |
+| `read_constrained_head_bc(path)` | Constrained general head BC file |
 | `read_boundary_ts(path)` | `BoundTSD.dat` |
 | `read_pump_main(path)` | `Pump_MAIN.dat` |
+| `read_well_spec(path)` | `WellSpec.dat` — well locations, per-well pumping config, delivery element groups |
 | `read_elem_pump(path)` | `ElemPump.dat` |
 | `read_ts_pumping(path)` | `TSPumping.dat` |
-| `read_tile_drain(path)` | `TileDrain.dat` |
-| `read_subsidence(path)` | `Subsidence.dat` |
+| `read_tile_drain(path)` | `TileDrain.dat` — incl. hydrograph print control |
+| `read_subsidence(path)` | `Subsidence.dat` — incl. subsidence parameters (per-node or parametric grid) |
 
 ### Stream Readers
 
 | Function | Input file |
 |----------|-----------|
-| `read_stream_main(path)` | `Stream_MAIN.dat` |
+| `read_stream_main(path)` | `Stream_MAIN.dat` — incl. reach bed parameters and stream evaporation table |
 | `read_stream_inflow(path)` | `StreamInflow.dat` |
 | `read_diver_specs(path)` | `DiverSpecs.dat` |
 | `read_bypass_specs(path)` | `BypassSpecs.dat` |
@@ -121,9 +125,15 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 | Function | Input file |
 |----------|-----------|
 | `read_lake_main(path)` | `Lake_MAIN.dat` |
-| `read_rootzone_main(path)` | `RootZone_MAIN.dat` |
-| `read_swshed(path)` | `SWShed.dat` |
-| `read_unsatzone(path)` | `UnsatZone.dat` |
+| `read_rootzone_main(path)` | `RootZone_MAIN.dat` — incl. per-element soil parameter table |
+| `read_nonponded_ag_main(path)` | Non-ponded crops main (AGNPFL) — crop codes, root depths, CN and pointer tables, initial moisture |
+| `read_ponded_ag_main(path)` | Ponded crops main (PFL) — rice/refuge parameters and pointer tables |
+| `read_urban_main(path)` | Urban main (URBFL) — per-element urban water use parameters |
+| `read_native_veg_main(path)` | Native/riparian vegetation main (NVRVFL) |
+| `read_swshed(path)` | `SWShed.dat` — watershed definitions, root zone/aquifer parameters, initial conditions |
+| `read_unsatzone(path)` | `UnsatZone.dat` — per-element parameters and initial moisture |
+
+Pointer-table columns whose names start with `ic`/`irn`/`itscol` are 1-based column numbers referencing data columns of other files (ET, Precipitation, return-flow/reuse fractions, time-series pumping, surface-flow destinations, …); each dataclass docstring states which file every such column points at.
 
 ### HDF5 Output Readers
 
@@ -149,17 +159,19 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 
 ### Writers
 
-Every reader has a corresponding writer with the same name pattern (`read_*` → `write_*`). Writers accept the same result object returned by the reader:
+Writers follow the reader name pattern (`read_*` → `write_*`) and accept the same result object. Every section — including aquifer/subsidence parameters, initial conditions, and all pointer tables — is regenerated from the parsed DataFrames, so `read → edit DataFrame → write` produces a valid IWFM input file (verified: the sample model reproduces baseline heads exactly from fully regenerated inputs).
 
 ```python
-from iwfm_io import read_nodes, write_nodes
+from iwfm_io import read_gw_main, write_gw_main
 
-result = read_nodes("NodeXY.dat")
-result.data["x"] += 100  # modify
-write_nodes(result, "NodeXY_shifted.dat")
+gw = read_gw_main("GW_MAIN.dat")
+gw.initial_heads["head_layer_1"] += 5.0            # modify
+write_gw_main(gw, "GW_MAIN_new.dat", base_dir=sim_dir)
 ```
 
-Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_supply_adjust`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_swshed`, `write_unsatzone`.
+Component-main writers (`write_gw_main`, `write_subsidence_file`, `write_stream_main`, `write_rootzone_main`) accept `base_dir` — pass the simulation working directory (the folder of the simulation main file) so referenced paths are written relative to it; IWFM does not accept absolute paths.
+
+Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_supply_adjust`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_well_spec`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_swshed`, `write_unsatzone`.
 
 ### Validation
 

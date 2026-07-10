@@ -853,7 +853,7 @@ class IOModelAdapter:
     # -- Aquifer parameters (from the GW main file, NGROUP=0) -----------
 
     def _aquifer_params(self):
-        """Parse per-node aquifer parameters from the GW main's block.
+        """Per-node aquifer parameters from the GW main's parsed block.
 
         Only the NGROUP=0 layout (values listed at every node) is
         supported; parametric-grid models (NGROUP>0) require the grid
@@ -866,69 +866,35 @@ class IOModelAdapter:
                 "Aquifer parameters need the GW main file — open the model "
                 "with open_model() so it is discovered, or check that the "
                 "simulation main references it.")
-        from iwfm_io._tokens import is_comment, tokenize_data_line
-
-        data_lines = [l for l in self._gw_main.aquifer_param_raw
-                      if not is_comment(l)]
-        it = iter(data_lines)
-        ngroup = int(tokenize_data_line(next(it))[0])
-        if ngroup != 0:
+        if self._gw_main.ngroup:
             raise NotImplementedError(
                 f"Aquifer parameter block uses a parametric grid "
-                f"(NGROUP={ngroup}); only per-node values (NGROUP=0) can "
-                "be read without the DLL.")
-        # Factors line: FX FKH FS FN FV FL (FX applies to parametric
-        # grid coordinates only — not used for NGROUP=0)
-        factors = [float(t) for t in tokenize_data_line(next(it))]
-        fkh, fs, fn, fv, fl = (factors[1:] + [1.0] * 5)[:5]
+                f"(NGROUP={self._gw_main.ngroup}); only per-node values "
+                "(NGROUP=0) can be read without the DLL.")
+        df = self._gw_main.aquifer_params
+        if df is None:
+            raise RuntimeError(
+                "The GW main's aquifer parameter table could not be parsed.")
+        f = self._gw_main.param_factors
 
         n_layers = self.n_layers
         node_ids = self.nodes_df()["node_id"].astype(int).values
         pos = {int(nid): i for i, nid in enumerate(node_ids)}
         shape = (len(node_ids), n_layers)
-        kh = np.full(shape, np.nan)
-        ss = np.full(shape, np.nan)
-        sy = np.full(shape, np.nan)
-        kv_aquitard = np.full(shape, np.nan)
-        kv = np.full(shape, np.nan)
+        params = {name: np.full(shape, np.nan)
+                  for name in ("kh", "ss", "sy", "kv_aquitard", "kv")}
+        factor_of = {"kh": "fkh", "ss": "fs", "sy": "fn",
+                     "kv_aquitard": "fv", "kv": "fl"}
+        col_of = {"kv_aquitard": "aquitard_kv"}
 
-        # The raw block also contains everything AFTER the parameter
-        # table (anomaly zones, initial heads, …) whose rows can look
-        # identical, so stop after exactly n_nodes node blocks.
-        row_idx = None
-        layer = 0
-        nodes_seen = 0
-        for line in it:
-            toks = tokenize_data_line(line)
-            if not toks:
-                continue
-            try:
-                vals = [float(t) for t in toks]
-            except ValueError:
-                continue  # TUNIT* and other keyed text lines
-            if len(vals) == 6:            # new node: ID + 5 params
-                if nodes_seen >= len(node_ids):
-                    break
-                nodes_seen += 1
-                row_idx = pos.get(int(vals[0]))
-                layer = 0
-                vals = vals[1:]
-            elif len(vals) == 5:          # continuation: next layer
-                layer += 1
-            else:
-                continue
-            if row_idx is None or layer >= n_layers:
-                continue
-            kh[row_idx, layer] = vals[0] * fkh
-            ss[row_idx, layer] = vals[1] * fs
-            sy[row_idx, layer] = vals[2] * fn
-            kv_aquitard[row_idx, layer] = vals[3] * fv
-            kv[row_idx, layer] = vals[4] * fl
-            if nodes_seen == len(node_ids) and layer == n_layers - 1:
-                break
+        rows = df["node_id"].map(pos).values
+        cols = df["layer"].values - 1
+        ok = ~pd.isna(rows) & (cols < n_layers)
+        for name, arr in params.items():
+            values = df[col_of.get(name, name)].values * f.get(
+                factor_of[name], 1.0)
+            arr[rows[ok].astype(int), cols[ok].astype(int)] = values[ok]
 
-        params = {"kh": kh, "ss": ss, "sy": sy,
-                  "kv_aquitard": kv_aquitard, "kv": kv}
         self._cache["aquifer_params"] = params
         return params
 

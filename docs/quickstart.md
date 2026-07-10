@@ -107,7 +107,7 @@ from iwfm_io import read_simulation
 
 sim = read_simulation(".assets/sample_model/Simulation/Simulation_MAIN.IN")
 print(f"Period: {sim.sim_begin} → {sim.sim_end}")
-print(f"Time step: {sim.time_step}")
+print(f"Time step: {sim.time_unit}")
 ```
 
 ### Read groundwater and stream files

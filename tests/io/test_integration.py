@@ -52,7 +52,8 @@ class TestFullModelLoad:
             pytest.skip("GW files not available")
         gw = read_gw_main(path)
         assert gw.n_hydrographs > 0
-        assert len(gw.aquifer_param_raw) > 0
+        assert gw.ngroup is not None
+        assert gw.initial_heads is not None and len(gw.initial_heads) > 0
 
     def test_stream_component(self):
         from iwfm_io.readers.stream import read_stream_main
@@ -71,7 +72,14 @@ class TestFullModelLoad:
         if not path.exists():
             pytest.skip("RootZone files not available")
         rz = read_rootzone_main(path)
-        assert len(rz.file_paths) == 14
+        # 13 core sub-file roles + version-dependent extras
+        # (area_scale/surface_flow_dest in v4.12, final_moisture in v4.11)
+        assert len(rz.file_paths) >= 14
+        assert rz.file_paths["nonponded_ag"].endswith("NonPondedAg_MAIN.dat")
+        # The soil parameter table is fully parsed
+        assert rz.element_params is not None
+        assert len(rz.element_params) == 400
+        assert "icdstag" in rz.element_params.columns
 
     def test_hdf5_output_files(self):
         from iwfm_io.readers.hdf5 import read_budget_hdf, read_hydrograph_hdf, read_head_hdf

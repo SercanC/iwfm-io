@@ -18,7 +18,9 @@ class TestRootZoneMain:
             assert rz.header is not None
             assert rz.convergence > 0
             assert rz.max_iterations > 0
-            assert len(rz.file_paths) == 14
+            # 13 core roles + version-dependent extras (v4.12 sample
+            # adds area_scale and surface_flow_dest)
+            assert len(rz.file_paths) >= 14
 
     def test_rootzone_file_paths(self):
         from iwfm_io.readers.rootzone import read_rootzone_main

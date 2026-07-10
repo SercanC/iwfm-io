@@ -36,9 +36,40 @@ class GWMain:
         Output file for face flow hydrographs.
     face_flows : pd.DataFrame or None
         Columns: id, layer, node_a, node_b, name.
-    aquifer_param_raw : list[str]
-        Raw lines for the aquifer parameter section (NGROUP block),
-        stored verbatim for round-trip writing.
+    ngroup : int or None
+        Number of parametric grid groups (0 = parameters listed at
+        every GW node).
+    param_factors : dict
+        Aquifer parameter conversion factors: fx, fkh, fs, fn, fv, fl.
+        Parameter DataFrames store file-native values — apply these
+        factors for model units.
+    param_time_units : dict
+        Time units keyed by keyword (TUNITKH, TUNITV, TUNITL).
+    aquifer_params : pd.DataFrame or None
+        NGROUP=0 only.  Long format, one row per node-layer:
+        node_id, layer, kh, ss, sy, aquitard_kv, kv.
+    parametric_grids : list[dict]
+        NGROUP>0 only.  One dict per group: node_range (str), nodes
+        (list[int]), ndp, nep, elements (DataFrame or None), params
+        (DataFrame: node_id, x, y, layer, kh, ss, sy, aquitard_kv, kv).
+    anomaly_nebk : int
+        Number of hydraulic-conductivity anomaly elements (NEBK).
+    anomaly_factor : float
+        Conversion factor for anomaly Kh values (FACT).
+    anomaly_time_unit : str
+        Time unit for anomaly Kh values (TUNITH).
+    kh_anomalies : pd.DataFrame or None
+        Columns: ic, element_id, kh_layer_1..kh_layer_NL.
+    iflagrf : int or None
+        Groundwater return-flow simulation flag (IFLAGRF); None when
+        the file variant has no return-flow section.
+    return_flow : pd.DataFrame or None
+        Columns: node_id, dest_type (0=outside, 1=stream node,
+        3=lake), dest.
+    facthp : float or None
+        Conversion factor for initial heads (FACTHP).
+    initial_heads : pd.DataFrame or None
+        Columns: node_id, head_layer_1..head_layer_NL.
     """
 
     header: FileHeader = field(default_factory=FileHeader)
@@ -51,7 +82,19 @@ class GWMain:
     n_face_flows: int = 0
     face_flow_out_file: str | None = None
     face_flows: Any = None  # DataFrame
-    aquifer_param_raw: list[str] = field(default_factory=list)
+    ngroup: int | None = None
+    param_factors: dict = field(default_factory=dict)
+    param_time_units: dict = field(default_factory=dict)
+    aquifer_params: Any = None  # DataFrame
+    parametric_grids: list = field(default_factory=list)
+    anomaly_nebk: int = 0
+    anomaly_factor: float = 1.0
+    anomaly_time_unit: str = ""
+    kh_anomalies: Any = None  # DataFrame
+    iflagrf: int | None = None
+    return_flow: Any = None  # DataFrame
+    facthp: float | None = None
+    initial_heads: Any = None  # DataFrame
 
 
 @dataclass
@@ -96,6 +139,95 @@ class SpecifiedHeadFile:
     header: FileHeader = field(default_factory=FileHeader)
     n_nodes: int = 0
     factor: float = 1.0
+    data: Any = None  # DataFrame
+
+
+@dataclass
+class SpecifiedFlowBCFile:
+    """Parsed specified flow boundary conditions file.
+
+    Attributes
+    ----------
+    header : FileHeader
+    n_nodes : int
+        Number of specified-flow nodes (NQB).
+    factor : float
+        Conversion factor for flow values (FACT).
+    time_unit : str
+        Time unit of the flows (TUNIT).
+    data : pd.DataFrame or None
+        Columns: node_id, layer, itscol (column in the time-series BC
+        file; 0 = constant), flow.
+    """
+
+    header: FileHeader = field(default_factory=FileHeader)
+    n_nodes: int = 0
+    factor: float = 1.0
+    time_unit: str = ""
+    data: Any = None  # DataFrame
+
+
+@dataclass
+class GeneralHeadBCFile:
+    """Parsed general head boundary conditions file.
+
+    Attributes
+    ----------
+    header : FileHeader
+    n_nodes : int
+        Number of general-head BC nodes (NGB).
+    facth : float
+        Conversion factor for boundary heads (FACTH).
+    factc : float
+        Conversion factor for conductances (FACTC).
+    time_unit : str
+        Time unit of the conductance (TUNITC).
+    data : pd.DataFrame or None
+        Columns: node_id, layer, itscol (column in the time-series BC
+        file; 0 = constant), head, conductance.
+    """
+
+    header: FileHeader = field(default_factory=FileHeader)
+    n_nodes: int = 0
+    facth: float = 1.0
+    factc: float = 1.0
+    time_unit: str = ""
+    data: Any = None  # DataFrame
+
+
+@dataclass
+class ConstrainedHeadBCFile:
+    """Parsed constrained general head boundary conditions file.
+
+    Attributes
+    ----------
+    header : FileHeader
+    n_nodes : int
+        Number of constrained general-head BC nodes (NCGB).
+    facth : float
+        Conversion factor for boundary and limiting heads (FACTH).
+    factvl : float
+        Conversion factor for maximum boundary flows (FACTVL).
+    tunitvl : str
+        Time unit of the maximum boundary flows.
+    factc : float
+        Conversion factor for conductances (FACTC).
+    tunitc : str
+        Time unit of the conductances.
+    data : pd.DataFrame or None
+        Columns: node_id, layer, itscol (boundary-head column in the
+        time-series BC file; 0 = constant), head, conductance,
+        limiting_head, itscolf (max-flow column in the time-series BC
+        file; 0 = constant), max_flow, name.
+    """
+
+    header: FileHeader = field(default_factory=FileHeader)
+    n_nodes: int = 0
+    facth: float = 1.0
+    factvl: float = 1.0
+    tunitvl: str = ""
+    factc: float = 1.0
+    tunitc: str = ""
     data: Any = None  # DataFrame
 
 
@@ -154,17 +286,21 @@ class ElemPumpFile:
         typdstsk, dstsk, icfirigsk, icadjsk, icskmax, fskmax.
     n_groups : int
         Number of element groups for delivery (NGRP).
-    groups_raw : list[str]
-        Raw lines for element group definitions, stored verbatim.
     """
 
     header: FileHeader = field(default_factory=FileHeader)
     n_sinks: int = 0
     data: Any = None  # DataFrame
     n_groups: int = 0
-    groups_raw: list[str] = field(default_factory=list)
     #: Parsed delivery element groups: [{group_id, elements: [int]}, …]
     element_groups: list = field(default_factory=list)
+
+    @property
+    def element_groups_df(self):
+        """Delivery element groups as a long-format DataFrame
+        (columns: group_id, element_id)."""
+        from iwfm_io.readers._element_groups import element_groups_to_df
+        return element_groups_to_df(self.element_groups)
 
 
 @dataclass
@@ -182,15 +318,34 @@ class WellSpecFile:
         apply factors for model units.
     data : pd.DataFrame or None
         Columns: well_id, x, y, radius, perf_top, perf_bot, name.
+    pump_config : pd.DataFrame or None
+        Per-well pumping configuration, one row per well.  Columns use
+        the IWFM variable names: id, icolwl (column in the time-series
+        pumping file; 0 = none), fracwl (fraction of that column),
+        ioptwl (distribution option), typdstwl (-1=same element,
+        0=outside, 2=element, 4=subregion, 6=element group), dstwl
+        (destination id), icfirigwl (column in the irrigation fractions
+        file), icadjwl (column in the supply adjustment file), icwlmax
+        (max-pumping column in the time-series pumping file), fwlmax.
+    n_groups : int
+        Number of delivery element groups (NGRP).
     """
 
     header: FileHeader = field(default_factory=FileHeader)
     n_wells: int = 0
     factors: dict = field(default_factory=dict)
     data: Any = None  # DataFrame
+    pump_config: Any = None  # DataFrame
     n_groups: int = 0
     #: Parsed delivery element groups: [{group_id, elements: [int]}, …]
     element_groups: list = field(default_factory=list)
+
+    @property
+    def element_groups_df(self):
+        """Delivery element groups as a long-format DataFrame
+        (columns: group_id, element_id)."""
+        from iwfm_io.readers._element_groups import element_groups_to_df
+        return element_groups_to_df(self.element_groups)
 
 
 @dataclass
@@ -241,8 +396,16 @@ class TileDrainFile:
         Time unit for subsurface irrigation conductance (TUNITSI).
     sub_irrig_data : pd.DataFrame or None
         Columns: id, node, elev, conductance.
-    hyd_raw : list[str]
-        Raw lines for the hydrograph output section, stored verbatim.
+    n_hydrographs : int
+        Number of tile drain hydrograph outputs (NOUTTD).
+    hyd_factvlou : float
+        Flow output conversion factor (FACTVLOU).
+    hyd_unitvlou : str
+        Flow output unit (UNITVLOU).
+    hyd_out_file : str or None
+        Hydrograph output file (TDOUTFL), file-native path string.
+    hydrographs : pd.DataFrame or None
+        Columns: id, idtyp (1=tile drain, 2=subsurface irrigation), name.
     """
 
     header: FileHeader = field(default_factory=FileHeader)
@@ -256,7 +419,11 @@ class TileDrainFile:
     factcdcsi: float = 1.0
     tunit_si: str = "1day"
     sub_irrig_data: Any = None  # DataFrame
-    hyd_raw: list[str] = field(default_factory=list)
+    n_hydrographs: int = 0
+    hyd_factvlou: float = 1.0
+    hyd_unitvlou: str = ""
+    hyd_out_file: str | None = None
+    hydrographs: Any = None  # DataFrame
 
 
 @dataclass
@@ -278,9 +445,22 @@ class SubsidenceFile:
         Output file for subsidence hydrographs.
     hydrographs : pd.DataFrame or None
         Columns: id, subtyp, layer, x, y, node, name.
-    subsidence_param_raw : list[str]
-        Raw lines for the subsidence parameter section (NGROUP block),
-        stored verbatim for round-trip writing.
+    ngroup : int or None
+        Number of parametric grid groups (0 = parameters listed at
+        every GW node).
+    param_factors : dict
+        Conversion factors: fx, fsce, fsci, fdc, fdcmin, fhc.
+        ``subsidence_params`` stores file-native values — apply these
+        factors for model units.
+    subsidence_params : pd.DataFrame or None
+        NGROUP=0 only.  Long format, one row per node-layer: node_id,
+        layer, sce (elastic storage), sci (inelastic storage), dc
+        (interbed thickness), dcmin (min interbed thickness), hc
+        (pre-compaction head; 99999 = use initial heads).
+    parametric_grids : list[dict]
+        NGROUP>0 only.  One dict per group: node_range (str), nodes
+        (list[int]), ndp, nep, elements (DataFrame or None), params
+        (DataFrame: node_id, x, y, layer, sce, sci, dc, dcmin, hc).
     """
 
     header: FileHeader = field(default_factory=FileHeader)
@@ -290,4 +470,7 @@ class SubsidenceFile:
     hydrograph_factxy: float = 1.0
     hydrograph_out_file: str | None = None
     hydrographs: Any = None  # DataFrame
-    subsidence_param_raw: list[str] = field(default_factory=list)
+    ngroup: int | None = None
+    param_factors: dict = field(default_factory=dict)
+    subsidence_params: Any = None  # DataFrame
+    parametric_grids: list = field(default_factory=list)
