@@ -9,7 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from . import (build_triangulation, overlay_streams, overlay_grid,
-               excel_date_to_datetime, savefig, _has_df_methods)
+               excel_date_to_datetime, savefig, _has_df_methods,
+               style_map_axes)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -74,8 +75,7 @@ def plot_sparkline_grid(model, layer, begin_date, end_date,
         ax.plot(sx, sy, color="darkred", linewidth=0.5, alpha=0.8, zorder=10)
 
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     ax.set_title(f"Sparkline Grid — Head Layer {layer}")
 
     if save_path:

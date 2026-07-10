@@ -27,6 +27,8 @@ from . import (
     overlay_grid,
     savefig,
     excel_date_to_datetime,
+    style_map_axes,
+    map_legend_outside,
 )
 
 
@@ -110,8 +112,7 @@ def plot_grid_mesh(model, color_by="subregion", ax=None, figsize=(10, 8),
                     mpatches.Patch(facecolor=colormap(idx), edgecolor="gray",
                                    label=label_text, alpha=alpha)
                 )
-            ax.legend(handles=handles, loc="best", fontsize="small",
-                      title="Subregions", framealpha=0.9)
+            legend_handles = handles
         else:
             # Legacy DLL path
             sub_ids = model.get_subregion_ids()
@@ -142,8 +143,7 @@ def plot_grid_mesh(model, color_by="subregion", ax=None, figsize=(10, 8),
                     mpatches.Patch(facecolor=colormap(idx), edgecolor="gray",
                                    label=label_text, alpha=alpha)
                 )
-            ax.legend(handles=handles, loc="best", fontsize="small",
-                      title="Subregions", framealpha=0.9)
+            legend_handles = handles
     else:
         pc = PolyCollection(
             polygons,
@@ -152,11 +152,14 @@ def plot_grid_mesh(model, color_by="subregion", ax=None, figsize=(10, 8),
             linewidths=linewidth,
         )
         ax.add_collection(pc)
+        legend_handles = None
 
     ax.autoscale_view()
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
+    if legend_handles:
+        map_legend_outside(ax, handles=legend_handles, title="Subregions",
+                           ncol=1 if len(legend_handles) <= 12 else 2)
     if title:
         ax.set_title(title)
 
@@ -211,7 +214,7 @@ def plot_ground_surface_elevation(model, ax=None, cmap="terrain", levels=25,
     )
     if show_streams:
         overlay_streams(model, ax)
-        ax.legend(loc="upper right", fontsize="small")
+        map_legend_outside(ax)
 
     if save_path:
         savefig(fig, save_path)
@@ -443,7 +446,7 @@ def plot_gw_head_contour(model, layer=1, time_index=None,
 
     if show_streams:
         overlay_streams(model, ax)
-        ax.legend(loc="upper right", fontsize="small")
+        map_legend_outside(ax)
 
     if save_path:
         savefig(fig, save_path)
@@ -572,8 +575,7 @@ def plot_head_change(model, layer, heads_t1, heads_t2, ax=None,
 
     cs = ax.tricontourf(tri, diff, levels=contour_levels, cmap=cmap)
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     if title:
         ax.set_title(title)
     cb = fig.colorbar(cs, ax=ax, label=label, shrink=0.8)
@@ -661,8 +663,7 @@ def plot_stream_network(model, color_by="reach", ax=None, cmap="tab20",
                         label=f"Reach {int(reach_ids[i])}")
         # Show legend only when the number of reaches is manageable
         if n_reaches <= 20:
-            ax.legend(loc="best", fontsize="x-small", ncol=2,
-                      framealpha=0.9, title="Reaches")
+            map_legend_outside(ax, title="Reaches", ncol=1)
     else:
         for seg in segments:
             if len(seg) >= 2:
@@ -671,8 +672,7 @@ def plot_stream_network(model, color_by="reach", ax=None, cmap="tab20",
 
     ax.autoscale_view()
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     if title:
         ax.set_title(title)
 
@@ -773,8 +773,7 @@ def plot_well_locations(model, ax=None, cmap="plasma", figsize=(10, 8),
 
     ax.autoscale_view()
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     if title:
         ax.set_title(title)
 
@@ -930,12 +929,11 @@ def plot_lake_and_diversion_elements(model, ax=None, figsize=(10, 8),
     if not lake_polys and not div_polys:
         handles.append(mpatches.Patch(facecolor="white", edgecolor="gray",
                                       label="None found"))
-    ax.legend(handles=handles, loc="best", fontsize="small", framealpha=0.9)
 
     ax.autoscale_view()
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
+    map_legend_outside(ax, handles=handles)
     if title:
         ax.set_title(title)
 
@@ -1037,11 +1035,10 @@ def plot_tile_drain_locations(model, ax=None, figsize=(10, 8),
                marker=marker, linewidths=0.6, zorder=7, alpha=0.85,
                label=f"Tile drains ({len(td_x)})")
 
-    ax.legend(loc="best", fontsize="small", framealpha=0.9)
     ax.autoscale_view()
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
+    map_legend_outside(ax)
     if title:
         ax.set_title(title)
 

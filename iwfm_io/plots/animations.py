@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from . import (build_triangulation, overlay_streams, overlay_grid,
                get_stream_segments, get_stream_node_xy,
-               excel_date_to_datetime, _has_df_methods, savefig)
+               excel_date_to_datetime, _has_df_methods, savefig,
+               style_map_axes)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -63,8 +64,7 @@ def animate_gw_heads(model, layer, begin_date, end_date,
     overlay_streams(model, ax, color="black", linewidth=1)
     title = ax.set_title("")
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
 
     def update(frame):
         for c in ax.collections[:]:
@@ -127,8 +127,7 @@ def animate_stream_flows(model, layer, begin_date, end_date,
 
     fig, ax = plt.subplots(figsize=figsize)
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
 
     overlay_grid(model, ax, alpha=0.15)
     cs = ax.tricontourf(tri, heads[:, frame_idx[0]], levels=15,
@@ -209,8 +208,7 @@ def animate_depth_to_water(model, layer, begin_date, end_date,
     overlay_streams(model, ax, color="blue", linewidth=1)
     title = ax.set_title("")
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
 
     def update(frame):
         for c in ax.collections[:]:

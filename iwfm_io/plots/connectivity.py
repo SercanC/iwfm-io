@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.collections import LineCollection
 from . import (get_stream_node_xy, get_element_centroids, overlay_grid,
-               overlay_streams, _id_to_index_map, _has_df_methods, savefig)
+               overlay_streams, _id_to_index_map, _has_df_methods, savefig,
+               style_map_axes, map_legend_outside)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -111,8 +112,7 @@ def plot_diversion_network(model, ax=None, figsize=(12, 10),
                         alpha=0.6, zorder=7)
 
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     ax.set_title("Diversion Network")
 
     # Legend
@@ -123,7 +123,7 @@ def plot_diversion_network(model, ax=None, figsize=(12, 10),
         plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="gray",
                    markersize=6, label="Served element"),
     ]
-    ax.legend(handles=handles, loc="upper right", fontsize=8)
+    map_legend_outside(ax, handles=handles)
 
     if save_path:
         savefig(fig, save_path)
@@ -246,8 +246,7 @@ def plot_bypass_flow_diagram(model, ax=None, figsize=(12, 10),
                     markeredgecolor="black")
 
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     ax.set_title("Bypass Flow Diagram")
 
     handles = [
@@ -256,7 +255,7 @@ def plot_bypass_flow_diagram(model, ax=None, figsize=(12, 10),
         plt.Line2D([0], [0], marker="v", color="w", markerfacecolor="gray",
                    markersize=10, label="Destination"),
     ]
-    ax.legend(handles=handles, loc="upper right", fontsize=8)
+    map_legend_outside(ax, handles=handles)
 
     if save_path:
         savefig(fig, save_path)

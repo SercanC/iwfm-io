@@ -104,15 +104,22 @@ def stacked_area(x, series, title, ylabel, save_path, figsize=(12, 6)):
     go = _go()
     import numpy as np
     fig = go.Figure()
-    n_visible = 0
+    base_colors = {}
     for name, values in series:
         v = np.asarray(values, dtype=float)
         pos = np.clip(v, 0, None)
         neg = np.clip(v, None, 0)
         if not (pos.any() or neg.any()):
             continue  # all-zero series: no trace, don't burn a color slot
-        c = color(n_visible)
-        n_visible += 1
+        # Paired '<subsystem>_Inflow'/'_Outflow' columns share a hue
+        base = str(name)
+        for suf in ("_Inflow", "_Outflow"):
+            if base.endswith(suf):
+                base = base[: -len(suf)]
+                break
+        if base not in base_colors:
+            base_colors[base] = color(len(base_colors))
+        c = base_colors[base]
         common = dict(x=x, name=str(name), mode="lines",
                       line=dict(width=0.5, color=c),
                       fillcolor=rgba(c, 0.55), legendgroup=str(name))
@@ -175,4 +182,7 @@ def diverging_bars(names, values, title, xlabel, save_path,
     ))
     fig.update_layout(showlegend=False)
     apply_layout(fig, title, figsize, xaxis_title=xlabel)
+    # Symmetric range so equal in/out magnitudes read as equal bars
+    m = 1.2 * max(abs(v) for v in values) if len(values) else 1.0
+    fig.update_xaxes(range=[-m, m])
     return finish(fig, save_path)

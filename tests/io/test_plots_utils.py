@@ -66,6 +66,20 @@ def test_filter_balance_components_untagged_passthrough():
     assert out_vals.shape == (2, 3)
 
 
+def test_water_year_totals():
+    import pandas as pd
+    from iwfm_io.plots import water_year_totals
+
+    # Two water years of monthly ones: Oct 1990 .. Sep 1992
+    months = pd.date_range("1990-10-31", periods=24, freq="ME")
+    values = np.ones((24, 2))
+    ends, totals = water_year_totals(months, values)
+    assert totals.shape == (2, 2)
+    np.testing.assert_allclose(totals, 12.0)
+    assert [e.year for e in ends] == [1991, 1992]
+    assert all(e.month == 9 and e.day == 30 for e in ends)
+
+
 def test_sign_budget_components():
     from iwfm_io.plots import sign_budget_components
 

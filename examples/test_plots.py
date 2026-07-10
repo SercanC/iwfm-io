@@ -598,7 +598,7 @@ with iwfm_io.dll.IWFMModel(
             begin_date=bd, end_date=ed,
             save_path=os.path.join(OUT, "42_budget_sankey.png"))
         print("42 budget Sankey OK")
-        plt.close(fig)
+        plt.close("all")  # engine="auto" may return a plotly Figure
     except Exception as e:
         print(f"42 budget Sankey FAIL: {e}")
 

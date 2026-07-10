@@ -8,7 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from . import (get_stream_segments, get_stream_node_xy, overlay_grid,
-               plot_contour_map, _has_df_methods, savefig)
+               plot_contour_map, _has_df_methods, savefig,
+               style_map_axes, map_legend_outside)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -169,10 +170,9 @@ def plot_stream_aquifer_exchange_map(model, layer=1, factor=1.0,
                     zorder=5)
 
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     ax.set_title("Stream–Aquifer Exchange")
-    ax.legend(loc="upper right")
+    map_legend_outside(ax)
 
     if save_path:
         savefig(fig, save_path)

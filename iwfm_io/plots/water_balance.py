@@ -230,10 +230,10 @@ def _plotly_sankey(names, values, title, save_path, figsize=(14, 8)):
 
 def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
                        interval="1MON", fact_vl=CUFT_TO_AF,
-                       combine_storage=True, engine="auto",
+                       combine_storage=True, annual=True, engine="auto",
                        ax=None, figsize=(14, 8),
                        save_path=None):
-    """Sankey from model budget time-series averages.
+    """Sankey of the average water-year budget.
 
     Parameters
     ----------
@@ -244,6 +244,9 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
     combine_storage : bool
         Replace Beginning/Ending Storage with a flux-scale
         "Change in Storage" component (default True).
+    annual : bool
+        Show the average water-year (Oct–Sep) annual budget
+        (default). ``False`` averages the native interval instead.
     engine : str
         ``"plotly"`` uses plotly's Sankey (interactive HTML, or PNG via
         the *kaleido* package), ``"matplotlib"`` the built-in flow
@@ -264,6 +267,10 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
     # signed by their label direction so outflows leave the diagram.
     from . import filter_balance_components, sign_budget_components
     titles, values = filter_balance_components(titles, values)
+    if annual:
+        from . import excel_date_to_datetime, water_year_totals
+        _, values = water_year_totals(
+            excel_date_to_datetime(ts["dates"]), values)
     titles, signed = sign_budget_components(titles, values.mean(axis=0))
 
     # Group minor flows so labels stay readable
@@ -281,7 +288,8 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
         names_f.append("Other outflows")
         vals_f.append(other_out)
 
-    title = f"Water Balance — Location {location} (mean monthly, AF)"
+    period = "average water year" if annual else "mean per step"
+    title = f"Water Balance — Location {location} ({period}, AF)"
 
     if engine == "auto":
         try:
@@ -364,6 +372,7 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
                         fontsize=7, color="#0b0b0b")
 
     ax.axvline(0, color="black", linewidth=0.8)
+    ax.set_xlim(-1.15 * span, 1.15 * span)
     ax.set_yticks([])
     ax.set_xlabel("Mean flow (AF)")
     ax.set_title(title, fontsize=14)

@@ -218,6 +218,43 @@ def combine_storage_terms(names, values, extras=None, component_axis=1):
     return new_names, new_values, new_extras
 
 
+def water_year_totals(datetimes, values):
+    """Sum a time-series table to water years (Oct–Sep).
+
+    Parameters
+    ----------
+    datetimes : sequence of datetime
+        Timestamps for each row of *values*.
+    values : array-like, shape ``(n_times, n_components)``
+
+    Returns
+    -------
+    (wy_ends, totals) — one row per water year, dated by the year's
+    ending Sep 30. Change-in-Storage columns telescope to the true
+    annual value under this sum. Incomplete leading/trailing water
+    years (fewer time steps than a full year) are dropped — a stub
+    total would read as a real annual value.
+    """
+    import pandas as pd
+    df = pd.DataFrame(np.asarray(values, dtype=float),
+                      index=pd.DatetimeIndex(datetimes))
+    grouped = df.resample("YS-OCT")
+    wy = grouped.sum()
+    # Only the first and last bins can be incomplete; compare against
+    # the median bin size (tolerating leap-year variation) rather than
+    # the max, which would reject 365-day years next to a 366-day one.
+    counts = grouped.size()
+    if len(wy) > 1:
+        med = counts.median()
+        keep = np.ones(len(wy), dtype=bool)
+        keep[0] = counts.iloc[0] >= 0.95 * med
+        keep[-1] = counts.iloc[-1] >= 0.95 * med
+        wy = wy[keep]
+    ends = [(ts + pd.DateOffset(months=11, days=29)).to_pydatetime()
+            for ts in wy.index]
+    return ends, wy.to_numpy()
+
+
 # ──────────────────────────────────────────────────────────────────
 # Source resolution helpers
 # ──────────────────────────────────────────────────────────────────
@@ -518,8 +555,7 @@ def plot_element_map(source, values, ax=None, cmap="viridis", label="",
     ax.add_collection(pc)
     ax.autoscale_view()
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     if title:
         ax.set_title(title)
     cb = fig.colorbar(pc, ax=ax, label=label, shrink=0.8)
@@ -540,8 +576,7 @@ def plot_contour_map(source, node_values, ax=None, cmap="viridis",
     else:
         cs = ax.tricontour(tri, node_values, levels=levels, cmap=cmap)
     ax.set_aspect("equal")
-    ax.set_xlabel("Easting")
-    ax.set_ylabel("Northing")
+    style_map_axes(ax)
     if title:
         ax.set_title(title)
     cb = fig.colorbar(cs, ax=ax, label=label, shrink=0.8)
@@ -565,6 +600,29 @@ def overlay_grid(source, ax, color="gray", linewidth=0.2, alpha=0.4):
     pc = PolyCollection(polygons, facecolors="none", edgecolors=color,
                         linewidths=linewidth, alpha=alpha)
     ax.add_collection(pc)
+
+
+def style_map_axes(ax):
+    """Shared map chrome: Easting/Northing axis labels without the
+    coordinate tick labels (raw model coordinates rarely mean anything
+    to the reader)."""
+    ax.set_xlabel("Easting")
+    ax.set_ylabel("Northing")
+    ax.tick_params(labelbottom=False, labelleft=False)
+
+
+def map_legend_outside(ax, handles=None, title=None, ncol=1):
+    """Place a map legend outside the frame, at the right edge of the
+    figure so it clears any colorbar. ``savefig``'s tight bounding box
+    grows the saved image to include it. No-op without legend entries."""
+    fig = ax.figure
+    if handles is None:
+        handles, _ = ax.get_legend_handles_labels()
+    if not handles:
+        return None
+    return fig.legend(handles=handles, title=title, ncol=ncol,
+                      loc="center left", bbox_to_anchor=(0.98, 0.5),
+                      fontsize="small", framealpha=0.9)
 
 
 def savefig(fig, path, dpi=150):

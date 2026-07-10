@@ -56,13 +56,71 @@ def _finalise(fig, ax, title, ylabel, save_path, dpi, legend=True):
         dedup = {}
         for h, l in zip(handles, labels):
             dedup.setdefault(l, h)
-        ax.legend(dedup.values(), dedup.keys(), loc="best",
-                  fontsize="small", framealpha=0.8)
+        if len(dedup) > 10:
+            # Long legends cover the data — park them outside; the
+            # tight save bbox grows the image to fit
+            ax.legend(dedup.values(), dedup.keys(), loc="center left",
+                      bbox_to_anchor=(1.02, 0.5), fontsize="x-small",
+                      framealpha=0.8)
+        else:
+            ax.legend(dedup.values(), dedup.keys(), loc="best",
+                      fontsize="small", framealpha=0.8)
     _format_date_axis(ax)
     fig.tight_layout()
     if save_path:
         savefig(fig, save_path, dpi=dpi)
     return fig, ax
+
+
+def _component_base(name):
+    """Strip a zone-budget style '_Inflow'/'_Outflow' suffix so a
+    subsystem's two directions share one hue."""
+    s = str(name)
+    for suf in ("_Inflow", "_Outflow"):
+        if s.endswith(suf):
+            return s[: -len(suf)]
+    return s
+
+
+def _stacked_components(ax, datetimes, col_names, values):
+    """Sign-split stacked areas: positive parts stack up, negative down.
+
+    One fixed color per visible component, so a component's positive
+    and negative parts match and the two stacks don't restart the
+    color cycle. All-zero components don't burn a color slot, and a
+    subsystem's paired Inflow/Outflow columns share a hue.
+    """
+    pos = np.clip(values, 0, None)
+    neg = np.clip(values, None, 0)
+
+    has_pos = pos.sum(axis=0) > 0
+    has_neg = neg.sum(axis=0) < 0
+
+    from ._plotly import CATEGORICAL as cycle
+    comp_colors, base_colors = {}, {}
+    for j, visible in enumerate(has_pos | has_neg):
+        if visible:
+            base = _component_base(col_names[j])
+            if base not in base_colors:
+                base_colors[base] = cycle[len(base_colors) % len(cycle)]
+            comp_colors[j] = base_colors[base]
+
+    if has_pos.any():
+        ax.stackplot(
+            datetimes,
+            pos[:, has_pos].T,
+            labels=[col_names[i] for i, hp in enumerate(has_pos) if hp],
+            colors=[comp_colors[i] for i, hp in enumerate(has_pos) if hp],
+            alpha=0.75,
+        )
+    if has_neg.any():
+        ax.stackplot(
+            datetimes,
+            neg[:, has_neg].T,
+            labels=[col_names[i] for i, hn in enumerate(has_neg) if hn],
+            colors=[comp_colors[i] for i, hn in enumerate(has_neg) if hn],
+            alpha=0.75,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -440,14 +498,8 @@ def plot_budget_timeseries(
     datetimes = excel_date_to_datetime(dates_arr)
 
     if annual:
-        # Sum to water years (Oct-Sep); Change in Storage telescopes to
-        # the true annual value. Label each year by its ending Sep 30.
-        import pandas as pd
-        df = pd.DataFrame(values, index=pd.DatetimeIndex(datetimes))
-        wy = df.resample("YS-OCT").sum()
-        values = wy.to_numpy()
-        datetimes = [(ts + pd.DateOffset(months=11, days=29)).to_pydatetime()
-                     for ts in wy.index]
+        from . import water_year_totals
+        datetimes, values = water_year_totals(datetimes, values)
 
     if title is None:
         title = (f"Budget: {budget_type} (Location {location}"
@@ -465,38 +517,7 @@ def plot_budget_timeseries(
     fig, ax = _prepare_axes(ax, figsize)
 
     if stacked:
-        # Separate positive and negative components for a clean stack.
-        # One fixed color per component so its pos and neg parts match
-        # and the two stacks don't restart the color cycle.
-        pos = np.clip(values, 0, None)
-        neg = np.clip(values, None, 0)
-
-        has_pos = pos.sum(axis=0) > 0
-        has_neg = neg.sum(axis=0) < 0
-
-        cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-        comp_colors, k = {}, 0
-        for j, visible in enumerate(has_pos | has_neg):
-            if visible:
-                comp_colors[j] = cycle[k % len(cycle)]
-                k += 1
-
-        if has_pos.any():
-            ax.stackplot(
-                datetimes,
-                pos[:, has_pos].T,
-                labels=[col_names[i] for i, hp in enumerate(has_pos) if hp],
-                colors=[comp_colors[i] for i, hp in enumerate(has_pos) if hp],
-                alpha=0.75,
-            )
-        if has_neg.any():
-            ax.stackplot(
-                datetimes,
-                neg[:, has_neg].T,
-                labels=[col_names[i] for i, hn in enumerate(has_neg) if hn],
-                colors=[comp_colors[i] for i, hn in enumerate(has_neg) if hn],
-                alpha=0.75,
-            )
+        _stacked_components(ax, datetimes, col_names, values)
     else:
         for j in range(values.shape[1]):
             ax.plot(datetimes, values[:, j], label=col_names[j])
@@ -522,15 +543,28 @@ def plot_zbudget_timeseries(
     interval="1MON",
     fact_ar=1.0,
     fact_vl=CUFT_TO_AF,
+    balance_only=True,
+    annual=True,
+    engine="matplotlib",
     title=None,
     ylabel="Volume (AF)",
-    stacked=False,
+    stacked=True,
     ax=None,
     figsize=(12, 6),
     save_path=None,
     dpi=150,
 ):
     """Plot zone-budget components over time.
+
+    By default the plot shows **water-year totals** of the zone's
+    **mass-balance components** in acre-feet, mirroring
+    :func:`plot_budget_timeseries`: components are signed by their
+    ``(+)``/``(-)`` direction tags so inflows stack above the axis and
+    outflows below, and monthly values are summed to water years
+    ending Sep 30 (``annual=False`` plots the native interval).
+
+    ``engine="plotly"`` renders an interactive version — save as
+    ``.html``, or ``.png`` with kaleido; returns ``(Figure, None)``.
 
     Parameters
     ----------
@@ -546,9 +580,15 @@ def plot_zbudget_timeseries(
     begin_date, end_date : str or None
     interval : str
     fact_ar, fact_vl : float
+    balance_only : bool
+        Keep only (+)/(-)-tagged mass-balance components and sign them
+        by direction (default True).
+    annual : bool
+        Sum to water years, Oct–Sep (default True).
     title, ylabel : str
     stacked : bool
-        If ``True`` produce a stacked area chart; otherwise lines.
+        If ``True`` (default) produce a stacked area chart; otherwise
+        lines.
     ax, figsize, save_path, dpi : optional
 
     Returns
@@ -568,39 +608,52 @@ def plot_zbudget_timeseries(
     )
 
     dates_arr = result["dates"]
-    values = result["values"]       # (n_times, n_cols)
-    col_names = result.get("data_types", [f"Column {c}" for c in columns])
+    values = np.asarray(result["values"], dtype=float)  # (n_times, n_cols)
+    names = result.get("data_types")
+    if names is not None and len(names) and isinstance(names[0], str):
+        col_names = [str(n) for n in names]
+    else:
+        # The DLL returns integer type codes here — fetch real titles
+        try:
+            titles = model.get_zbudget_column_titles(
+                zbudget_type, zone_id, zone_extent, elements, layers,
+                zone_ids)
+            col_names = [titles[c - 1] if 1 <= c <= len(titles)
+                         else f"Column {c}" for c in columns]
+        except Exception:
+            col_names = [f"Column {c}" for c in columns]
+
+    if balance_only:
+        from . import filter_balance_components, sign_budget_components
+        col_names, values = filter_balance_components(col_names, values)
+        col_names, values = sign_budget_components(col_names, values)
 
     datetimes = excel_date_to_datetime(dates_arr)
+
+    if annual:
+        from . import water_year_totals
+        datetimes, values = water_year_totals(datetimes, values)
+
+    if title is None:
+        title = (f"Zone Budget: {zbudget_type} (Zone {zone_id}"
+                 + (", water-year totals)" if annual else ")"))
+
+    if engine == "plotly":
+        from . import _plotly
+        series = [(n, values[:, j]) for j, n in enumerate(col_names)]
+        if stacked:
+            return _plotly.stacked_area(datetimes, series, title, ylabel,
+                                        save_path, figsize)
+        return _plotly.line_chart(datetimes, series, title, ylabel,
+                                  save_path, figsize)
 
     fig, ax = _prepare_axes(ax, figsize)
 
     if stacked:
-        pos = np.clip(values, 0, None)
-        neg = np.clip(values, None, 0)
-        has_pos = pos.sum(axis=0) > 0
-        has_neg = neg.sum(axis=0) < 0
-
-        if has_pos.any():
-            ax.stackplot(
-                datetimes,
-                pos[:, has_pos].T,
-                labels=[col_names[i] for i, hp in enumerate(has_pos) if hp],
-                alpha=0.75,
-            )
-        if has_neg.any():
-            ax.stackplot(
-                datetimes,
-                neg[:, has_neg].T,
-                labels=[col_names[i] for i, hn in enumerate(has_neg) if hn],
-                alpha=0.75,
-            )
+        _stacked_components(ax, datetimes, col_names, values)
     else:
         for j in range(values.shape[1]):
             ax.plot(datetimes, values[:, j], label=col_names[j])
-
-    if title is None:
-        title = f"Zone Budget: {zbudget_type} (Zone {zone_id})"
 
     return _finalise(fig, ax, title, ylabel, save_path, dpi)
 

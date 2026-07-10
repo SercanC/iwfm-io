@@ -554,8 +554,8 @@ def plot_aquifer_parameter_histograms(
 
     Plots histograms of horizontal hydraulic conductivity (Kh),
     vertical hydraulic conductivity (Kv), specific yield (Sy),
-    and specific storage (Ss).  Optionally includes aquitard Kv
-    in a fifth panel.
+    specific storage (Ss), and vertical anisotropy (Kh/Kv).
+    Optionally includes aquitard Kv as well.
 
     Each subplot is annotated with mean, median, and standard
     deviation.
@@ -597,6 +597,10 @@ def plot_aquifer_parameter_histograms(
     if include_aquitard_kv:
         aq_kv = np.asarray(model.get_aquitard_vertical_k())[:, idx]
         params.append(("Aquitard Kv", aq_kv, "#9467bd"))
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        aniso = np.where(kv > 0, kh / kv, np.nan)
+    params.append(("Vertical Anisotropy (Kh/Kv)", aniso, "#8c564b"))
 
     n_params = len(params)
     if n_params <= 4:
