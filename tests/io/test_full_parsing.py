@@ -14,6 +14,11 @@ from tests.io.conftest import SIMULATION_DIR
 GW_DIR = SIMULATION_DIR / "GW"
 RZ_DIR = SIMULATION_DIR / "RootZone"
 
+pytestmark = pytest.mark.skipif(
+    not SIMULATION_DIR.is_dir(),
+    reason="sample model not present in .assets/",
+)
+
 
 class TestGWMainTail:
     def test_parametric_grid_and_initial_heads(self):
