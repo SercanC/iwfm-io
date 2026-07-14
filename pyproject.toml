@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iwfm-io"
-version = "2.1.0"
+version = "2.2.0"
 description = "Read, write, analyze and visualize IWFM (Integrated Water Flow Model) models: pure-Python file I/O, DLL wrapper, and 58 plot functions"
 readme = "README.md"
-license = "GPL-2.0-or-later"
-license-files = ["LICENSE"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.8"
 authors = [
     { name = "Sercan Ceyhan", email = "sercan.ceyhan@gmail.com" },

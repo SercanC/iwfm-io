@@ -270,7 +270,10 @@ See `docs/TEST_PLOTS_RESULTS.md` for detailed plot-test results and known issues
 
 ## License
 
-GPL v2+ (matches IWFM license)
+- **iwfm-io code**: Apache-2.0 (see `LICENSE` and `NOTICE`)
+- **IWFM itself and the DLL builds published as release assets**: GPL-2.0, Copyright California Department of Water Resources (see `LICENSE-DLLS.md`)
+
+The split reflects who wrote what: the Python code is an independent work that reads IWFM's file formats and calls the DLL's C API, while the DLL release assets are unmodified redistributions of DWR's GPL-2.0 binaries, published with their corresponding source.
 
 ## Credits
 
@@ -279,6 +282,7 @@ GPL v2+ (matches IWFM license)
 
 ## Version History
 
+- **v2.2.0** (2026-07-14) - **Relicensed iwfm-io code from GPL-2.0 to Apache-2.0.** IWFM and the DLL builds distributed as release assets remain GPL-2.0 (DWR) — see `LICENSE-DLLS.md`. No code changes.
 - **v2.1.0** (2026-07-10) - **Every input dataset is now a DataFrame, and writers regenerate files entirely from them.** Readers no longer stash unparsed sections as raw text: GW main aquifer parameters (per-node and parametric-grid layouts), Kh anomalies, return-flow specs and initial heads; subsidence parameters; tile-drain hydrograph controls; per-well pumping configuration; diversion specs incl. recharge zones and (old-format) spill locations; small watersheds; unsaturated zone; the root-zone soil table; plus new readers for the root-zone sub-components (non-ponded/ponded crops, urban, native vegetation) and the specified-flow / general-head / constrained general-head BC files. Pointer columns (`ic*`, `irn*`, `itscol*`) are documented per dataclass with the file they reference. Writers rebuild every section from the parsed DataFrames — verified against the real IWFM executables: the sample model reproduces baseline heads **exactly** from fully regenerated inputs (`read → write → PreProcessor → Simulation`, max head difference 0.0). `download_dll()` now offers six official DWR builds (2015.0.1403 → 2025.0.1747, incl. 2024.2.1594 used by C2VSimFG v1.5), sha256-verified from this project's releases. All examples repaired and a new `examples/09_full_input_datasets.py` tours the parsed datasets. Fixed: `validate_stratigraphy` false positives; element-group parsing of zero-element recharge zones.
 - **v2.0.0** (2026-07-09) - **Import package renamed `iwfm` → `iwfm_io`** to match the distribution name and coexist with other IWFM Python packages (cfbrush/iwfm, DWR's PyWFM). The pure-Python I/O layer moves to the top level and the DLL wrapper into an explicit subpackage — migration: `iwfm.io.X` → `iwfm_io.X`, `iwfm.plots` → `iwfm_io.plots`, `iwfm.IWFMModel` / `download_dll` / `load_dll` → `iwfm_io.dll.…`, `iwfm.run_model` → `iwfm_io.run_model`. No functional changes.
 - **v1.4.0** (2026-07-08) - Wells and diversions fully readable without the DLL: new `read_well_spec` (well locations, screens, names, delivery element groups), complete diversion-spec parsing (all component column/fraction pairs incl. spills where the format has them, destination type/id resolved to delivery elements for group/subregion/element destinations, recharge zones with loss fractions), and element-group parsing shared across well specs, element pumping, and diversion specs. `wells_df()` and `diversions_df()` on `IOModelAdapter` are now fully populated; `plot_well_locations` and `plot_diversion_network` (with delivery arrows) render DLL-free. Robust to real-world file quirks (comments glued to numbers, name comments missing the leading slash).

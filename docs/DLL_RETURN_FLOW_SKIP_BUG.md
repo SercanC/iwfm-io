@@ -1,5 +1,10 @@
 # DLL Bug: Missing Return Flow Section Skip
 
+> The Fortran excerpts quoted below are from IWFM (`Class_AppGW.f90`),
+> Copyright California Department of Water Resources, licensed under
+> GPL-2.0. They are reproduced here solely for bug analysis and are not
+> part of the iwfm-io code or its Apache-2.0 license.
+
 ## Summary
 
 Two subroutines in `Class_AppGW.f90` fail to skip the Groundwater Return Flow section when re-reading `GW_MAIN.dat` from disk. This causes `ReadInitialHeads` to start reading from the wrong file position, producing a spurious "Node ID 1 is listed more than once for initial groundwater heads" fatal error.

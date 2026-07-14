@@ -10,7 +10,7 @@ tool; corrections are welcome via issues/PRs.
 | Author / origin | Sercan Ceyhan | Tyler Hatch — hosted by DWR's Sustainable Groundwater Management Office | Charles Brush (Hydrolytics; formerly DWR C2VSim lead) |
 | Core approach | Library API: parse model **files** into pandas/GeoDataFrames; DLL optional | ctypes wrapper around the IWFM **DLL** — all data via DLL calls | Utility toolbox + CLI: ~180 single-purpose functions, mostly file→file converters |
 | Import / install | `pip install iwfm-io` → `import iwfm_io` | PyPI `iwfm-pywfm` / conda `cadwr-sgmo::pywfm` → `import pywfm` | source install (`pip install -e`) → `import iwfm` |
-| License | GPL-2.0-or-later | MIT | see repo |
+| License | Apache-2.0 (DLL release assets: GPL-2.0, DWR) | MIT | see repo |
 | **Platforms** | **any OS** for I/O, analysis, plotting (DLL wrapper Windows-only) | **Windows only** (DLL dependency; Linux experimental) | any OS |
 | Reads IWFM text inputs without the DLL | ✅ all subsystems, 2015-era and 2024.x formats | ❌ (DLL required for everything) | ✅ broad coverage |
 | Reads budget/zbudget/heads outputs without the DLL | ✅ HDF5 + text | ❌ (via `IW_Budget_*` DLL calls) | ✅ (HDF5 CLI group, headall tools) |
