@@ -75,6 +75,12 @@ class TestHeadAllOut:
             assert "date" in df.columns
             # Should have many columns (nodes * layers)
             assert len(df.columns) > 100
+            # Columns carry the header node IDs, layer-major (441 nodes x
+            # 2 layers in the sample model), mirroring read_head_hdf
+            assert df.columns[1] == "node_1_layer_1"
+            assert df.columns[441] == "node_441_layer_1"
+            assert df.columns[442] == "node_1_layer_2"
+            assert df.columns[-1] == "node_441_layer_2"
 
 
 class TestFinalState:

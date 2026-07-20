@@ -63,10 +63,16 @@ class IWFMModel:
                 pp_len, c_pp, sim_len, c_sim, wsa_len, c_wsa,
                 c_routed, c_inquiry, byref(model_id), byref(iStat),
             )
-        else:
+        elif getattr(self._dll, "_iwfm_multi_model", True):
             self._dll.IW_Model_New(
                 pp_len, c_pp, sim_len, c_sim,
                 c_routed, c_inquiry, byref(model_id), byref(iStat),
+            )
+        else:
+            # 2015-line DLLs: IW_Model_New has no model-id out-parameter.
+            self._dll.IW_Model_New(
+                pp_len, c_pp, sim_len, c_sim,
+                c_routed, c_inquiry, byref(iStat),
             )
         _check_status(iStat, self._dll)
         self._model_id = model_id.value

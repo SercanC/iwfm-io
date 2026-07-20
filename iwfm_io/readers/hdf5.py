@@ -553,15 +553,24 @@ def read_budget_hdf(
     dict with keys:
 
     ``'locations'`` : list of str
-        Location/subregion names in file order.
+        Location/subregion names in the file's native location order — the
+        same order the IWFM DLL reports (read from the
+        ``Attributes/cLocationNames`` dataset, e.g. subregions first, then
+        'ENTIRE MODEL AREA').  Falls back to alphabetical HDF5 iteration
+        order when that dataset is absent.
     ``'data'`` : dict mapping location_name -> :class:`pandas.DataFrame`
         Each DataFrame has a :class:`pandas.DatetimeIndex` and columns named
         from the ``LocationDataN%cFullColumnHeaders`` attribute (first 'Time'
         entry stripped).  Generic names ``col_1``, ``col_2``, … are used when
-        the attribute is absent.
+        the attribute is absent.  Iterates in the same order as
+        ``'locations'``.
     ``'data_types'`` : dict mapping column_name -> int
         IWFM data type code for each column (1-11).  Same mapping applies to
         all locations (controlled by ``NLocationData``).
+    ``'interval'`` : str or None
+        The file's native output interval from the ``TimeStep%Unit``
+        attribute (e.g. ``'1DAY'``, ``'1MON'``), regardless of any
+        resampling requested via *interval*.
 
     Raises
     ------
@@ -583,12 +592,20 @@ def read_budget_hdf(
                 f"Unsupported interval '{interval}'. Use '1MON' or '1YEAR'."
             )
 
-    result: Dict = {"locations": [], "data": {}, "data_types": {}}
+    result: Dict = {"locations": [], "data": {}, "data_types": {},
+                    "interval": None}
 
     with h5py.File(path, "r") as f:
         # Build shared DatetimeIndex from TimeStep attributes
         date_index = _build_date_index(f["Attributes"].attrs)
         root_attrs = f["Attributes"].attrs
+
+        # Native output interval, e.g. b'1DAY' / b'1MON'
+        native_unit = root_attrs.get("TimeStep%Unit")
+        if native_unit is not None:
+            if isinstance(native_unit, bytes):
+                native_unit = native_unit.decode()
+            result["interval"] = str(native_unit).strip()
 
         # Read data column types (same for all locations)
         raw_col_types: Optional[np.ndarray] = None
@@ -596,8 +613,23 @@ def read_budget_hdf(
         if type_key in root_attrs:
             raw_col_types = np.asarray(root_attrs[type_key])
 
-        # Collect location dataset names (everything except 'Attributes')
+        # Collect location dataset names (everything except 'Attributes').
+        # h5py iterates alphabetically, which is not IWFM's location order
+        # (e.g. 'NODE 19' sorts before 'NODE 8', and 'ENTIRE MODEL AREA'
+        # before the subregions).  The DLL's order is stored in the
+        # Attributes/cLocationNames dataset — use it when it matches the
+        # group names so positional selection agrees with DLL semantics
+        # and LocationData{N} attributes align with the right dataset.
         location_names = [k for k in f.keys() if k != "Attributes"]
+        attrs_group = f["Attributes"]
+        if isinstance(attrs_group, h5py.Group) and \
+                "cLocationNames" in attrs_group:
+            ordered = [
+                (s.decode() if isinstance(s, bytes) else str(s)).strip()
+                for s in attrs_group["cLocationNames"][()]
+            ]
+            if sorted(ordered) == sorted(location_names):
+                location_names = ordered
         result["locations"] = location_names
 
         for loc_idx, loc_name in enumerate(location_names, start=1):

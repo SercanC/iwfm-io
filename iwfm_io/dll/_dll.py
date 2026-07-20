@@ -112,7 +112,7 @@ def list_dll_versions():
     return versions
 
 
-def load_dll(version=None, dll_path=None):
+def load_dll(version=None, dll_path=None, download=True):
     """Load the IWFM DLL and register all function signatures.
 
     Parameters
@@ -123,11 +123,19 @@ def load_dll(version=None, dll_path=None):
         then in ``~/.iwfm/dlls/{version}/IWFM_C_x64.dll``.
     dll_path : str or pathlib.Path, optional
         Explicit path to the DLL file.  Takes precedence over *version*.
+    download : bool
+        When *version* names a published build that is not installed
+        locally, fetch it via :func:`iwfm_io.dll.download_dll` into
+        ``~/.iwfm/dlls/{version}/`` and load it (default True).  Set
+        False to keep the search-only behaviour (offline/air-gapped
+        machines).  Has no effect on *dll_path* loads or the other
+        resolution steps.
 
     Resolution order
     ----------------
     1. *dll_path* — used directly when provided.
-    2. *version* argument — searches ``dlls/{version}/``.
+    2. *version* argument — searches ``dlls/{version}/``; on a miss,
+       downloads the build if it is published and *download* is True.
     3. ``IWFM_DLL_VERSION`` environment variable — same search as *version*.
     4. ``dlls/default_version.txt`` — project-level version config file.
     5. Legacy auto-discovery: project root, ``DLL/Bin/``, ``source_code/Bin/``.
@@ -151,14 +159,30 @@ def load_dll(version=None, dll_path=None):
     # 2. Explicit version argument
     if resolved is None and version is not None:
         resolved = _find_version(version)
+        download_error = None
+        if resolved is None and download:
+            from .download import KNOWN_DLLS, download_dll
+            if version in KNOWN_DLLS:
+                try:
+                    download_dll(version)
+                    resolved = _find_version(version)
+                except Exception as exc:  # network failure, bad archive, ...
+                    download_error = exc
         if resolved is None:
             installed = list_dll_versions()
+            hint = (
+                f"  Download failed: {download_error}\n" if download_error
+                else "" if download
+                else "  (download=False: automatic fetch disabled.)\n"
+            )
             raise FileNotFoundError(
                 f"IWFM DLL version '{version}' not found.\n"
                 f"  Searched: {os.path.join(_PROJECT_DLLS, version)}\n"
                 f"       and: {os.path.join(_USER_DLLS, version)}\n"
+                f"{hint}"
                 f"  Installed versions: {installed or '(none)'}\n"
-                f"  Place IWFM_C_x64.dll in dlls/{version}/ to register it."
+                f"  Place IWFM_C_x64.dll in dlls/{version}/ to register it, "
+                f"or use a published build (iwfm_io.dll.download_dll)."
             )
 
     # 3. IWFM_DLL_VERSION environment variable
@@ -493,6 +517,22 @@ def _register_zbudget(dll):
 # ===================================================================
 
 def _register_model(dll):
+    # The 2015-line DLLs predate multi-model support: they do not export
+    # IW_Model_Switch / IW_Model_GetCurrentModelID / IW_Model_WSA_New, and
+    # their IW_Model_New takes 7 arguments — no model-id out-parameter.
+    # Calling the 8-argument form on them makes the DLL write iStat into
+    # the model-id slot, silently swallowing open failures.  Detect the
+    # generation from the export set; IWFMModel checks this flag to choose
+    # the matching call form.
+    dll._iwfm_multi_model = hasattr(dll, 'IW_Model_Switch')
+    if dll._iwfm_multi_model:
+        # (iLen_PP, cPP, iLen_Sim, cSim, IsRoutedStreams, IsForInquiry,
+        #  iModelID, iStat)
+        _new_sig = [_P_INT, _CHAR, _P_INT, _CHAR, _P_INT, _P_INT, _P_INT, _P_INT]
+    else:
+        # (iLen_PP, cPP, iLen_Sim, cSim, IsRoutedStreams, IsForInquiry, iStat)
+        _new_sig = [_P_INT, _CHAR, _P_INT, _CHAR, _P_INT, _P_INT, _P_INT]
+
     _sigs = [
         # ------------------------------------------------------------------
         # Constructor / Destructor
@@ -505,10 +545,7 @@ def _register_model(dll):
             _P_INT, _P_INT, _P_INT, _P_INT,
         ]),
 
-        # (iLen_PP, cPP, iLen_Sim, cSim, iLen_Log, cLog, HasLogFile, iStat)
-        ('IW_Model_New', [
-            _P_INT, _CHAR, _P_INT, _CHAR, _P_INT, _P_INT, _P_INT, _P_INT,
-        ]),
+        ('IW_Model_New', _new_sig),
 
         ('IW_Model_Kill', [_P_INT]),
 

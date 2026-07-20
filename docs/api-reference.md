@@ -22,7 +22,7 @@
 
 | Function | Description |
 |----------|-------------|
-| `load_dll(dll_path=None, version=None)` | Load the IWFM DLL. Returns a `ctypes.WinDLL` handle. |
+| `load_dll(dll_path=None, version=None, download=True)` | Load the IWFM DLL. Returns a `ctypes.WinDLL` handle. When `version` names a published build that is not installed, it is downloaded automatically (`download=False` disables the fetch for offline machines). |
 | `list_dll_versions()` | Scan `dlls/` and `~/.iwfm/dlls/` for installed DLL versions. |
 | `download_dll(version="2025.0.1747")` | Download an official DLL build (sha256-verified) from the project's GitHub releases into `~/.iwfm/dlls/<version>/`. |
 | `get_version(dll)` | Return the IWFM version string. |
@@ -139,7 +139,7 @@ Pointer-table columns whose names start with `ic`/`irn`/`itscol` are 1-based col
 
 | Function | Description |
 |----------|-------------|
-| `read_budget_hdf(path)` | Budget HDF5 → dict with `locations` list and `data` dict of DataFrames |
+| `read_budget_hdf(path)` | Budget HDF5 → dict with `locations` (native DLL order), `data` dict of DataFrames, `data_types`, and `interval` (the file's native output interval, e.g. `'1DAY'`) |
 | `read_head_hdf(path, n_nodes, n_layers)` | GWHeadAll.hdf → DataFrame |
 | `read_hydrograph_hdf(path)` | Hydrograph HDF5 → DataFrame |
 | `read_zone_def(path)` | Zone definition file → zone mapping |
@@ -151,7 +151,7 @@ Pointer-table columns whose names start with `ic`/`irn`/`itscol` are 1-based col
 |----------|-------------|
 | `read_hydrograph_out(path)` | `GWHyd.out` or `StrmHyd.out` → DataFrame |
 | `read_hydrograph_out_with_metadata(path)` | Same, plus parsed metadata |
-| `read_head_all_out(path)` | `GWHeadAll.out` → DataFrame |
+| `read_head_all_out(path)` | `GWHeadAll.out` → DataFrame with `node_<id>_layer_<L>` columns |
 | `read_final_state_out(path)` | `FinalGWHeads.out`, etc. → DataFrame |
 | `read_flow_out(path)` | `FaceFlow.out`, `BoundaryFlow.out` → DataFrame |
 | `read_velocity_out(path)` | `GWVelocities.out` → DataFrame |

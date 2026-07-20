@@ -55,6 +55,38 @@ class TestBudgetHDF:
             assert len(df) > 0
             assert df.index.name == "datetime"
 
+    def test_native_interval_and_location_order(self):
+        """The native output interval is exposed and locations follow the
+        file's cLocationNames (DLL) order, not h5py's alphabetical order."""
+        from iwfm_io.readers.hdf5 import read_budget_hdf
+
+        path = RESULTS_DIR / "GW.hdf"
+        if not path.exists():
+            pytest.skip(f"{path} not found")
+
+        result = read_budget_hdf(path)
+        assert result["interval"] == "1DAY"
+        # DLL order: subregions first, ENTIRE MODEL AREA last (alphabetical
+        # iteration would put ENTIRE MODEL AREA first)
+        assert result["locations"] == [
+            "Region1 (SR1)", "Region2 (SR2)", "ENTIRE MODEL AREA"]
+        assert list(result["data"].keys()) == result["locations"]
+        # Resampling must not change the reported native interval
+        monthly = read_budget_hdf(path, interval="1MON")
+        assert monthly["interval"] == "1DAY"
+
+    def test_location_order_numeric_names(self):
+        """StrmNodeBud: numeric DLL order NODE 1, 8, 19 (alphabetical would
+        yield NODE 1, 19, 8)."""
+        from iwfm_io.readers.hdf5 import read_budget_hdf
+
+        path = RESULTS_DIR / "StrmNodeBud.hdf"
+        if not path.exists():
+            pytest.skip(f"{path} not found")
+
+        result = read_budget_hdf(path)
+        assert result["locations"] == ["NODE 1", "NODE 8", "NODE 19"]
+
     def test_read_strm_budget(self):
         from iwfm_io.readers.hdf5 import read_budget_hdf
 

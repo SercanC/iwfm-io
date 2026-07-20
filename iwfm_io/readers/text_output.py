@@ -148,7 +148,12 @@ def read_head_all_out(path: Union[str, Path]) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Columns: date (str), then one column per node per layer.
+        Columns: date (str), then one column per node per layer named
+        ``node_<id>_layer_<L>`` (layer-major, mirroring
+        :func:`~iwfm_io.readers.hdf5.read_head_hdf`), using the node IDs
+        from the file's ``TIME`` header line.  Falls back to generic
+        ``col_1``, ``col_2``, … names when the header node IDs cannot be
+        matched to the data width.
     """
     path = Path(path)
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -207,7 +212,15 @@ def read_head_all_out(path: Union[str, Path]) -> pd.DataFrame:
         return pd.DataFrame()
 
     n_cols = max(len(r) for r in all_values)
-    col_names = [f"col_{i + 1}" for i in range(n_cols)]
+    if node_ids and n_cols % len(node_ids) == 0:
+        n_layers = n_cols // len(node_ids)
+        col_names = [
+            f"node_{nid}_layer_{layer}"
+            for layer in range(1, n_layers + 1)
+            for nid in node_ids
+        ]
+    else:
+        col_names = [f"col_{i + 1}" for i in range(n_cols)]
     for r in all_values:
         while len(r) < n_cols:
             r.append(float("nan"))
