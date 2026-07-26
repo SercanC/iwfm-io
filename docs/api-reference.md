@@ -246,7 +246,7 @@ list of `{group_id, elements, [fractions]}`.
 
 | Function | Description |
 |----------|-------------|
-| `create_scenario(base, out_dir, changes=[...])` | Copy a model's inputs (+ `Bin/`) and apply changes; returns the scenario folder ready for `iwfm_io.run_model()` |
+| `create_scenario(base, out_dir, changes=[...])` | Copy a model's inputs (+ `Bin/`) and apply changes; returns the scenario folder ready for `iwfm_io.run_model()`. `link_unchanged=True` hardlinks unchanged inputs instead of copying (copy-on-change; near-zero marginal disk/time for many worker copies of a large model — changed files and run-rewritten types like `.out`/`.bin`/`.bud`/`.dss`/`.hdf` are always real copies; falls back to copying across filesystems) |
 | `set_keyed_value(relpath, keyword, value)` | Change factory: edit a `VALUE / KEYWORD` line (e.g. `EDT` end date) preserving layout |
 | `replace_text(relpath, old, new, count=-1)` | Change factory: literal text replacement in one file |
 

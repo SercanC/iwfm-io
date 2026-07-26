@@ -26,18 +26,29 @@ readers/writers for structured edits.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from pathlib import Path
 
 from iwfm_io._tokens import is_comment, split_keyed_line
+from iwfm_io._writer import replace_file_text as _replace_file_text
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SUBDIRS = ("Preprocessor", "Simulation", "Budget", "ZBudget", "Bin")
 
+#: File suffixes always real-copied (never hardlinked) under
+#: ``link_unchanged=True`` — the IWFM executables rewrite these during a
+#: run (message/log files, the preprocessor binary, text and HDF5
+#: budget outputs) or open them read-write (HEC-DSS), which through a
+#: hardlink could mutate the base model's copy.
+_NEVER_LINK_SUFFIXES = frozenset({".out", ".bin", ".bud", ".log", ".dss",
+                                  ".hdf", ".h5"})
+
 
 def create_scenario(base_dir, out_dir, changes=None,
-                    subdirs=_DEFAULT_SUBDIRS, overwrite=False):
+                    subdirs=_DEFAULT_SUBDIRS, overwrite=False,
+                    link_unchanged=False):
     """Copy a model folder and apply modifications to the copy.
 
     Parameters
@@ -58,6 +69,28 @@ def create_scenario(base_dir, out_dir, changes=None,
         run will write.
     overwrite : bool
         Delete an existing *out_dir* first (default False: raise).
+    link_unchanged : bool
+        Hardlink files into the scenario instead of copying them
+        (default False). IWFM only reads its inputs during a run, and
+        files modified by *changes* are replaced (write temp + rename)
+        rather than edited in place, so the base model is never
+        touched — copy-on-change semantics. This makes stamping out
+        many worker copies of a large model near-instant with roughly
+        zero marginal disk for shared inputs. If hardlinking fails
+        (e.g. *out_dir* is on a different filesystem than *base_dir*),
+        falls back to copying with a warning. ``Results/`` is always a
+        real directory, and files the executables rewrite during a run
+        (``.out``, ``.bin``, ``.bud``, ``.log``, ``.dss``, ``.hdf``,
+        ``.h5``) are always real copies — the runtime may truncate or
+        update them in place, which through a hardlink would corrupt
+        the base model.
+
+        **Invariant for custom change callables:** under this mode a
+        change must *replace* a file it modifies (write to a temp file,
+        then rename over the target) — editing a hardlinked file in
+        place would silently mutate the base model's copy. The built-in
+        factories (:func:`set_keyed_value`, :func:`replace_text`) and
+        the ``iwfm_io`` writers already do this.
 
     Returns
     -------
@@ -73,12 +106,31 @@ def create_scenario(base_dir, out_dir, changes=None,
                 f"{out_dir} already exists. Pass overwrite=True to replace it.")
         shutil.rmtree(out_dir)
 
+    copy_function = shutil.copy2
+    if link_unchanged:
+        link_failed = False
+
+        def copy_function(src, dst):
+            nonlocal link_failed
+            if (not link_failed
+                    and Path(src).suffix.lower() not in _NEVER_LINK_SUFFIXES):
+                try:
+                    os.link(src, dst)
+                    return
+                except OSError as exc:
+                    link_failed = True
+                    logger.warning(
+                        "create_scenario: hardlink failed (%s) — falling "
+                        "back to copying. Are %s and %s on the same "
+                        "filesystem?", exc, base_dir, out_dir)
+            shutil.copy2(src, dst)
+
     out_dir.mkdir(parents=True)
     copied = []
     for sub in subdirs:
         src = base_dir / sub
         if src.is_dir():
-            shutil.copytree(src, out_dir / sub)
+            shutil.copytree(src, out_dir / sub, copy_function=copy_function)
             copied.append(sub)
     if not copied:
         raise FileNotFoundError(
@@ -126,7 +178,7 @@ def set_keyed_value(relpath, keyword, value):
         i, old_val = hits[0]
         # Replace the value in place, preserving surrounding layout
         lines[i] = lines[i].replace(str(old_val), str(value), 1)
-        path.write_text("".join(lines))
+        _replace_file_text(path, "".join(lines))
         logger.info("set_keyed_value: %s %s: %r -> %r",
                     relpath, keyword, old_val, value)
     return _apply
@@ -146,7 +198,7 @@ def replace_text(relpath, old, new, count=-1):
         if n == 0:
             raise ValueError(
                 f"replace_text: {old!r} not found in {relpath}")
-        path.write_text(text.replace(old, new, count))
+        _replace_file_text(path, text.replace(old, new, count))
         logger.info("replace_text: %s: %d occurrence(s) of %r replaced",
                     relpath, n if count == -1 else min(n, count), old)
     return _apply

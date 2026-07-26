@@ -6,12 +6,36 @@ Builds lines in memory and writes them out on :meth:`flush`.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import pandas as pd
 
 from iwfm_io._tokens import format_iwfm_date
 from iwfm_io.models.base import FileHeader, TimeSeriesSpec
+
+
+def replace_file_text(path: str | Path, text: str,
+                      encoding: str | None = None,
+                      newline: str | None = None) -> None:
+    """Atomically replace *path*'s contents (write temp + rename).
+
+    Never truncates the target in place, so if *path* is a hardlink
+    (``create_scenario(..., link_unchanged=True)``) the linked sibling
+    in the base model is left untouched and *path* becomes an
+    independent file.
+    """
+    path = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 class IWFMFileWriter:
@@ -246,9 +270,8 @@ class IWFMFileWriter:
         if target is None:
             raise ValueError("No output path specified")
         target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "w", encoding="utf-8", newline="\n") as fh:
-            for line in self._lines:
-                fh.write(line + "\n")
+        replace_file_text(target, "".join(line + "\n" for line in self._lines),
+                          encoding="utf-8", newline="\n")
 
     def to_string(self) -> str:
         """Return all lines joined as a single string."""

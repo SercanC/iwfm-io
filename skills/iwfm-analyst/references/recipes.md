@@ -86,6 +86,11 @@ iwfm_io.run_model(scen)   # Windows; exes from <model>/Bin or IWFM_BIN_DIR
 Runtime scales with model size (sample ≈ 40 s; C2VSimFG ≈ 8 h — run in
 background and monitor).
 
+For many parallel copies of a large model, `link_unchanged=True`
+hardlinks unchanged inputs instead of copying (near-instant, ~zero
+marginal disk; changed files stay real copies). Same-volume only —
+falls back to copying otherwise.
+
 ## Individual input files
 
 ```python
