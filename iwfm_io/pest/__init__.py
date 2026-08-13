@@ -64,6 +64,10 @@ Currently provided:
   ``apply_kriging_factors``): pure-numpy ordinary kriging on the FE mesh
   (exp/sph/gau variograms, anisotropy, zones) — factors computed once,
   FAC2REAL-style application in the forward run.
+- Constrained reparameterization (:class:`RatioChain`): anchor + bounded
+  ratio/exponent chains with corner-checked ordering guarantees (no
+  invalid ensemble draw), forward-run ``evaluate()``, PEST par rows;
+  plus Texture2Par ``PP_LOCS`` file I/O.
 
 Quick-start::
 
@@ -88,6 +92,11 @@ from iwfm_io.pest.wells import (
     WellMapping,
     build_well_mapping,
     select_best_layers,
+)
+from iwfm_io.pest.reparam import (
+    RatioChain,
+    read_t2p_pilot_points,
+    write_t2p_pilot_points,
 )
 from iwfm_io.pest.pilot_points import (
     ExpVariogram,
@@ -181,6 +190,9 @@ __all__ = [
     "ApplyAction",
     "ParamSpec",
     "ExpVariogram",
+    "RatioChain",
+    "read_t2p_pilot_points",
+    "write_t2p_pilot_points",
     "SphVariogram",
     "GauVariogram",
     "place_pilot_points_grid",

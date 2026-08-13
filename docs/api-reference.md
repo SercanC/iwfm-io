@@ -448,6 +448,16 @@ pp_values, log=True)` is the cheap FAC2REAL step for the forward run
 (log-space kriging for conductivities). C2VSimCG-scale: 73 points → 1,393
 nodes in 0.4 s.
 
+### Constrained reparameterization + Texture2Par (`iwfm_io/pest/reparam.py`)
+
+`RatioChain`: declare free parameters (bounds/transform) and derived
+quantities as expressions (`kmin_coarse = kxc * 10**(-pa*dt)`);
+`assert_ordering([...])` checks physical orderings at every bound corner —
+for the monotone chains this pattern uses, a pass guarantees no ensemble
+draw can be invalid. `evaluate()` is the forward-run step; `par_data()`
+emits the v2 parameter rows. `read_t2p_pilot_points`/`write_t2p_pilot_points`
+handle Texture2Par `BEGIN PP_LOCS` files (`.ppaq`/`.ppaqt`).
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a
