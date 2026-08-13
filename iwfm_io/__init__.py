@@ -7,6 +7,8 @@ two subpackages:
 - ``iwfm_io.plots`` — 58 matplotlib visualization functions
 - ``iwfm_io.dll``   — optional ctypes wrapper for the IWFM Fortran DLL
   (Windows x64; only needed for live simulation state)
+- ``iwfm_io.pest``  — PEST(++) calibration support (observation-name
+  codec; more to come — see the pest-module tracking issue)
 
 .. note::
    Version 2.0 renamed the import package from ``iwfm`` to ``iwfm_io``
@@ -219,7 +221,7 @@ from iwfm_io.collect import (
 def __getattr__(name):
     # Lazy subpackages: matplotlib loads only when plots are used, and
     # the ctypes layer only when the DLL wrapper is used.
-    if name in ("plots", "dll"):
+    if name in ("plots", "dll", "pest"):
         import importlib
         return importlib.import_module(f".{name}", __name__)
     raise AttributeError(f"module 'iwfm_io' has no attribute {name!r}")
@@ -228,6 +230,7 @@ def __getattr__(name):
 __all__ = [
     "plots",
     "dll",
+    "pest",
     # Scenario runner
     "RunResult",
     "run_model",

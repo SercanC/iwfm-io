@@ -263,6 +263,33 @@ All four accept `max_workers=N` to read the runs' HDF5 files concurrently (worth
 
 ---
 
+## `iwfm_io.pest` — PEST(++) Calibration Support
+
+Utilities for building and post-processing PEST / PEST++ calibrations of IWFM
+models. Pure Python (pandas only); `pyemu` is an optional companion, never a
+hard dependency. Lazy subpackage — import as `from iwfm_io.pest import ...`.
+
+### Observation-name codec (`iwfm_io/pest/names.py`)
+
+Structured, round-trip-safe conversion between `(obs_type, location, time)`
+and PEST observation names. The default `StandardScheme` writes
+`{type}_{location}_{YYYYMMDD}` (lowercase; the date part is omitted for
+time-aggregated observations, and locations may themselves contain
+underscores — `stf_105_zcs014_13_20001031` round-trips unambiguously).
+
+| Function / class | Purpose |
+|---|---|
+| `encode_obs_name(obs_type, location, time=None, scheme="standard")` | One name, e.g. `("gwh", "w1234", "2000-10-31")` → `"gwh_w1234_20001031"` |
+| `decode_obs_name(name, scheme="standard")` | One name → `ObsName(obs_type, location, time)` |
+| `encode_obs_names(obs_types, locations, times=None, ...)` | Vectorized encode (scalars broadcast); returns `Series` |
+| `decode_obs_names(names, scheme="standard")` | Vectorized decode; returns `DataFrame(obs_type, location, time)` indexed by name |
+| `validate_obs_names(names, max_len=200)` | Case-insensitive uniqueness, length (`20` for classic PEST tools), character-set checks; returns `list[str]` of problems |
+| `ObsName` | Frozen dataclass of decoded parts (`time is None` for dateless names) |
+| `NameScheme` / `StandardScheme` | Scheme base class / default implementation (`sep`, `date_format` configurable) |
+| `register_scheme(name, scheme)` / `get_scheme(name)` | Register project-specific legacy schemes and use them by name everywhere |
+
+---
+
 ## `iwfm_io.plots` — Visualization Library
 
 See [Plot Gallery](plotting.md) for the full list of 58 functions across 13 modules.
