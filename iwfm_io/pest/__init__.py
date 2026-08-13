@@ -68,6 +68,10 @@ Currently provided:
   ratio/exponent chains with corner-checked ordering guarantees (no
   invalid ensemble draw), forward-run ``evaluate()``, PEST par rows;
   plus Texture2Par ``PP_LOCS`` file I/O.
+- :class:`PestSetup` (capstone): accumulate parameter bundles + apply
+  actions, observation tables + paired specs, and run steps → a
+  complete runnable PEST++ v2 template directory (control file,
+  external tables, templates, instructions, fail-fast forward run).
 
 Quick-start::
 
@@ -92,6 +96,9 @@ from iwfm_io.pest.wells import (
     WellMapping,
     build_well_mapping,
     select_best_layers,
+)
+from iwfm_io.pest.setup import (
+    PestSetup,
 )
 from iwfm_io.pest.reparam import (
     RatioChain,
@@ -191,6 +198,7 @@ __all__ = [
     "ParamSpec",
     "ExpVariogram",
     "RatioChain",
+    "PestSetup",
     "read_t2p_pilot_points",
     "write_t2p_pilot_points",
     "SphVariogram",

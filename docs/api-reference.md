@@ -458,6 +458,19 @@ draw can be invalid. `evaluate()` is the forward-run step; `par_data()`
 emits the v2 parameter rows. `read_t2p_pilot_points`/`write_t2p_pilot_points`
 handle Texture2Par `BEGIN PP_LOCS` files (`.ppaq`/`.ppaqt`).
 
+### PestSetup — the integration builder (`iwfm_io/pest/setup.py`)
+
+Accumulate `add_parameters(bundle, actions)` (from `build_parameters` +
+`ApplyAction`), `add_observations(obs_data, spec, output_file)` (paired
+`ObsFileSpec`), and `add_run_step(label, cmd)` — then `write(dest)` emits a
+complete runnable template: `{case}.pst` (v2), external
+par/pargp/obs CSVs, all templates + initial value files + instruction
+files, and the fail-fast `forward_run.py` whose first step applies PEST's
+value files onto the model inputs. Duplicate names, spec/obs mismatches and
+empty setups are hard errors. Verified end-to-end against the real
+pestpp-ies executable (base run of a toy problem; residuals load back
+through `load_ies_ensembles`/`rei_stats`).
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a
