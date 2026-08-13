@@ -435,6 +435,19 @@ PEST++ v2 `par_data`/`pargp_data` tables with `tied` chains. `bundle.write(dir)`
 persists; `bundle.verify()` fills each template with `parval1` and asserts it
 reproduces the value file — run automatically at build.
 
+### Pilot points (`iwfm_io/pest/pilot_points.py`)
+
+Pure-numpy ordinary kriging on the FE mesh (no scipy/pyemu):
+`ExpVariogram`/`SphVariogram`/`GauVariogram` (range, nugget, geometric
+anisotropy + bearing); `place_pilot_points_grid(model, spacing, zones=...)`
+lays out points clipped to the node cloud; `compute_kriging_factors(pps,
+nodes, variogram, max_points=12, search_radius=..., same_zone_only=...)`
+solves the OK systems once (weights per target sum to 1; exact at pilot
+locations) and persists as a plain CSV; `apply_kriging_factors(factors,
+pp_values, log=True)` is the cheap FAC2REAL step for the forward run
+(log-space kriging for conductivities). C2VSimCG-scale: 73 points → 1,393
+nodes in 0.4 s.
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a

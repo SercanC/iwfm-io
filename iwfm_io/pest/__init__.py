@@ -60,6 +60,10 @@ Currently provided:
   :class:`ParamBundle`): declarative zones/ties → template files,
   initial value files, and v2 parameter/parameter-group tables, with a
   fill-and-compare verify step.
+- Pilot points (``place_pilot_points_grid``, ``compute_kriging_factors``,
+  ``apply_kriging_factors``): pure-numpy ordinary kriging on the FE mesh
+  (exp/sph/gau variograms, anisotropy, zones) — factors computed once,
+  FAC2REAL-style application in the forward run.
 
 Quick-start::
 
@@ -84,6 +88,14 @@ from iwfm_io.pest.wells import (
     WellMapping,
     build_well_mapping,
     select_best_layers,
+)
+from iwfm_io.pest.pilot_points import (
+    ExpVariogram,
+    SphVariogram,
+    GauVariogram,
+    place_pilot_points_grid,
+    compute_kriging_factors,
+    apply_kriging_factors,
 )
 from iwfm_io.pest.params import (
     ParamSpec,
@@ -168,6 +180,12 @@ __all__ = [
     "setup_agents",
     "ApplyAction",
     "ParamSpec",
+    "ExpVariogram",
+    "SphVariogram",
+    "GauVariogram",
+    "place_pilot_points_grid",
+    "compute_kriging_factors",
+    "apply_kriging_factors",
     "ParamBundle",
     "build_parameters",
     "apply_parameters",
