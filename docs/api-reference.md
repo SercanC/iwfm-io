@@ -339,6 +339,19 @@ standard long-form columns `site, datetime, value` (same as
 | `read_smp(path, date_format=None)` | Read to a long-form frame. Auto-detects `dd/mm/yyyy` vs `mm/dd/yyyy` from the data; refuses to guess when ambiguous (pass `date_format` explicitly) |
 | `write_smp(df, path, date_format="dd/mm/yyyy", max_site_len=10, sort=True)` | Write atomically; validates site names (10-char classic-PEST limit, no whitespace), drops NaN values with a warning, sorts site-then-time |
 
+### Sim-to-obs matching (`iwfm_io/pest/sim2obs.py`)
+
+Python IWFM2OBS equivalent: pair simulated hydrographs with observed records
+by time interpolation. Long-form `site, datetime, value` in (from `read_smp`,
+`collect_hydrographs`, or the hydrograph readers), long-form
+`site, datetime, observed, simulated` out — ready for `residual_stats` and
+`write_smp`.
+
+| Function | Purpose |
+|---|---|
+| `match_sim_to_obs(sim, obs, method="linear", max_gap=None)` | Interpolate sim to obs timestamps. `linear` never extrapolates; `max_gap` refuses to bridge data gaps (NaN instead); `nearest` also supported. Sites without simulation are dropped with a warning |
+| `resample_month_end(df, how="mean", iwfm_convention=True)` | Month-end aggregation honoring IWFM's 24:00 end-of-timestep stamps (a `10/31 24:00` value buckets into October, not November) |
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a

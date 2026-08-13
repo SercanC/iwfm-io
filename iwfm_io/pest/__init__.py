@@ -29,6 +29,9 @@ Currently provided:
   convergence/collapse, prior-data conflict, ensemble-wide bound
   railing, residual bias/trends, outliers, objective balance — as a
   compact JSON state + boolean signals + text summary.
+- Sim-to-obs matching (``match_sim_to_obs``, ``resample_month_end``):
+  IWFM2OBS-equivalent time interpolation of simulated hydrographs to
+  observation timestamps, gap-guarded, 24:00-convention aware.
 
 Quick-start::
 
@@ -48,6 +51,10 @@ from iwfm_io.pest.ies import (
 from iwfm_io.pest.smp import (
     read_smp,
     write_smp,
+)
+from iwfm_io.pest.sim2obs import (
+    match_sim_to_obs,
+    resample_month_end,
 )
 from iwfm_io.pest.diagnostics import (
     DiagThresholds,
@@ -84,6 +91,8 @@ __all__ = [
     "read_rei",
     "read_smp",
     "write_smp",
+    "match_sim_to_obs",
+    "resample_month_end",
     "WeightBalance",
     "balance_weights",
     "balance_pst_weights",
