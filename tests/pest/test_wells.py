@@ -161,7 +161,7 @@ class TestComposite:
 
     def test_composite_from_multiindex_frame(self):
         from iwfm_io.pest import build_well_mapping
-        from iwfm_io.pest.wells import _canonical_heads
+        from iwfm_io.wells import _canonical_heads
 
         m = build_well_mapping(FakeModel(), _wells(layer=[1]))
         canon = _canonical_heads(_heads(), 2)

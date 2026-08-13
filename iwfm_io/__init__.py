@@ -212,6 +212,20 @@ from iwfm_io._validation import (
 # Model adapter
 from iwfm_io.model_adapter import IOModelAdapter
 
+# Wells: metadata, hydrograph linking, mapping, compositing
+from iwfm_io.wells import (
+    WellMapping,
+    build_well_mapping,
+    select_best_layers,
+    validate_gwl_metadata,
+    HydrographLink,
+    link_hydrographs,
+    assign_sequences,
+    composite_well_hydrographs,
+    enrich_gwl_metadata,
+    gwl_metadata_from_legacy,
+)
+
 # Multi-run collection helpers
 from iwfm_io.collect import (
     collect_budgets,
@@ -348,7 +362,17 @@ __all__ = [
     "validate_preprocessor",
     # Model adapter
     "IOModelAdapter",
-    # Multi-run collection helpers
+    # Wells: metadata, hydrograph linking, mapping, compositing
+    "WellMapping",
+    "build_well_mapping",
+    "select_best_layers",
+    "validate_gwl_metadata",
+    "HydrographLink",
+    "link_hydrographs",
+    "assign_sequences",
+    "composite_well_hydrographs",
+    "enrich_gwl_metadata",
+    "gwl_metadata_from_legacy",
     "collect_budgets",
     "collect_zbudgets",
     "collect_hydrographs",

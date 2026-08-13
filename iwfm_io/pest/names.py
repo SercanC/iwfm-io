@@ -38,6 +38,7 @@ import pandas as pd
 
 __all__ = [
     "ObsName",
+    "GroupSequenceScheme",
     "NameScheme",
     "StandardScheme",
     "register_scheme",
@@ -187,7 +188,67 @@ class StandardScheme(NameScheme):
         return out
 
 
-_SCHEMES: dict = {"standard": StandardScheme()}
+class GroupSequenceScheme(NameScheme):
+    """Legacy-style ``{type}{group:02d}{seq:04d}_{date}`` names.
+
+    Encodes a well's spatial group and within-group sequence directly
+    into the location token (e.g. group 67, seq 1 -> ``670001``), so
+    observation names — and therefore hydrograph figures sorted by
+    name — order by location. Pair with
+    :func:`iwfm_io.assign_sequences`.
+
+    Parameters
+    ----------
+    type_len : int, default 3
+        Length of the observation-type token (no separator between
+        type and location).
+    date_format : str, default ``"%y%m%d"``
+        The legacy 2-digit-year stamp; use ``"%Y%m%d"`` for
+        unambiguous new setups.
+    """
+
+    def __init__(self, type_len: int = 3, date_format: str = "%y%m%d"):
+        self.type_len = int(type_len)
+        self.date_format = date_format
+
+    @staticmethod
+    def location(group, seq, group_digits: int = 2,
+                 seq_digits: int = 4) -> str:
+        """Build the location token from (group, seq)."""
+        return f"{int(group):0{group_digits}d}{int(seq):0{seq_digits}d}"
+
+    def encode(self, parts: ObsName) -> str:
+        obs_type = str(parts.obs_type).lower()
+        location = str(parts.location).lower()
+        if len(obs_type) != self.type_len:
+            raise ValueError(
+                f"obs_type {obs_type!r} must be exactly "
+                f"{self.type_len} characters in this scheme")
+        if not location:
+            raise ValueError("location must be non-empty")
+        if parts.time is None:
+            return f"{obs_type}{location}"
+        stamp = pd.Timestamp(parts.time).strftime(self.date_format)
+        return f"{obs_type}{location}_{stamp}"
+
+    def decode(self, name: str) -> ObsName:
+        s = str(name).lower()
+        head, sep, stamp = s.rpartition("_")
+        time = None
+        if sep and stamp.isdigit():
+            try:
+                time = pd.to_datetime(stamp, format=self.date_format)
+            except ValueError:
+                head = s
+        else:
+            head = s
+        if len(head) <= self.type_len:
+            raise ValueError(f"cannot decode observation name {name!r}")
+        return ObsName(head[:self.type_len], head[self.type_len:], time)
+
+
+_SCHEMES: dict = {"standard": StandardScheme(),
+                  "grouped": GroupSequenceScheme()}
 
 
 def register_scheme(name: str, scheme: NameScheme) -> None:

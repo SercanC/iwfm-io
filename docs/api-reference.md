@@ -287,6 +287,7 @@ underscores — `stf_105_zcs014_13_20001031` round-trips unambiguously).
 | `ObsName` | Frozen dataclass of decoded parts (`time is None` for dateless names) |
 | `NameScheme` / `StandardScheme` | Scheme base class / default implementation (`sep`, `date_format` configurable) |
 | `register_scheme(name, scheme)` / `get_scheme(name)` | Register project-specific legacy schemes and use them by name everywhere |
+| `GroupSequenceScheme` (registered as `"grouped"`) | `{type}{group:02d}{seq:04d}_{date}` names — hydrograph figures sort by location; pairs with `assign_sequences` |
 
 ### PESTPP-IES results loader (`iwfm_io/pest/ies.py`)
 
@@ -377,7 +378,23 @@ setup's successive-change observations exactly (106k values, bit-for-bit).
 | `accretion_depletion(df, pairs)` | `downstream − upstream` gauge flow difference (positive = stream gains) |
 | `long_term_stats(df, stat="mean", min_n=1)` | One whole-record statistic per site, dateless names |
 
-### Multi-layer well observations (`iwfm_io/pest/wells.py`)
+### Wells & GWL metadata (`iwfm_io/wells.py` — core)
+
+DataFrame-first replacement for hand-maintained well-configuration files.
+The **`gwl_metadata` frame** is a documented schema, not a file format
+(`well_id, group, seq, site_code, hydrograph_name, perf_top, perf_bottom,
+layer`; extras pass through; persist with plain pandas if desired).
+
+| Function / class | Purpose |
+|---|---|
+| `validate_gwl_metadata(df)` | Problem-string list (unique well_id, per-group seq uniqueness, perf sanity, no legacy 0/-1 layer codes) |
+| `link_hydrographs(gwl_metadata, gw_main, on="site_code", name_sep="%")` | Interpret the `well_identifier%layer` hydrograph-name convention: parse stems, group per-layer rows into wells, join on any metadata column. Cross-checks parsed layer vs the LAYER field; reports unmatched wells / orphan stems / mismatches (`HydrographLink`) |
+| `composite_well_hydrographs(link, hyd_output, fractions)` | IWFM's FE-interpolated per-layer hydrograph output × layer fractions (`WellMapping` or frame) → time × well composite heads; resolves `col_N` labels and IWFM 24:00 date stamps |
+| `assign_sequences(gwl_metadata, link, order="north_to_south")` | Pure-function seq ledger: fills only missing within-group numbers by spatial order; caller persists the returned frame |
+| `enrich_gwl_metadata(model, gwl_metadata, link=None, obs=None)` | Derived columns on demand: subregion, gse, obs-record stats |
+| `gwl_metadata_from_legacy(df)` | One-time converter from historical keys frames (maps the -1/0 layer codes onto the schema) |
+
+### Multi-layer well observations (`iwfm_io/wells.py`, re-exported by `iwfm_io.pest`)
 
 Map real observation wells onto the FE mesh and composite simulated heads
 across layers by transmissivity. Two-phase: an expensive build step

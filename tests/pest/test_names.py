@@ -216,3 +216,55 @@ class TestLazySubpackage:
         import iwfm_io
 
         assert hasattr(iwfm_io.pest, "encode_obs_name")
+
+
+class TestGroupSequenceScheme:
+    def test_reproduces_legacy_names(self):
+        import pandas as pd
+
+        from iwfm_io.pest import (GroupSequenceScheme, decode_obs_name,
+                                  encode_obs_name)
+
+        loc = GroupSequenceScheme.location(67, 1)
+        assert loc == "670001"
+        name = encode_obs_name("gwh", loc, "2000-10-31", scheme="grouped")
+        assert name == "gwh670001_001031"
+        parts = decode_obs_name(name, scheme="grouped")
+        assert parts.obs_type == "gwh"
+        assert parts.location == "670001"
+        assert parts.time == pd.Timestamp("2000-10-31")
+
+    def test_names_sort_by_location(self):
+        from iwfm_io.pest import GroupSequenceScheme, encode_obs_name
+
+        names = [encode_obs_name("gwh",
+                                 GroupSequenceScheme.location(g, s),
+                                 "2000-10-31", scheme="grouped")
+                 for g, s in [(10, 2), (2, 1), (10, 1)]]
+        assert sorted(names) == [
+            "gwh020001_001031", "gwh100001_001031", "gwh100002_001031"]
+
+    def test_dateless_and_errors(self):
+        from iwfm_io.pest import (GroupSequenceScheme, decode_obs_name,
+                                  encode_obs_name)
+
+        assert encode_obs_name("gwh", "670001",
+                               scheme="grouped") == "gwh670001"
+        d = decode_obs_name("gwh670001", scheme="grouped")
+        assert d.time is None and d.location == "670001"
+        with pytest.raises(ValueError, match="exactly 3"):
+            encode_obs_name("gw", "670001", scheme="grouped")
+        with pytest.raises(ValueError, match="cannot decode"):
+            decode_obs_name("gw", scheme="grouped")
+
+    def test_four_digit_year_variant(self):
+        import pandas as pd
+
+        from iwfm_io.pest import GroupSequenceScheme
+
+        s = GroupSequenceScheme(date_format="%Y%m%d")
+        from iwfm_io.pest.names import ObsName
+        n = s.encode(ObsName("gwh", "670001",
+                             pd.Timestamp("2000-10-31")))
+        assert n == "gwh670001_20001031"
+        assert s.decode(n).time == pd.Timestamp("2000-10-31")

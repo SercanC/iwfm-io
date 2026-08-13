@@ -92,7 +92,7 @@ from iwfm_io.pest.smp import (
     read_smp,
     write_smp,
 )
-from iwfm_io.pest.wells import (
+from iwfm_io.wells import (  # relocated to core; re-exported here
     WellMapping,
     build_well_mapping,
     select_best_layers,
@@ -168,6 +168,7 @@ from iwfm_io.pest.names import (
     ObsName,
     NameScheme,
     StandardScheme,
+    GroupSequenceScheme,
     register_scheme,
     get_scheme,
     encode_obs_name,
@@ -230,6 +231,7 @@ __all__ = [
     "ObsName",
     "NameScheme",
     "StandardScheme",
+    "GroupSequenceScheme",
     "register_scheme",
     "get_scheme",
     "encode_obs_name",
