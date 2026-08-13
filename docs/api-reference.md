@@ -425,6 +425,16 @@ writers — no template markers in fixed-format IWFM files.
 | `apply_parameters(run_dir, actions, log_path=...)` | Apply all actions (targets read once), rewrite atomically, and write the bookkeeping CSV (the `mult2model_info` role) |
 | `write_gw_overwrite(path, df, factors=None, time_unit="1MON")` / `read_gw_overwrite(path)` | IWFM's native GW parameter overwrite file (`node layer PKH PS PN PV PL SCE SCI`, `-1` = keep) |
 
+### Zone/group parameterization (`iwfm_io/pest/params.py`)
+
+`ParamSpec` declares one parameterized quantity (base name, the value CSV the
+apply step consumes, key rows, optional zone column, transform/bounds, tie
+chains); `build_parameters(specs)` emits a `ParamBundle`: `ptf ~` template
+files + initial value files (forward run works before PEST writes anything) +
+PEST++ v2 `par_data`/`pargp_data` tables with `tied` chains. `bundle.write(dir)`
+persists; `bundle.verify()` fills each template with `parval1` and asserts it
+reproduces the value file — run automatically at build.
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a

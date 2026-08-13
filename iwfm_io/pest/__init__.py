@@ -56,6 +56,10 @@ Currently provided:
   parameter tables and regenerated through the round-trip writers, with
   bounds and a bookkeeping log; plus IWFM's native GW parameter
   overwrite file (``write_gw_overwrite`` / ``read_gw_overwrite``).
+- Zone/group parameterization (``ParamSpec`` → ``build_parameters`` →
+  :class:`ParamBundle`): declarative zones/ties → template files,
+  initial value files, and v2 parameter/parameter-group tables, with a
+  fill-and-compare verify step.
 
 Quick-start::
 
@@ -80,6 +84,11 @@ from iwfm_io.pest.wells import (
     WellMapping,
     build_well_mapping,
     select_best_layers,
+)
+from iwfm_io.pest.params import (
+    ParamSpec,
+    ParamBundle,
+    build_parameters,
 )
 from iwfm_io.pest.apply import (
     ApplyAction,
@@ -158,6 +167,9 @@ __all__ = [
     "ObsFileSpec",
     "setup_agents",
     "ApplyAction",
+    "ParamSpec",
+    "ParamBundle",
+    "build_parameters",
     "apply_parameters",
     "write_gw_overwrite",
     "read_gw_overwrite",
