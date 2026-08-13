@@ -32,6 +32,9 @@ Currently provided:
 - Sim-to-obs matching (``match_sim_to_obs``, ``resample_month_end``):
   IWFM2OBS-equivalent time interpolation of simulated hydrographs to
   observation timestamps, gap-guarded, 24:00-convention aware.
+- Budget observations (``budget_observations``): named observation
+  tables from budget/zbudget output — full series, long-term means, or
+  water-year totals per location × component.
 
 Quick-start::
 
@@ -51,6 +54,10 @@ from iwfm_io.pest.ies import (
 from iwfm_io.pest.smp import (
     read_smp,
     write_smp,
+)
+from iwfm_io.pest.budget_obs import (
+    budget_observations,
+    slugify_label,
 )
 from iwfm_io.pest.sim2obs import (
     match_sim_to_obs,
@@ -93,6 +100,8 @@ __all__ = [
     "write_smp",
     "match_sim_to_obs",
     "resample_month_end",
+    "budget_observations",
+    "slugify_label",
     "WeightBalance",
     "balance_weights",
     "balance_pst_weights",

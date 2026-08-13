@@ -352,6 +352,16 @@ by time interpolation. Long-form `site, datetime, value` in (from `read_smp`,
 | `match_sim_to_obs(sim, obs, method="linear", max_gap=None)` | Interpolate sim to obs timestamps. `linear` never extrapolates; `max_gap` refuses to bridge data gaps (NaN instead); `nearest` also supported. Sites without simulation are dropped with a warning |
 | `resample_month_end(df, how="mean", iwfm_convention=True)` | Month-end aggregation honoring IWFM's 24:00 end-of-timestep stamps (a `10/31 24:00` value buckets into October, not November) |
 
+### Budget observations (`iwfm_io/pest/budget_obs.py`)
+
+Named observation tables from IWFM budget output — the water-balance
+regularizers of DWR-style calibrations.
+
+| Function | Purpose |
+|---|---|
+| `budget_observations(source, budget=None, locations=None, components=None, aggregate="none")` | Source: `IOModelAdapter`/model dir (+ `budget="GW"`), a budget `.hdf` path, or a long-form frame (covers z-budgets). `aggregate`: `"none"` (full series), `"mean"` (dateless long-term means — the classic setup), `"annual"` (water-year sums named by Sep-30 WY end, 24:00-aware). Names via the obs-name codec: `bud_{component}_{location}[_{date}]` |
+| `slugify_label(label)` | PEST-safe label slugs: `"Region1 (SR1)"` → `region1_sr1` |
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a
