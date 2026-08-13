@@ -44,6 +44,10 @@ Currently provided:
   with stratigraphy, transmissivity-weight layers; persistable weights
   and a one-matrix-multiply composite for the forward run;
   ``select_best_layers`` resolves unknown completions by RMSE.
+- Paired output/instruction writers (:class:`ObsFileSpec`): one spec
+  emits both the forward-run output file and its matching ``.ins`` —
+  name/column/order consistency by construction, with a built-in
+  round-trip check.
 
 Quick-start::
 
@@ -68,6 +72,9 @@ from iwfm_io.pest.wells import (
     WellMapping,
     build_well_mapping,
     select_best_layers,
+)
+from iwfm_io.pest.obsfiles import (
+    ObsFileSpec,
 )
 from iwfm_io.pest.derived import (
     head_changes,
@@ -127,6 +134,7 @@ __all__ = [
     "accretion_depletion",
     "long_term_stats",
     "WellMapping",
+    "ObsFileSpec",
     "build_well_mapping",
     "select_best_layers",
     "WeightBalance",

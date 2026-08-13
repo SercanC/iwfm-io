@@ -392,6 +392,16 @@ node assignments).
 | `WellMapping` | `.wells` (well → node, method), `.weights` (`well_id, node, layer, weight`), `.composite(heads)` (heads as `{layer: frame}`, `node_<n>_layer_<l>` frame, `(node, layer)` MultiIndex frame, or a model with `heads_df`) → time × well frame; `.to_csv()/.from_csv()` persistence (the `fracs.csv` role) |
 | `select_best_layers(mapping, heads, obs, min_n=6, default_layer=1)` | Resolve unknown completions: per-layer RMSE against the observed record → `well_id → layer`; feed back into the wells frame and rebuild |
 
+### Paired output/instruction writers (`iwfm_io/pest/obsfiles.py`)
+
+One `ObsFileSpec` (an ordered list of observation names + layout) writes both
+the forward-run output file (`write_output`, fixed-column `.pout` style or
+`name,value` CSV) and its matching PEST instruction file (`write_ins`) — so
+name/column/order consistency holds by construction. `read_output` parses
+with the same semantics; `verify_round_trip()` asserts write→parse fidelity
+(catching too-narrow formats); `from_frame`/`obs_data` bridge to the
+observation tables the other pest modules produce.
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a
