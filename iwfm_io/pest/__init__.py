@@ -35,6 +35,10 @@ Currently provided:
 - Budget observations (``budget_observations``): named observation
   tables from budget/zbudget output — full series, long-term means, or
   water-year totals per location × component.
+- Derived observations (``head_changes``, ``vertical_head_difference``,
+  ``accretion_depletion``, ``long_term_stats``): the DWR-proven
+  regularizers, as pure transforms applied identically to observed and
+  simulated series.
 
 Quick-start::
 
@@ -54,6 +58,12 @@ from iwfm_io.pest.ies import (
 from iwfm_io.pest.smp import (
     read_smp,
     write_smp,
+)
+from iwfm_io.pest.derived import (
+    head_changes,
+    vertical_head_difference,
+    accretion_depletion,
+    long_term_stats,
 )
 from iwfm_io.pest.budget_obs import (
     budget_observations,
@@ -102,6 +112,10 @@ __all__ = [
     "resample_month_end",
     "budget_observations",
     "slugify_label",
+    "head_changes",
+    "vertical_head_difference",
+    "accretion_depletion",
+    "long_term_stats",
     "WeightBalance",
     "balance_weights",
     "balance_pst_weights",

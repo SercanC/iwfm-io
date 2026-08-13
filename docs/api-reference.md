@@ -362,6 +362,21 @@ regularizers of DWR-style calibrations.
 | `budget_observations(source, budget=None, locations=None, components=None, aggregate="none")` | Source: `IOModelAdapter`/model dir (+ `budget="GW"`), a budget `.hdf` path, or a long-form frame (covers z-budgets). `aggregate`: `"none"` (full series), `"mean"` (dateless long-term means — the classic setup), `"annual"` (water-year sums named by Sep-30 WY end, 24:00-aware). Names via the obs-name codec: `bud_{component}_{location}[_{date}]` |
 | `slugify_label(label)` | PEST-safe label slugs: `"Region1 (SR1)"` → `region1_sr1` |
 
+### Derived observations (`iwfm_io/pest/derived.py`)
+
+The DWR-proven regularizing observation types, as pure transforms on
+long-form `site, datetime, value` frames — apply the same call to observed
+and simulated series and the results pair cleanly. Pass `obs_type=` to add
+codec-encoded `obsnme` columns. Verified to reproduce a production IES
+setup's successive-change observations exactly (106k values, bit-for-bit).
+
+| Function | Purpose |
+|---|---|
+| `head_changes(df, kind, ...)` | `"successive"` (month-over-month, `max_gap` guard), `"seasonal"` (year-over-year for a chosen month), `"drawdown"` (within-year spring−fall) |
+| `vertical_head_difference(df, pairs)` | `shallow − deep` at multi-completion well pairs (positive = downward gradient); pairs as tuples or `{label: (a, b)}` |
+| `accretion_depletion(df, pairs)` | `downstream − upstream` gauge flow difference (positive = stream gains) |
+| `long_term_stats(df, stat="mean", min_n=1)` | One whole-record statistic per site, dateless names |
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a
