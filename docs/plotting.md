@@ -1,6 +1,6 @@
 # Plot Gallery
 
-58 visualization functions across 13 modules. All accept either an `IWFMModel` or `IOModelAdapter` instance and return `(fig, ax)`. Most accept an optional `save_path` parameter.
+66 visualization functions across 14 modules. All accept either an `IWFMModel` or `IOModelAdapter` instance and return `(fig, ax)`. Most accept an optional `save_path` parameter.
 
 ```python
 from iwfm_io.plots import maps, timeseries, water_balance  # etc.
@@ -128,6 +128,22 @@ from iwfm_io.plots import maps, timeseries, water_balance  # etc.
 | `connectivity.plot_bypass_diagram` | Bypass routing diagram |
 
 ---
+
+## Calibration (8 functions)
+
+PEST(++) calibration figures built on the `iwfm_io.pest` data structures
+(these take `IesResults`/stats frames rather than a model instance).
+
+| Function | Description |
+|----------|-------------|
+| `calibration.plot_phi_convergence` | Ensemble phi boxplots per IES iteration + mean line |
+| `calibration.plot_phi_by_group` | Top phi-contributing observation groups, first vs last iteration |
+| `calibration.plot_residual_butterfly` | Diverging mean-residual bars by observation group |
+| `calibration.plot_obs_vs_sim` | Observed vs simulated 1:1 (auto-hexbin for large N) with RMSE/R²/NSE |
+| `calibration.plot_parameter_histograms` | Prior vs posterior parameter distributions with bounds |
+| `calibration.plot_parameter_railing` | % of ensemble values at parameter bounds, per group |
+| `calibration.plot_ensemble_hydrograph` | Ensemble envelope + base realization + observed + original model |
+| `calibration.plot_residual_map` | Residual metric at observation x/y over the model mesh |
 
 ## Running the Test Suite
 

@@ -4,11 +4,13 @@ iwfm_io — Python toolkit for the Integrated Water Flow Model (IWFM).
 Pure-Python file I/O at the top level (any OS, no DLL required), plus
 two subpackages:
 
-- ``iwfm_io.plots`` — 58 matplotlib visualization functions
+- ``iwfm_io.plots`` — 66 matplotlib visualization functions
 - ``iwfm_io.dll``   — optional ctypes wrapper for the IWFM Fortran DLL
   (Windows x64; only needed for live simulation state)
-- ``iwfm_io.pest``  — PEST(++) calibration support (observation-name
-  codec; more to come — see the pest-module tracking issue)
+- ``iwfm_io.pest``  — PEST(++) calibration support (obs-name codec,
+  IES results loader, residual statistics, SMP files, weight
+  balancing, run diagnostics; calibration figures in
+  ``iwfm_io.plots.calibration``)
 
 .. note::
    Version 2.0 renamed the import package from ``iwfm`` to ``iwfm_io``

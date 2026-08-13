@@ -639,6 +639,7 @@ def savefig(fig, path, dpi=150):
 
 from . import (  # noqa: E402,F401
     animations,
+    calibration,
     connectivity,
     cross_sections,
     maps,

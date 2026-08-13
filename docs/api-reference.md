@@ -374,6 +374,15 @@ Every section is fault-tolerant (missing inputs become notes, not errors).
 `DiagThresholds` holds all signal cut-offs; `IesDiagnostics` exposes
 `.state`, `.signals`, `.summary()`, `.to_json(path)`.
 
+### Calibration figures (`iwfm_io/plots/calibration.py`)
+
+Eight matplotlib functions for reviewing ensemble calibrations — phi
+convergence/by-group, residual butterfly, obs-vs-sim 1:1, prior-vs-posterior
+histograms, bound railing, ensemble hydrographs, and residual maps. See the
+Calibration section of [plotting.md](plotting.md) for the full table; all
+follow the package plotting interface (`ax`/`figsize`/`save_path`/`dpi`,
+return `(fig, ax)`).
+
 ---
 
 ## `iwfm_io.plots` — Visualization Library
