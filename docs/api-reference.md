@@ -402,6 +402,16 @@ with the same semantics; `verify_round_trip()` asserts write→parse fidelity
 (catching too-narrow formats); `from_frame`/`obs_data` bridge to the
 observation tables the other pest modules produce.
 
+### Run orchestration (`iwfm_io/pest/orchestrate.py`)
+
+| Function | Purpose |
+|---|---|
+| `setup_agents(template, n, dest_root=None, host=..., port=4004, link=True)` | Stamp out N agent dirs by hardlinking the whole template (root files included, `Results/` recreated empty, output suffixes real-copied); writes per-agent start scripts |
+| `write_manager_script(dir, port=4004)` | Matching manager starter |
+| `write_forward_run(path, steps)` | Generate the fail-fast `forward_run.py`: ordered shell steps, first nonzero exit aborts with that code so PEST++ drops the run |
+| `parrep_v2(pst_path, values, noptmax=0)` | pyemu-free parrep for PEST++ v2 control files: rewrite the external parameter-data CSV(s) from a Series and set `noptmax` |
+| `run_finals(results, template, dest, iteration=None, realization="base")` | Stage a verification rerun of one ensemble realization in a fresh hardlinked copy |
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a

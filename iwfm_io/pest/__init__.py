@@ -48,6 +48,9 @@ Currently provided:
   emits both the forward-run output file and its matching ``.ins`` —
   name/column/order consistency by construction, with a built-in
   round-trip check.
+- Run orchestration (``setup_agents``, ``write_forward_run``,
+  ``run_finals``): hardlinked agent replication, fail-fast forward-run
+  scripts, and pyemu-free v2 parrep for finals reruns.
 
 Quick-start::
 
@@ -72,6 +75,13 @@ from iwfm_io.pest.wells import (
     WellMapping,
     build_well_mapping,
     select_best_layers,
+)
+from iwfm_io.pest.orchestrate import (
+    setup_agents,
+    write_manager_script,
+    write_forward_run,
+    parrep_v2,
+    run_finals,
 )
 from iwfm_io.pest.obsfiles import (
     ObsFileSpec,
@@ -135,6 +145,11 @@ __all__ = [
     "long_term_stats",
     "WellMapping",
     "ObsFileSpec",
+    "setup_agents",
+    "write_manager_script",
+    "write_forward_run",
+    "parrep_v2",
+    "run_finals",
     "build_well_mapping",
     "select_best_layers",
     "WeightBalance",
