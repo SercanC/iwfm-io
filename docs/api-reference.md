@@ -377,6 +377,21 @@ setup's successive-change observations exactly (106k values, bit-for-bit).
 | `accretion_depletion(df, pairs)` | `downstream − upstream` gauge flow difference (positive = stream gains) |
 | `long_term_stats(df, stat="mean", min_n=1)` | One whole-record statistic per site, dateless names |
 
+### Multi-layer well observations (`iwfm_io/pest/wells.py`)
+
+Map real observation wells onto the FE mesh and composite simulated heads
+across layers by transmissivity. Two-phase: an expensive build step
+producing a persistable weight table, and a one-matrix-multiply composite
+for the forward-run loop. Verified to reproduce a production C2VSimCG
+workflow's layer fractions exactly (2,148 wells, bit-for-bit, identical
+node assignments).
+
+| Function / class | Purpose |
+|---|---|
+| `build_well_mapping(model, wells, kh=None, spatial="nearest", k=4, default_layer=1)` | Wells need `well_id, x, y` (+ optional `layer` override, `perf_top/perf_bottom` depths). Perforation ∩ stratigraphy × Kh → layer fractions; falls back deepest-layer/layer-1 for non-intersecting intervals (logged). `spatial="idw"` spreads over the k nearest nodes. No kh → thickness weighting. Pure numpy (no scipy) |
+| `WellMapping` | `.wells` (well → node, method), `.weights` (`well_id, node, layer, weight`), `.composite(heads)` (heads as `{layer: frame}`, `node_<n>_layer_<l>` frame, `(node, layer)` MultiIndex frame, or a model with `heads_df`) → time × well frame; `.to_csv()/.from_csv()` persistence (the `fracs.csv` role) |
+| `select_best_layers(mapping, heads, obs, min_n=6, default_layer=1)` | Resolve unknown completions: per-layer RMSE against the observed record → `well_id → layer`; feed back into the wells frame and rebuild |
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a

@@ -39,6 +39,11 @@ Currently provided:
   ``accretion_depletion``, ``long_term_stats``): the DWR-proven
   regularizers, as pure transforms applied identically to observed and
   simulated series.
+- Multi-layer well observations (``build_well_mapping`` →
+  :class:`WellMapping`): map wells onto the mesh, intersect perforations
+  with stratigraphy, transmissivity-weight layers; persistable weights
+  and a one-matrix-multiply composite for the forward run;
+  ``select_best_layers`` resolves unknown completions by RMSE.
 
 Quick-start::
 
@@ -58,6 +63,11 @@ from iwfm_io.pest.ies import (
 from iwfm_io.pest.smp import (
     read_smp,
     write_smp,
+)
+from iwfm_io.pest.wells import (
+    WellMapping,
+    build_well_mapping,
+    select_best_layers,
 )
 from iwfm_io.pest.derived import (
     head_changes,
@@ -116,6 +126,9 @@ __all__ = [
     "vertical_head_difference",
     "accretion_depletion",
     "long_term_stats",
+    "WellMapping",
+    "build_well_mapping",
+    "select_best_layers",
     "WeightBalance",
     "balance_weights",
     "balance_pst_weights",
