@@ -288,6 +288,92 @@ underscores — `stf_105_zcs014_13_20001031` round-trips unambiguously).
 | `NameScheme` / `StandardScheme` | Scheme base class / default implementation (`sep`, `date_format` configurable) |
 | `register_scheme(name, scheme)` / `get_scheme(name)` | Register project-specific legacy schemes and use them by name everywhere |
 
+### PESTPP-IES results loader (`iwfm_io/pest/ies.py`)
+
+`load_ies_ensembles(path)` discovers a PESTPP-IES run's output files (from a
+`<case>.pst` path, the master directory, or a `<dir>/<case>` prefix) and
+returns an `IesResults` handle. All accessors are lazy and cached — ensemble
+CSVs for large models can run to hundreds of MB. `.jcb` binaries
+(`ies_save_binary`) are read through pyemu when installed (clear error
+otherwise); CSV wins when both exist.
+
+| Method / function | Purpose |
+|---|---|
+| `IesResults.iterations` | Sorted iterations with any ensemble file |
+| `.par(iteration=None)` / `.obs(iteration=None)` | Parameter / simulated-observation ensemble, `real_name`-indexed (default: last iteration) |
+| `.par_all()` / `.obs_all()` | All iterations concatenated, `(iteration, real_name)` MultiIndex |
+| `.phi(kind="composite")` | Tidy phi: `iteration, real_name, phi` (kinds: composite/actual/meas/regul) |
+| `.phi_summary(kind)` | Per-iteration total_runs/mean/std/min/max |
+| `.phi_groups()` | Tidy per-group phi: `iteration, real_name, group, phi` |
+| `.pdc()` / `.obs_plus_noise()` | Prior-data-conflict table / obs+noise realizations (`None` if absent) |
+| `.base_rei(iteration=None)` | Base-realization residuals as a DataFrame |
+| `.best_realization(iteration=None)` | Minimum-phi realization name |
+| `.describe()` | JSON-serializable file inventory + phi summary (agent-friendly) |
+| `read_rei(path)` | Standalone PEST `.rei`/`.res` residual-file reader |
+
+### Residual & calibration statistics (`iwfm_io/pest/stats.py`)
+
+Goodness-of-fit metrics on observed/simulated pairs: `n`, `mean_res` (bias),
+`med_res`, `mean_abs_res`, `max_abs_res`, `rmse`, `r2`, `nse`, `kge`, plus
+`phi` (PEST objective contribution, `Σ(w·res)²`) when weights are supplied.
+Convention: `residual = observed − simulated` (PEST's Measured − Modelled).
+All computations are vectorized groupby reductions — no per-group Python
+loops — so full IES ensembles (10⁵–10⁶ obs × 10² realizations) are practical.
+
+| Function | Purpose |
+|---|---|
+| `residual_stats(df, by=..., observed=..., simulated=..., weight=None)` | Core engine on a long-form frame; group by any column combination |
+| `rei_stats(path_or_df, by="group", weighted_only=False)` | Stats (incl. `phi`) straight from a PEST residual file |
+| `ies_stats(results, observed=None, iterations=None, by=None)` | Per-`(iteration, realization, group)` stats for an IES run; `observed` defaults to the obs+noise `base` row; `by` maps obs name → group (pairs naturally with `decode_obs_names`) |
+| `METRICS` | List of metric column names |
+
+### SMP bore-sample files (`iwfm_io/pest/smp.py`)
+
+The interchange format of the DWR/IWFM2OBS calibration toolchain
+(`site  date  time  value`, whitespace-delimited). Frames use the package's
+standard long-form columns `site, datetime, value` (same as
+`collect_hydrographs`).
+
+| Function | Purpose |
+|---|---|
+| `read_smp(path, date_format=None)` | Read to a long-form frame. Auto-detects `dd/mm/yyyy` vs `mm/dd/yyyy` from the data; refuses to guess when ambiguous (pass `date_format` explicitly) |
+| `write_smp(df, path, date_format="dd/mm/yyyy", max_site_len=10, sort=True)` | Write atomically; validates site names (10-char classic-PEST limit, no whitespace), drops NaN values with a warning, sorts site-then-time |
+
+### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
+
+Rescales observation weights so each observation *category* contributes a
+chosen target to the objective function (weights × `√(target/current phi)`
+per group). Works pyemu-free on the PEST++ v2 external observation-data
+layout (`obsnme, weight, obgnme` DataFrame/CSV) with residuals from any
+source (`.rei` path, `read_rei` frame, `IesResults.base_rei()`, or Series).
+Per-observation 1/σ weighting composes: set `weight = 1/σ` first, then
+balance — the group-uniform rescale preserves relative weighting.
+
+| Function / class | Purpose |
+|---|---|
+| `balance_weights(obs_data, residuals, budgets, split="even", min_weight=None, max_weight=None)` | Core rescale. `budgets` = `{pattern: target_phi}`, patterns match groups by exact name / regex / prefix; a pattern's budget splits evenly or proportional-to-phi among its groups. Overlaps and no-match patterns raise |
+| `WeightBalance` | Result: `.obs_data` (rescaled weights) + `.report` (per group: phi before/after, target, factor, shares) |
+| `balance_pst_weights(pst_path, budgets, residuals=None)` | Classic inline `.pst` adapter via pyemu (optional dependency) |
+
+### IES diagnostics (`iwfm_io/pest/diagnostics.py`)
+
+`diagnose_ies(results, par_data=None, ...)` distills a PESTPP-IES run into a
+few-KB JSON-serializable state + boolean signals + a text summary — small
+enough to hand to a person or an LLM without exposing the raw ensembles.
+Every section is fault-tolerant (missing inputs become notes, not errors).
+
+| Section | Metrics / signals |
+|---|---|
+| `phi` | Per-iteration mean/min/max/std, total & last-step reduction, std collapse ratio → `phi_stalled`, `ensemble_collapsed` |
+| `prior_data_conflict` | Conflict count/rate by category → `conflict_systemic` |
+| `bound_railing` | % of (parameter × realization) values at bounds per group, log-aware, over the whole last ensemble (needs `par_data` with bounds) → `railing_present` |
+| `residuals` | Per-group bias, abs-mean, time trend (dates via the obs-name codec) + flagged groups |
+| `outliers` | Weighted obs with \|residual\| over threshold, top-N table |
+| `objective_balance` | Last-iteration phi share by category → `objective_imbalance`, `dominant_category` |
+
+`DiagThresholds` holds all signal cut-offs; `IesDiagnostics` exposes
+`.state`, `.signals`, `.summary()`, `.to_json(path)`.
+
 ---
 
 ## `iwfm_io.plots` — Visualization Library

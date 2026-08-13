@@ -11,6 +11,24 @@ Currently provided:
   vectorized counterparts): structured, round-trip-safe conversion between
   ``(obs_type, location, time)`` and PEST observation names, with a
   registry for project-specific legacy naming schemes.
+- PESTPP-IES results loader (``load_ies_ensembles`` → :class:`IesResults`):
+  lazy, cached access to per-iteration parameter/observation ensembles,
+  tidy phi tables, per-group phi, prior-data conflict, obs+noise, and
+  base-realization residuals (``read_rei``).
+- Residual/calibration statistics (``residual_stats``, ``rei_stats``,
+  ``ies_stats``): RMSE, bias, R², NSE, KGE, phi contributions — grouped
+  by any columns, vectorized to ensemble scale.
+- SMP bore-sample files (``read_smp`` / ``write_smp``): the interchange
+  format of the DWR/IWFM2OBS calibration toolchain, as long-form
+  ``site, datetime, value`` frames.
+- Phi-budget weight balancing (``balance_weights``): rescale observation
+  weights so each category contributes a target phi, pyemu-free on
+  v2-style observation-data tables (``balance_pst_weights`` adapts
+  classic .pst files through pyemu).
+- IES diagnostics (``diagnose_ies`` → :class:`IesDiagnostics`): phi
+  convergence/collapse, prior-data conflict, ensemble-wide bound
+  railing, residual bias/trends, outliers, objective balance — as a
+  compact JSON state + boolean signals + text summary.
 
 Quick-start::
 
@@ -22,6 +40,31 @@ Quick-start::
     parts = decode_obs_names(obs_df.index)   # DataFrame: obs_type, location, time
 """
 
+from iwfm_io.pest.ies import (
+    IesResults,
+    load_ies_ensembles,
+    read_rei,
+)
+from iwfm_io.pest.smp import (
+    read_smp,
+    write_smp,
+)
+from iwfm_io.pest.diagnostics import (
+    DiagThresholds,
+    IesDiagnostics,
+    diagnose_ies,
+)
+from iwfm_io.pest.weights import (
+    WeightBalance,
+    balance_weights,
+    balance_pst_weights,
+)
+from iwfm_io.pest.stats import (
+    METRICS,
+    residual_stats,
+    rei_stats,
+    ies_stats,
+)
 from iwfm_io.pest.names import (
     ObsName,
     NameScheme,
@@ -36,6 +79,21 @@ from iwfm_io.pest.names import (
 )
 
 __all__ = [
+    "IesResults",
+    "load_ies_ensembles",
+    "read_rei",
+    "read_smp",
+    "write_smp",
+    "WeightBalance",
+    "balance_weights",
+    "balance_pst_weights",
+    "DiagThresholds",
+    "IesDiagnostics",
+    "diagnose_ies",
+    "METRICS",
+    "residual_stats",
+    "rei_stats",
+    "ies_stats",
     "ObsName",
     "NameScheme",
     "StandardScheme",
