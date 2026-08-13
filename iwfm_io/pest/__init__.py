@@ -51,6 +51,11 @@ Currently provided:
 - Run orchestration (``setup_agents``, ``write_forward_run``,
   ``run_finals``): hardlinked agent replication, fail-fast forward-run
   scripts, and pyemu-free v2 parrep for finals reruns.
+- Parameter write-back (``apply_parameters`` + :class:`ApplyAction`):
+  the multiplier apply step — PEST-written value files merged onto base
+  parameter tables and regenerated through the round-trip writers, with
+  bounds and a bookkeeping log; plus IWFM's native GW parameter
+  overwrite file (``write_gw_overwrite`` / ``read_gw_overwrite``).
 
 Quick-start::
 
@@ -75,6 +80,12 @@ from iwfm_io.pest.wells import (
     WellMapping,
     build_well_mapping,
     select_best_layers,
+)
+from iwfm_io.pest.apply import (
+    ApplyAction,
+    apply_parameters,
+    write_gw_overwrite,
+    read_gw_overwrite,
 )
 from iwfm_io.pest.orchestrate import (
     setup_agents,
@@ -146,6 +157,10 @@ __all__ = [
     "WellMapping",
     "ObsFileSpec",
     "setup_agents",
+    "ApplyAction",
+    "apply_parameters",
+    "write_gw_overwrite",
+    "read_gw_overwrite",
     "write_manager_script",
     "write_forward_run",
     "parrep_v2",

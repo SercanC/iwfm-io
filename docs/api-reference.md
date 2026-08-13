@@ -412,6 +412,19 @@ observation tables the other pest modules produce.
 | `parrep_v2(pst_path, values, noptmax=0)` | pyemu-free parrep for PEST++ v2 control files: rewrite the external parameter-data CSV(s) from a Series and set `noptmax` |
 | `run_finals(results, template, dest, iteration=None, realization="base")` | Stage a verification rerun of one ensemble realization in a fresh hardlinked copy |
 
+### Parameter write-back (`iwfm_io/pest/apply.py`)
+
+The multiplier apply step of the forward run: PEST writes small value CSVs
+(through trivial templates), `apply_parameters` merges them onto the base
+parameter tables and regenerates the model input through the round-trip
+writers — no template markers in fixed-format IWFM files.
+
+| Function / class | Purpose |
+|---|---|
+| `ApplyAction(reader, path, table, column, values_file, key_cols, op, lower, upper)` | One declarative write-back: `reader` ∈ gw_main/stream_main/subsidence; `op` ∈ multiply/replace/add; bounds clip with a logged count; value rows matching no table row are an error |
+| `apply_parameters(run_dir, actions, log_path=...)` | Apply all actions (targets read once), rewrite atomically, and write the bookkeeping CSV (the `mult2model_info` role) |
+| `write_gw_overwrite(path, df, factors=None, time_unit="1MON")` / `read_gw_overwrite(path)` | IWFM's native GW parameter overwrite file (`node layer PKH PS PN PV PL SCE SCI`, `-1` = keep) |
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a

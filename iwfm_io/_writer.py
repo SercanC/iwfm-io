@@ -16,6 +16,23 @@ from iwfm_io._tokens import format_iwfm_date
 from iwfm_io.models.base import FileHeader, TimeSeriesSpec
 
 
+def _format_token(tok, width: int) -> str:
+    """Render one table token, keeping floats within their column.
+
+    ``str(float)`` can emit 17-significant-digit reprs (e.g.
+    ``105.09150000000001`` for a value computed as ``70.061 * 1.5``)
+    which overflow the fixed-width layout. Floats whose repr exceeds the
+    column are re-rendered at 8 significant digits — more than IWFM
+    input precision, still column-safe.
+    """
+    if isinstance(tok, float):
+        s = repr(tok)
+        if len(s) > width and tok == tok and abs(tok) != float("inf"):
+            s = f"{tok:.8G}"
+        return s
+    return str(tok)
+
+
 def replace_file_text(path: str | Path, text: str,
                       encoding: str | None = None,
                       newline: str | None = None) -> None:
@@ -161,8 +178,10 @@ class IWFMFileWriter:
             widths = [12] * len(tokens)
         parts = []
         for tok, w in zip(tokens, widths):
-            s = str(tok)
-            parts.append(s.rjust(w))
+            s = _format_token(tok, w)
+            # a token at/over its column width would fuse with the
+            # previous field — force at least one separating space
+            parts.append(s.rjust(w) if len(s) < w else " " + s)
         self._lines.append("".join(parts))
 
     def write_data_table(
