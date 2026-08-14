@@ -169,9 +169,11 @@ gw.initial_heads["head_layer_1"] += 5.0            # modify
 write_gw_main(gw, "GW_MAIN_new.dat", base_dir=sim_dir)
 ```
 
-Component-main writers (`write_gw_main`, `write_subsidence_file`, `write_stream_main`, `write_rootzone_main`) accept `base_dir` — pass the simulation working directory (the folder of the simulation main file) so referenced paths are written relative to it; IWFM does not accept absolute paths.
+Component-main writers (`write_gw_main`, `write_subsidence_file`, `write_stream_main`, `write_rootzone_main`, `write_bc_main`, and the four root-zone sub-main writers) accept `base_dir` — pass the simulation working directory (the folder of the simulation main file) so referenced paths are written relative to it; IWFM does not accept absolute paths.
 
-Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_supply_adjust`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_well_spec`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_swshed`, `write_unsatzone`.
+Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_supply_adjust`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_spec_flow_bc`, `write_general_head_bc`, `write_constrained_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_well_spec`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_nonponded_ag_main`, `write_ponded_ag_main`, `write_urban_main`, `write_native_veg_main`, `write_swshed`, `write_unsatzone`.
+
+**Every reader now has a mirror writer** — the reader/writer pairs cover the complete input tree, and the exe round-trip test regenerates all of them (root-zone sub-mains and BC files included) and reproduces baseline heads exactly.
 
 ### Validation
 
@@ -191,7 +193,13 @@ adapter = IOModelAdapter(
     preprocessor=pp,                    # from read_preprocessor()
     heads_hdf="Results/GWHeadAll.hdf",  # optional
     budget_hdfs={"GW": "GW.hdf"},       # optional
+    budget_texts={"GW": "GW.bud"},      # optional text-.bud fallback
 )
+```
+
+`open_model()` discovers text `.bud` budgets automatically (in `Results/` and `Budget/`) for models that ship no budget HDFs — `describe()` marks them `"format": "text"` and `budget_df()` serves them at their native output interval (pass no `interval=`; resample the returned frame instead). When a budget exists in both formats the HDF wins.
+
+```python
 
 adapter.describe()       # JSON-serializable model summary
 adapter.n_nodes          # int

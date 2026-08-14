@@ -39,11 +39,18 @@ def test_regenerated_inputs_reproduce_baseline_heads(tmp_path):
         read_unsatzone, write_unsatzone,
         read_rootzone_main, write_rootzone_main,
         read_stream_main, write_stream_main,
+        read_bc_main, write_bc_main,
+        read_spec_head_bc, write_spec_head_bc,
+        read_nonponded_ag_main, write_nonponded_ag_main,
+        read_ponded_ag_main, write_ponded_ag_main,
+        read_urban_main, write_urban_main,
+        read_native_veg_main, write_native_veg_main,
     )
     from iwfm_io.readers.text_output import read_head_all_out
 
     scen = create_scenario(SAMPLE_MODEL, tmp_path / "scenario")
     sim = scen / "Simulation"
+    rz = sim / "RootZone"
 
     pairs = [
         (sim / "GW" / "GW_MAIN.dat", read_gw_main, write_gw_main, True),
@@ -53,12 +60,23 @@ def test_regenerated_inputs_reproduce_baseline_heads(tmp_path):
          write_tile_drain, False),
         (sim / "GW" / "ElemPump.dat", read_elem_pump,
          write_elem_pump, False),
+        (sim / "GW" / "BC_MAIN.dat", read_bc_main, write_bc_main, True),
+        (sim / "GW" / "SpecHeadBC.dat", read_spec_head_bc,
+         write_spec_head_bc, False),
         (sim / "Stream" / "DiverSpecs.dat", read_diver_specs,
          write_diver_specs, False),
         (sim / "SWShed.dat", read_swshed, write_swshed, False),
         (sim / "UnsatZone.dat", read_unsatzone, write_unsatzone, False),
         (sim / "RootZone" / "RootZone_MAIN.dat", read_rootzone_main,
          write_rootzone_main, True),
+        (rz / "NonPondedAg" / "NonPondedAg_MAIN.dat",
+         read_nonponded_ag_main, write_nonponded_ag_main, True),
+        (rz / "PondedAg" / "PondedAg_MAIN.dat",
+         read_ponded_ag_main, write_ponded_ag_main, True),
+        (rz / "Urban" / "Urban_MAIN.dat",
+         read_urban_main, write_urban_main, True),
+        (rz / "NativeVeg" / "NativeVeg_MAIN.dat",
+         read_native_veg_main, write_native_veg_main, True),
         (sim / "Stream" / "Stream_MAIN.dat", read_stream_main,
          write_stream_main, True),
     ]

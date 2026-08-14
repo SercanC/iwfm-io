@@ -14,9 +14,12 @@ from iwfm_io._writer import IWFMFileWriter
 from iwfm_io.models.groundwater import (
     BCMain,
     BoundaryTSFile,
+    ConstrainedHeadBCFile,
     ElemPumpFile,
+    GeneralHeadBCFile,
     GWMain,
     PumpMain,
+    SpecifiedFlowBCFile,
     SpecifiedHeadFile,
     SubsidenceFile,
     TileDrainFile,
@@ -246,6 +249,135 @@ def write_spec_head_bc(sf: SpecifiedHeadFile, path: str | Path) -> None:
                 ],
                 widths=[10, 8, 8, 12],
             )
+
+    w.flush()
+
+
+# ------------------------------------------------------------------
+# Specified Flow BC
+# ------------------------------------------------------------------
+
+def write_spec_flow_bc(sf: SpecifiedFlowBCFile, path: str | Path) -> None:
+    """Write a specified flow boundary conditions file.
+
+    Mirrors :func:`iwfm_io.readers.groundwater.read_spec_flow_bc`:
+    NQB, FACT, TUNIT, then one ``NODE LAYER ITSCOL FLOW`` row per node.
+
+    Parameters
+    ----------
+    sf : SpecifiedFlowBCFile
+    path : str or Path
+    """
+    w = IWFMFileWriter(path)
+    w.write_header(sf.header)
+
+    w.write_keyed_value(sf.n_nodes, "NQB")
+    w.write_keyed_value(sf.factor, "FACT")
+    w.write_keyed_value(sf.time_unit, "TUNIT")
+
+    if sf.data is not None:
+        for _, row in sf.data.iterrows():
+            w.write_data_line(
+                [
+                    int(row["node_id"]),
+                    int(row["layer"]),
+                    int(row["itscol"]),
+                    fmt_num(float(row["flow"])),
+                ],
+                widths=[10, 8, 8, 14],
+            )
+
+    w.flush()
+
+
+# ------------------------------------------------------------------
+# General Head BC
+# ------------------------------------------------------------------
+
+def write_general_head_bc(gh: GeneralHeadBCFile, path: str | Path) -> None:
+    """Write a general head boundary conditions file.
+
+    Mirrors :func:`iwfm_io.readers.groundwater.read_general_head_bc`:
+    NGB, FACTH, FACTC, TUNITC, then one ``NODE LAYER ITSCOL BH BC``
+    row per node.
+
+    Parameters
+    ----------
+    gh : GeneralHeadBCFile
+    path : str or Path
+    """
+    w = IWFMFileWriter(path)
+    w.write_header(gh.header)
+
+    w.write_keyed_value(gh.n_nodes, "NGB")
+    w.write_keyed_value(gh.facth, "FACTH")
+    w.write_keyed_value(gh.factc, "FACTC")
+    w.write_keyed_value(gh.time_unit, "TUNITC")
+
+    if gh.data is not None:
+        for _, row in gh.data.iterrows():
+            w.write_data_line(
+                [
+                    int(row["node_id"]),
+                    int(row["layer"]),
+                    int(row["itscol"]),
+                    fmt_num(float(row["head"])),
+                    fmt_num(float(row["conductance"])),
+                ],
+                widths=[10, 8, 8, 14, 14],
+            )
+
+    w.flush()
+
+
+# ------------------------------------------------------------------
+# Constrained General Head BC
+# ------------------------------------------------------------------
+
+def write_constrained_head_bc(
+    ch: ConstrainedHeadBCFile,
+    path: str | Path,
+) -> None:
+    """Write a constrained general head boundary conditions file.
+
+    Mirrors :func:`iwfm_io.readers.groundwater.read_constrained_head_bc`
+    (keywords as in the C2VSimFG release files): NGB, FACTH, FACTVL,
+    TUNITVL, FACTC, TUNITC, then one row per node —
+    ``NODE LAYER ITSCOL BH BC LBH ITSCOLF CFLOW [/ name]``.
+
+    Parameters
+    ----------
+    ch : ConstrainedHeadBCFile
+    path : str or Path
+    """
+    w = IWFMFileWriter(path)
+    w.write_header(ch.header)
+
+    w.write_keyed_value(ch.n_nodes, "NGB")
+    w.write_keyed_value(ch.facth, "FACTH")
+    w.write_keyed_value(ch.factvl, "FACTVL")
+    w.write_keyed_value(ch.tunitvl, "TUNITVL")
+    w.write_keyed_value(ch.factc, "FACTC")
+    w.write_keyed_value(ch.tunitc, "TUNITC")
+
+    if ch.data is not None:
+        for _, row in ch.data.iterrows():
+            values = [
+                int(row["node_id"]),
+                int(row["layer"]),
+                int(row["itscol"]),
+                fmt_num(float(row["head"])),
+                fmt_num(float(row["conductance"])),
+                fmt_num(float(row["limiting_head"])),
+                int(row["itscolf"]),
+                fmt_num(float(row["max_flow"])),
+            ]
+            widths = [10, 8, 8, 14, 14, 14, 10, 14]
+            name = row.get("name", "")
+            if name:
+                values.append(f"/{name}")
+                widths.append(4)
+            w.write_data_line(values, widths)
 
     w.flush()
 

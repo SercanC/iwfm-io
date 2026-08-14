@@ -75,6 +75,61 @@ def test_repr(model):
     assert "441 nodes" in text
 
 
+def test_no_text_budgets_when_hdfs_cover_them(model):
+    # every sample .bud has an HDF twin (Strm.bud vs StrmBud.hdf etc.),
+    # so the normalized-stem preference leaves no text budgets
+    assert model._budget_texts == {}
+
+
+class TestTextBudgetFallback:
+    """Models without budget HDFs serve their text .bud budgets."""
+
+    @pytest.fixture(scope="class")
+    def text_model(self, tmp_path_factory):
+        import shutil
+
+        root = tmp_path_factory.mktemp("textmodel") / "model"
+        for sub in ("Preprocessor", "Simulation", "Budget"):
+            shutil.copytree(SAMPLE_MODEL / sub, root / sub)
+        (root / "Results").mkdir()
+        shutil.copy(SAMPLE_MODEL / "Results" / "GWHeadAll.out",
+                    root / "Results" / "GWHeadAll.out")
+        return open_model(root)
+
+    def test_discovery(self, text_model):
+        assert "GW" in text_model._budget_texts
+        assert len(text_model._budget_texts) >= 8
+        assert text_model._budget_hdfs == {}
+
+    def test_describe_marks_format(self, text_model):
+        d = text_model.describe()["results"]["budgets"]["GW"]
+        assert d["format"] == "text"
+        assert "ENTIRE MODEL AREA" in d["locations"]
+        json.dumps(text_model.describe())     # still JSON-serializable
+
+    def test_budget_df_by_index_and_name(self, text_model):
+        by_idx = text_model.budget_df("GW", location=1)
+        assert len(by_idx) > 0
+        assert by_idx.index.inferred_type.startswith("datetime")
+        by_name = text_model.budget_df("GW", location="ENTIRE MODEL AREA")
+        assert len(by_name) == len(by_idx)
+
+    def test_budget_df_date_window(self, text_model):
+        df = text_model.budget_df("GW", location=1,
+                                  begin_date="10/01/1995_24:00",
+                                  end_date="09/30/1997_24:00")
+        assert len(df) >= 1
+        assert df.index.min().year >= 1995
+
+    def test_interval_request_raises(self, text_model):
+        with pytest.raises(ValueError, match="native output interval"):
+            text_model.budget_df("GW", location=1, interval="1YEAR")
+
+    def test_unknown_budget_lists_available(self, text_model):
+        with pytest.raises(RuntimeError, match="available"):
+            text_model.budget_df("Nope", location=1)
+
+
 def test_preprocessor_properties(preprocessor_dir):
     pp = read_preprocessor(preprocessor_dir / "PreProcessor_MAIN.IN")
     assert len(pp.nodes) == 441

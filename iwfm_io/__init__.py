@@ -174,6 +174,9 @@ from iwfm_io.writers.groundwater import (
     write_gw_main,
     write_bc_main,
     write_spec_head_bc,
+    write_spec_flow_bc,
+    write_general_head_bc,
+    write_constrained_head_bc,
     write_boundary_ts,
     write_pump_main,
     write_well_spec,
@@ -196,7 +199,13 @@ from iwfm_io.writers.stream import (
 from iwfm_io.writers.lake import write_lake_main
 
 # Root zone writers
-from iwfm_io.writers.rootzone import write_rootzone_main
+from iwfm_io.writers.rootzone import (
+    write_rootzone_main,
+    write_nonponded_ag_main,
+    write_ponded_ag_main,
+    write_urban_main,
+    write_native_veg_main,
+)
 
 # Misc writers
 from iwfm_io.writers.misc import write_swshed, write_unsatzone
@@ -388,6 +397,9 @@ __all__ = [
     "write_gw_main",
     "write_bc_main",
     "write_spec_head_bc",
+    "write_spec_flow_bc",
+    "write_general_head_bc",
+    "write_constrained_head_bc",
     "write_boundary_ts",
     "write_pump_main",
     "write_well_spec",
@@ -405,6 +417,10 @@ __all__ = [
     "write_lake_main",
     # Root zone writers
     "write_rootzone_main",
+    "write_nonponded_ag_main",
+    "write_ponded_ag_main",
+    "write_urban_main",
+    "write_native_veg_main",
     # Misc writers
     "write_swshed",
     "write_unsatzone",

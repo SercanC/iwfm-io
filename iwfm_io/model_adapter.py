@@ -56,6 +56,11 @@ class IOModelAdapter:
         Result of ``read_bypass_specs()``.
     tile_drain : TileDrainFile, optional
         Result of ``read_tile_drain()``.
+    budget_texts : dict[str, str or Path], optional
+        Mapping of budget name → text ``.bud`` path.  Text budgets are
+        the fallback for packaged/older models whose Results carry no
+        budget HDF files; where a name exists in both mappings the HDF
+        wins.
     """
 
     def __init__(
@@ -72,11 +77,13 @@ class IOModelAdapter:
         gw_main=None,
         well_spec=None,
         diver_specs=None,
+        budget_texts=None,
     ):
         self._pp = preprocessor
         self._sim = simulation
         self._heads_hdf = heads_hdf
         self._budget_hdfs = budget_hdfs or {}
+        self._budget_texts = budget_texts or {}
         self._hydrograph_hdfs = hydrograph_hdfs or {}
         self._stream_main = stream_main
         self._bypass_specs = bypass_specs
@@ -475,11 +482,7 @@ class IOModelAdapter:
         location : int or str
             1-based location index or location name.
         """
-        if budget_name not in self._budget_hdfs:
-            raise RuntimeError(
-                f"IOModelAdapter: no budget HDF for '{budget_name}'")
-        from iwfm_io.readers.hdf5 import read_budget_hdf
-        bud = read_budget_hdf(self._budget_hdfs[budget_name], interval=interval)
+        bud = self._read_budget_source(budget_name, interval=interval)
         locs = bud["locations"]
         if isinstance(location, int):
             if location < 1 or location > len(locs):
@@ -527,19 +530,57 @@ class IOModelAdapter:
 
     # -- Budget-backed state (DLL-free) ---------------------------------
 
+    def _read_budget_source(self, key, interval=None):
+        """Read a budget by name from its HDF or text ``.bud`` source.
+
+        Returns the ``read_budget_hdf`` shape either way:
+        ``{"locations": [...], "data": {location: DataFrame}}`` with a
+        DatetimeIndex per location.  Text budgets carry the file's
+        native output interval; requesting a different ``interval``
+        from a text source raises (HDF budgets resample via the reader).
+        """
+        if key in self._budget_hdfs:
+            from iwfm_io.readers.hdf5 import read_budget_hdf
+            return read_budget_hdf(self._budget_hdfs[key],
+                                   interval=interval)
+        if key in self._budget_texts:
+            if interval is not None:
+                raise ValueError(
+                    f"text budget '{key}' serves only its native output "
+                    "interval — resample the returned DataFrame instead")
+            cache_key = f"_budget_text::{key}"
+            if cache_key in self._cache:
+                return self._cache[cache_key]
+            from iwfm_io._tokens import parse_iwfm_date
+            from iwfm_io.readers.text_output import read_budget_text
+            sections = read_budget_text(self._budget_texts[key])
+            data = {}
+            for loc, df in sections.items():
+                df = df.copy()
+                idx = pd.DatetimeIndex(
+                    [parse_iwfm_date(d) for d in df.pop("date")])
+                df.index = idx
+                data[loc] = df
+            result = {"locations": list(data), "data": data}
+            self._cache[cache_key] = result
+            return result
+        available = sorted({*self._budget_hdfs, *self._budget_texts})
+        raise RuntimeError(
+            f"IOModelAdapter: no budget source for '{key}' "
+            f"(available: {available})")
+
     def _read_full_budget(self, key):
-        """Read (and cache) a whole budget HDF: {locations, data, ...}."""
+        """Read (and cache) a whole budget: {locations, data, ...}."""
         cache_key = f"_budget_full::{key}"
         if cache_key in self._cache:
             return self._cache[cache_key]
-        from iwfm_io.readers.hdf5 import read_budget_hdf
-        bud = read_budget_hdf(self._budget_hdfs[key])
+        bud = self._read_budget_source(key)
         self._cache[cache_key] = bud
         return bud
 
     def _find_budget_key(self, *tokens):
         """Find a budget key whose normalized name contains any token."""
-        for key in self._budget_hdfs:
+        for key in (*self._budget_hdfs, *self._budget_texts):
             norm = key.upper().replace("&", "").replace("_", "").replace("-", "")
             if any(t in norm for t in tokens):
                 return key
@@ -1144,11 +1185,24 @@ class IOModelAdapter:
         info["results"] = {
             "heads": str(self._heads_hdf) if self._heads_hdf else None,
             "budgets": {
-                name: {
-                    "path": str(path),
-                    "locations": _try(lambda p=path: _hdf_dataset_names(p)),
-                }
-                for name, path in self._budget_hdfs.items()
+                **{
+                    name: {
+                        "path": str(path),
+                        "locations": _try(
+                            lambda p=path: _hdf_dataset_names(p)),
+                    }
+                    for name, path in self._budget_hdfs.items()
+                },
+                **{
+                    name: {
+                        "path": str(path),
+                        "format": "text",
+                        "locations": _try(
+                            lambda n=name: self._read_budget_source(
+                                n)["locations"]),
+                    }
+                    for name, path in self._budget_texts.items()
+                },
             },
             "hydrographs": {
                 name: str(path)
@@ -1169,8 +1223,9 @@ class IOModelAdapter:
             parts.append(f"{self.n_layers} layers")
         except Exception:
             parts.append("no grid loaded")
-        if self._budget_hdfs:
-            parts.append(f"{len(self._budget_hdfs)} budgets")
+        n_budgets = len(self._budget_hdfs) + len(self._budget_texts)
+        if n_budgets:
+            parts.append(f"{n_budgets} budgets")
         if self._heads_hdf:
             parts.append("heads")
         return f"<IOModelAdapter: {', '.join(parts)}>"
@@ -1441,6 +1496,27 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
                     heads_hdf = f
                     break
 
+    # Text .bud budgets (packaged/older models often ship these instead
+    # of budget HDFs; the Budget post-processor also writes them).  HDF
+    # wins when the same budget exists in both formats — matched on a
+    # normalized stem so e.g. Strm.bud defers to StrmBud.hdf.
+    import re as _re
+
+    def _budget_stem(name):
+        norm = _re.sub(r"[^A-Z0-9]", "", str(name).upper())
+        return norm[:-3] if norm.endswith("BUD") else norm
+
+    budget_texts = {}
+    hdf_stems = {_budget_stem(k) for k in budget_hdfs}
+    for bud_dir in (results_dir, root / "Budget"):
+        if not bud_dir.is_dir():
+            continue
+        for f in sorted(bud_dir.glob("*.bud")):
+            key = f.stem
+            if _budget_stem(key) in hdf_stems or key in budget_texts:
+                continue
+            budget_texts[key] = f
+
     adapter = IOModelAdapter(
         preprocessor=pp,
         simulation=sim,
@@ -1454,6 +1530,7 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
         gw_main=gw_main,
         well_spec=well_spec,
         diver_specs=diver_specs,
+        budget_texts=budget_texts,
     )
     adapter._root = root
     return adapter

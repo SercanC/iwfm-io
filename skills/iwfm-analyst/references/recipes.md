@@ -22,12 +22,13 @@ df = m.budget_df("<budget name from describe()>", location=1)
 - Values are model-internal volume units; convert to acre-feet with the
   GW main's FACTVLOU (commonly 2.2957e-5 from cubic feet).
 - Water-year totals: `df.resample("YS-OCT").sum()`.
-- Older/packaged models may only have **text** budgets (`.bud`):
-
-```python
-from iwfm_io.readers.text_output import read_budget_text
-sections = read_budget_text(r"...\Results\GW_Budget.bud")  # dict: location -> DataFrame
-```
+- Older/packaged models may only have **text** budgets (`.bud`) —
+  `open_model` discovers them automatically (in `Results/` and
+  `Budget/`) and `budget_df` serves them the same way; `describe()`
+  marks them `"format": "text"`. They come at the file's native output
+  interval (don't pass `interval=`; resample the returned frame), and
+  column names may be generic `col_N` when the header doesn't parse.
+  Direct access: `read_budget_text(path)` → dict location → DataFrame.
 
 ## Heads and depth to water
 

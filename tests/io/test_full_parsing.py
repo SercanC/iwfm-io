@@ -272,6 +272,137 @@ class TestWriterRoundTrips:
         assert ds2.recharge_zones == ds.recharge_zones
         assert ds2.spill_locations == ds.spill_locations
 
+    # -- Root zone sub-component mains ---------------------------------
+
+    def _rz_paths(self):
+        from iwfm_io import read_rootzone_main
+
+        rz = read_rootzone_main(
+            SIMULATION_DIR / "RootZone" / "RootZone_MAIN.dat")
+        return rz.file_paths
+
+    def test_nonponded_ag_main(self, tmp_output):
+        from iwfm_io import read_nonponded_ag_main, write_nonponded_ag_main
+
+        np1 = read_nonponded_ag_main(self._rz_paths()["nonponded_ag"])
+        out = tmp_output / "NonPondedAg_MAIN.dat"
+        write_nonponded_ag_main(np1, out, base_dir=SIMULATION_DIR)
+        np2 = read_nonponded_ag_main(out)
+        assert np2.n_crops == np1.n_crops
+        assert np2.crop_codes == np1.crop_codes
+        assert np2.demand_from_moisture == np1.demand_from_moisture
+        assert np2.n_budget_crops == np1.n_budget_crops
+        assert np2.budget_crop_codes == np1.budget_crop_codes
+        assert np2.root_depth_factor == np1.root_depth_factor
+        for f in ("root_depths", "curve_numbers", "et_columns",
+                  "supply_req_columns", "irig_period_columns",
+                  "min_moisture_columns", "target_moisture_columns",
+                  "return_flow_columns", "reuse_columns",
+                  "min_perc_columns", "initial_conditions"):
+            _frames_equal(getattr(np1, f), getattr(np2, f))
+        # blank optional sub-files stay blank
+        assert np2.file_paths["target_soil_moisture"] is None
+        assert np2.file_paths["min_perc"] is None
+
+    def test_ponded_ag_main(self, tmp_output):
+        from iwfm_io import read_ponded_ag_main, write_ponded_ag_main
+
+        pa1 = read_ponded_ag_main(self._rz_paths()["ponded_ag"])
+        out = tmp_output / "PondedAg_MAIN.dat"
+        write_ponded_ag_main(pa1, out, base_dir=SIMULATION_DIR)
+        pa2 = read_ponded_ag_main(out)
+        assert pa2.root_depths == pa1.root_depths
+        assert pa2.n_budget_crops == pa1.n_budget_crops
+        for f in ("curve_numbers", "et_columns", "supply_req_columns",
+                  "irig_period_columns", "ponding_depth_columns",
+                  "app_depth_columns", "return_flow_columns",
+                  "reuse_columns", "initial_conditions"):
+            _frames_equal(getattr(pa1, f), getattr(pa2, f))
+
+    def test_urban_main(self, tmp_output):
+        from iwfm_io import read_urban_main, write_urban_main
+
+        ur1 = read_urban_main(self._rz_paths()["urban"])
+        out = tmp_output / "Urban_MAIN.dat"
+        write_urban_main(ur1, out, base_dir=SIMULATION_DIR)
+        ur2 = read_urban_main(out)
+        assert ur2.root_depth == ur1.root_depth
+        assert ur2.root_depth_factor == ur1.root_depth_factor
+        _frames_equal(ur1.element_params, ur2.element_params)
+        _frames_equal(ur1.initial_conditions, ur2.initial_conditions)
+
+    def test_native_veg_main(self, tmp_output):
+        from iwfm_io import read_native_veg_main, write_native_veg_main
+
+        nv1 = read_native_veg_main(self._rz_paths()["native_veg"])
+        out = tmp_output / "NativeVeg_MAIN.dat"
+        write_native_veg_main(nv1, out, base_dir=SIMULATION_DIR)
+        nv2 = read_native_veg_main(out)
+        assert nv2.root_depth_native == nv1.root_depth_native
+        assert nv2.root_depth_riparian == nv1.root_depth_riparian
+        _frames_equal(nv1.element_params, nv2.element_params)
+        _frames_equal(nv1.initial_conditions, nv2.initial_conditions)
+
+    # -- Boundary-condition sub-files ----------------------------------
+
+    def test_spec_flow_bc(self, tmp_output):
+        import pandas as pd
+
+        from iwfm_io import read_spec_flow_bc, write_spec_flow_bc
+        from iwfm_io.models.groundwater import SpecifiedFlowBCFile
+
+        sf1 = SpecifiedFlowBCFile(
+            n_nodes=3, factor=2.5, time_unit="1day",
+            data=pd.DataFrame({
+                "node_id": [10, 11, 12], "layer": [1, 1, 2],
+                "itscol": [0, 3, 0], "flow": [-100.0, 0.0, 55.25]}))
+        out = tmp_output / "SpecFlowBC.dat"
+        write_spec_flow_bc(sf1, out)
+        sf2 = read_spec_flow_bc(out)
+        assert (sf2.n_nodes, sf2.factor, sf2.time_unit) == (3, 2.5, "1day")
+        _frames_equal(sf1.data, sf2.data)
+
+    def test_general_head_bc(self, tmp_output):
+        import pandas as pd
+
+        from iwfm_io import read_general_head_bc, write_general_head_bc
+        from iwfm_io.models.groundwater import GeneralHeadBCFile
+
+        gh1 = GeneralHeadBCFile(
+            n_nodes=2, facth=1.0, factc=0.0416667, time_unit="1mon",
+            data=pd.DataFrame({
+                "node_id": [5, 6], "layer": [2, 2], "itscol": [1, 0],
+                "head": [120.5, 118.0], "conductance": [2500.0, 1750.5]}))
+        out = tmp_output / "GHBC.dat"
+        write_general_head_bc(gh1, out)
+        gh2 = read_general_head_bc(out)
+        assert (gh2.n_nodes, gh2.facth, gh2.factc,
+                gh2.time_unit) == (2, 1.0, 0.0416667, "1mon")
+        _frames_equal(gh1.data, gh2.data)
+
+    def test_constrained_head_bc(self, tmp_output):
+        import pandas as pd
+
+        from iwfm_io import (read_constrained_head_bc,
+                             write_constrained_head_bc)
+        from iwfm_io.models.groundwater import ConstrainedHeadBCFile
+
+        ch1 = ConstrainedHeadBCFile(
+            n_nodes=2, facth=1.0, factvl=1.0, tunitvl="1day",
+            factc=1.0, tunitc="1day",
+            data=pd.DataFrame({
+                "node_id": [100, 101], "layer": [1, 1],
+                "itscol": [1, 1], "head": [0.0, 0.0],
+                "conductance": [319.61, 179.77],
+                "limiting_head": [371.96, 371.96],
+                "itscolf": [4, 4], "max_flow": [0.0, 0.0],
+                "name": ["Black Butte Lake", ""]}))
+        out = tmp_output / "ConGHBC.dat"
+        write_constrained_head_bc(ch1, out)
+        ch2 = read_constrained_head_bc(out)
+        assert (ch2.tunitvl, ch2.tunitc) == ("1day", "1day")
+        _frames_equal(ch1.data, ch2.data)
+
     def test_swshed(self, tmp_output):
         from iwfm_io import read_swshed, write_swshed
 

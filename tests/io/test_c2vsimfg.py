@@ -145,6 +145,24 @@ class TestGroundwater:
         assert cb.data["node_id"].iloc[0] == 2767
         assert cb.data["name"].iloc[0] == "Black Butte Lake"
 
+    def test_constrained_head_bc_writer_roundtrip(self, tmp_path):
+        import pandas as pd
+
+        from iwfm_io import (read_constrained_head_bc,
+                             write_constrained_head_bc)
+
+        src = (C2VSIMFG / "Simulation" / "Groundwater"
+               / "C2VSimFG_ConstrainedHeadBC.dat")
+        ch1 = read_constrained_head_bc(src)
+        out = tmp_path / "ConGHBC.dat"
+        write_constrained_head_bc(ch1, out)
+        ch2 = read_constrained_head_bc(out)
+        assert (ch2.facth, ch2.factvl, ch2.tunitvl, ch2.factc,
+                ch2.tunitc) == (ch1.facth, ch1.factvl, ch1.tunitvl,
+                                ch1.factc, ch1.tunitc)
+        pd.testing.assert_frame_equal(ch1.data, ch2.data,
+                                      check_dtype=False)
+
 
 class TestMiscComponents:
     def test_unsatzone(self):
@@ -217,6 +235,60 @@ class TestRootZoneComponents:
         assert nv.root_depth_native == pytest.approx(4.0)
         assert nv.root_depth_riparian == pytest.approx(5.0)
         assert len(nv.element_params) == 32537
+
+    def test_submain_writer_roundtrips(self, tmp_path):
+        """The four sub-main writers reproduce the real v4.11 files
+        (20 crops, 32.5k-element tables, element-0 shorthand rows)."""
+        import pandas as pd
+
+        from iwfm_io import (read_native_veg_main, read_nonponded_ag_main,
+                             read_ponded_ag_main, read_urban_main,
+                             write_native_veg_main, write_nonponded_ag_main,
+                             write_ponded_ag_main, write_urban_main)
+
+        rzdir = C2VSIMFG / "Simulation" / "RootZone"
+        base = C2VSIMFG / "Simulation"
+
+        def frames_equal(a, b):
+            assert (a is None) == (b is None)
+            if a is not None:
+                pd.testing.assert_frame_equal(
+                    a.reset_index(drop=True), b.reset_index(drop=True),
+                    check_dtype=False)
+
+        np1 = read_nonponded_ag_main(rzdir / "C2VSimFG_NonPondedCrop.dat")
+        write_nonponded_ag_main(np1, tmp_path / "np.dat", base_dir=base)
+        np2 = read_nonponded_ag_main(tmp_path / "np.dat")
+        assert np2.crop_codes == np1.crop_codes
+        for f in ("root_depths", "curve_numbers", "et_columns",
+                  "supply_req_columns", "irig_period_columns",
+                  "min_moisture_columns", "target_moisture_columns",
+                  "return_flow_columns", "reuse_columns",
+                  "min_perc_columns", "initial_conditions"):
+            frames_equal(getattr(np1, f), getattr(np2, f))
+
+        pa1 = read_ponded_ag_main(rzdir / "C2VSimFG_PondedCrop.dat")
+        write_ponded_ag_main(pa1, tmp_path / "pa.dat", base_dir=base)
+        pa2 = read_ponded_ag_main(tmp_path / "pa.dat")
+        assert pa2.root_depths == pa1.root_depths
+        for f in ("curve_numbers", "et_columns", "supply_req_columns",
+                  "irig_period_columns", "ponding_depth_columns",
+                  "app_depth_columns", "return_flow_columns",
+                  "reuse_columns", "initial_conditions"):
+            frames_equal(getattr(pa1, f), getattr(pa2, f))
+
+        ur1 = read_urban_main(rzdir / "C2VSimFG_Urban.dat")
+        write_urban_main(ur1, tmp_path / "ur.dat", base_dir=base)
+        ur2 = read_urban_main(tmp_path / "ur.dat")
+        frames_equal(ur1.element_params, ur2.element_params)
+        frames_equal(ur1.initial_conditions, ur2.initial_conditions)
+
+        nv1 = read_native_veg_main(rzdir / "C2VSimFG_NativeVeg.dat")
+        write_native_veg_main(nv1, tmp_path / "nv.dat", base_dir=base)
+        nv2 = read_native_veg_main(tmp_path / "nv.dat")
+        assert nv2.root_depth_native == nv1.root_depth_native
+        frames_equal(nv1.element_params, nv2.element_params)
+        frames_equal(nv1.initial_conditions, nv2.initial_conditions)
 
 
 class TestStreams:
