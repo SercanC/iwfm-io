@@ -1059,6 +1059,22 @@ class IOModelAdapter:
     def n_wells(self):
         return len(self.wells_df())
 
+    # -- GIS export -----------------------------------------------------
+
+    def to_gis(self, path, layers=None, crs=None,
+               node_data=None, element_data=None):
+        """Write the model's spatial layers to a GeoPackage or shapefiles.
+
+        Convenience wrapper around :func:`iwfm_io.export_gis` — see it
+        for parameters. Requires the ``[geo]`` extra.
+
+        >>> m = open_model("path/to/model")
+        >>> m.to_gis("model.gpkg", crs="EPSG:26910")
+        """
+        from iwfm_io.gis import export_gis
+        return export_gis(self, path, layers=layers, crs=crs,
+                          node_data=node_data, element_data=element_data)
+
     # -- Model overview -------------------------------------------------
 
     def describe(self):

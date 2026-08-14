@@ -104,6 +104,21 @@ from iwfm_io.readers.stream import read_stream_main, read_diversions
 Writers mirror readers (`iwfm_io.writers.*`) for round-trip edits —
 prefer `create_scenario` + change functions over hand-editing.
 
+## GIS export (needs `pip install iwfm-io[geo]`)
+
+```python
+m.to_gis(r"model.gpkg", crs="EPSG:26910")   # all layers, one GeoPackage
+# layers: nodes (with stratigraphy), elements, subregions (dissolved),
+# streams (reach lines), stream_nodes, lakes, tile_drains, wells
+```
+
+Non-`.gpkg` path = folder of shapefiles. IWFM files carry no CRS — ask
+the user for the projection (California DWR models are commonly UTM 10N
+`EPSG:26910` or NAD83 CA Albers `EPSG:3310`); omit `crs` if unknown.
+Join results onto layers via `node_data=`/`element_data=` (DataFrames
+keyed `node_id`/`element_id`), e.g. end-of-run depth to water. Layers as
+GeoDataFrames without writing: `iwfm_io.nodes_gdf(m)` etc.
+
 ## Calibration statistics (observed vs simulated)
 
 ```python

@@ -2,7 +2,7 @@
 
 Python file I/O, DLL wrapper, and visualization library for the Integrated Water Flow Model (IWFM).
 
-**[📓 Tutorial notebooks](https://github.com/SercanC/iwfm-io/blob/main/notebooks/README.md)** — eleven executed Jupyter notebooks covering every feature area, from reading files to PEST++ calibration and CalSim/HEC-DSS integration.
+**[📓 Tutorial notebooks](https://github.com/SercanC/iwfm-io/blob/main/notebooks/README.md)** — twelve executed Jupyter notebooks covering every feature area, from reading files to PEST++ calibration, CalSim/HEC-DSS integration, and GIS exports.
 
 **[📊 Example plot gallery](https://github.com/SercanC/iwfm-io/blob/main/docs/GALLERY.md)** — all 58 plot functions rendered from DWR's C2VSimFG v1.5 Central Valley model.
 
@@ -25,6 +25,7 @@ Python file I/O, DLL wrapper, and visualization library for the Integrated Water
   - Zone/group and pilot-point parameterization on the FE mesh, constrained reparameterization with Texture2Par hooks, and a `PestSetup` builder that assembles the whole PEST interface
   - DataFrame-first **well** (`gwl_metadata`) and **stream-gauge** (`gauge_metadata`) metadata suites: link metadata to IWFM hydrograph outputs by name, composite per-layer heads, extract per-gauge flow/stage series — no hand-maintained configuration files
 - **HEC-DSS + CalSim** (`iwfm-io[dss]`, cross-platform via `pydsstools`): catalog and read DSS-6/DSS-7 time series, link gauges to CalSim channel arcs, and extract monthly channel flows (CFS or TAF) whose timestamps align with IWFM's `24:00` convention out of the box
+- **GIS exports** (`iwfm-io[geo]`): `export_gis(model, "model.gpkg")` / `model.to_gis(...)` write the grid (nodes with stratigraphy, element polygons), dissolved subregions, stream network, lakes, tile drains, and wells to a GeoPackage or shapefiles — with optional per-node/per-element attribute joins (heads, depth to water, land use, …) and a user-supplied CRS; per-layer `*_gdf()` builders return GeoDataFrames for use in Python
 - **Python ctypes wrapper** for IWFM DLL — Windows x64 only (8 modules)
 - **58 plotting functions** across 13 modules — matplotlib PNGs by default, and key plots (Sankey, budget time series/pie/bars, hydrographs, butterfly) accept `engine="plotly"` for interactive HTML with hover, zoom, and range sliders (`pip install iwfm-io[viz]`):
   - **Maps** (11 functions) — Grid, heads, streams, wells, lakes, tile drains
@@ -159,7 +160,7 @@ timeseries.plot_gw_head_hydrographs(
 
 ## Examples
 
-**Prefer notebooks?** The [`notebooks/`](notebooks/README.md) folder holds eleven fully-executed Jupyter notebooks covering the same ground with narrative and rendered output — quickstart, every reader/writer, the DLL wrapper, scenario runs, plotting, and the complete PEST++/CalSim calibration workflow.
+**Prefer notebooks?** The [`notebooks/`](notebooks/README.md) folder holds twelve fully-executed Jupyter notebooks covering the same ground with narrative and rendered output — quickstart, every reader/writer, the DLL wrapper, scenario runs, plotting, the complete PEST++/CalSim calibration workflow, and GIS exports.
 
 | File | Requires | Description |
 |------|----------|-------------|

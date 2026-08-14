@@ -189,6 +189,21 @@ DSS end-of-period stamps read back as next-day midnight — the same
 convention as IWFM's `24:00` — so CalSim and IWFM series align without
 shifting.
 
+## GIS export (optional `[geo]` extra)
+
+```python
+m.to_gis("model.gpkg", crs="EPSG:26910")     # every layer, one GeoPackage
+# layers: nodes (stratigraphy joined), elements, subregions (dissolved),
+#         streams, stream_nodes, lakes, tile_drains, wells
+```
+
+A non-`.gpkg` path writes one shapefile per layer into that folder.
+IWFM files carry no CRS — pass the model's projection when known, or the
+layers come out unreferenced. Join model results onto the grid layers
+with `node_data=` / `element_data=` (DataFrames keyed `node_id` /
+`element_id`), and get any layer as a GeoDataFrame without writing via
+`iwfm_io.nodes_gdf(m)`, `elements_gdf(m)`, `streams_gdf(m)`, ….
+
 ## Conventions and gotchas
 
 - **Dates** are strings in `MM/DD/YYYY_HH:MM` format; hour `24:00`

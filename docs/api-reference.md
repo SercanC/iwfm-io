@@ -261,6 +261,24 @@ All four accept `max_workers=N` to read the runs' HDF5 files concurrently (worth
 | `collect_hydrographs(runs_dict)` | Combine hydrograph outputs |
 | `collect_gwheads(runs_dict, n_nodes, n_layers)` | Combine head outputs |
 
+### GIS Exports (`iwfm_io/gis.py` — core, requires the `[geo]` extra)
+
+Model geometry as geopandas GeoDataFrames and one-call export to GeoPackage or ESRI Shapefiles. Every function takes a *model* — an `IOModelAdapter` or a DLL `IWFMModel` (geometry is built from node coordinates and element configurations, so plain DataFrames suffice). IWFM files carry no CRS; pass `crs="EPSG:xxxx"` when known.
+
+| Function | Description |
+|----------|-------------|
+| `export_gis(model, path, layers=None, crs=None, node_data=None, element_data=None)` | Write every available layer to a `.gpkg` (multi-layer, replaced if present) or a folder of shapefiles; returns `{layer: rows}`. Default mode skips unavailable/empty layers; an explicit `layers=` list makes failures raise. `node_data`/`element_data` merge extra attributes (keyed `node_id`/`element_id`) onto those layers |
+| `IOModelAdapter.to_gis(path, ...)` | Convenience method delegating to `export_gis` |
+| `nodes_gdf(model, crs=None, data=None, stratigraphy=True)` | Node points, stratigraphy attributes joined by default |
+| `elements_gdf(model, crs=None, data=None)` | Element polygons with subregion id + name |
+| `subregions_gdf(model, crs=None)` | Dissolved subregion polygons (`n_elements`, `area`) |
+| `streams_gdf(model, crs=None)` | One LineString per reach (via the reaches' GW nodes) |
+| `stream_nodes_gdf(model, crs=None)` | Stream-node points at their GW nodes |
+| `lakes_gdf(model, crs=None)` | Lake polygons (element polygons merged per lake) |
+| `tile_drains_gdf(model, crs=None)` | Tile-drain points |
+| `wells_gdf(model, crs=None)` | Well points from the well-spec file (empty for element-only pumping) |
+| `GIS_LAYERS` | Tuple of exportable layer names, in export order |
+
 ---
 
 ## `iwfm_io.pest` — PEST(++) Calibration Support

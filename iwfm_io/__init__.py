@@ -246,6 +246,21 @@ from iwfm_io.dss import (
     calsim_streamflow_series,
 )
 
+# GIS exports (geopandas/shapely loaded lazily at call time — importing
+# these costs nothing without the [geo] extra)
+from iwfm_io.gis import (
+    GIS_LAYERS,
+    export_gis,
+    nodes_gdf,
+    elements_gdf,
+    subregions_gdf,
+    streams_gdf,
+    stream_nodes_gdf,
+    lakes_gdf,
+    tile_drains_gdf,
+    wells_gdf,
+)
+
 # Multi-run collection helpers
 from iwfm_io.collect import (
     collect_budgets,
@@ -267,6 +282,16 @@ __all__ = [
     "plots",
     "dll",
     "pest",
+    "GIS_LAYERS",
+    "export_gis",
+    "nodes_gdf",
+    "elements_gdf",
+    "subregions_gdf",
+    "streams_gdf",
+    "stream_nodes_gdf",
+    "lakes_gdf",
+    "tile_drains_gdf",
+    "wells_gdf",
     # Scenario runner
     "RunResult",
     "run_model",
