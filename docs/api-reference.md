@@ -279,6 +279,16 @@ Model geometry as geopandas GeoDataFrames and one-call export to GeoPackage or E
 | `wells_gdf(model, crs=None)` | Well points from the well-spec file (empty for element-only pumping) |
 | `GIS_LAYERS` | Tuple of exportable layer names, in export order |
 
+### VTK Exports (`iwfm_io/vtk.py` — core, no VTK library needed)
+
+The model as a 3D layered mesh for ParaView, written as VTK XML with plain numpy. The 2D FE grid is extruded through the stratigraphy (each layer's aquitard sits above its aquifer, so aquitard gaps are preserved); triangles become wedges, quads become hexahedra. Works from `IOModelAdapter` or the DLL `IWFMModel`.
+
+| Function | Description |
+|----------|-------------|
+| `export_vtk(model, path, point_data=None, cell_data=None, z_scale=1.0, layers=None)` | Write one `.vtu` UnstructuredGrid. Built-in arrays: `node_id` (points), `element_id`/`layer`/`thickness`/`subregion` (cells). `point_data`/`cell_data` add arrays shaped `(n,)` (constant over layers) or `(n, n_layers)` (per layer), in `nodes_df()`/`elements_df()` row order. `z_scale` bakes in vertical exaggeration (regional models want 20–100) |
+| `export_vtk_timeseries(model, out_dir, name="heads", begin_date=None, end_date=None, stride=1, z_scale=1.0, layers=None)` | One `.vtu` per (strided) timestep with `head` and `dtw` point arrays + the `.pvd` collection ParaView animates (timestep = days since first frame) |
+| `IOModelAdapter.to_vtk(path, ...)` | Convenience method delegating to `export_vtk` |
+
 ---
 
 ## `iwfm_io.pest` — PEST(++) Calibration Support

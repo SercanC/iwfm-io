@@ -261,6 +261,12 @@ from iwfm_io.gis import (
     wells_gdf,
 )
 
+# VTK exports (pure numpy — no VTK library needed)
+from iwfm_io.vtk import (
+    export_vtk,
+    export_vtk_timeseries,
+)
+
 # Multi-run collection helpers
 from iwfm_io.collect import (
     collect_budgets,
@@ -292,6 +298,8 @@ __all__ = [
     "lakes_gdf",
     "tile_drains_gdf",
     "wells_gdf",
+    "export_vtk",
+    "export_vtk_timeseries",
     # Scenario runner
     "RunResult",
     "run_model",

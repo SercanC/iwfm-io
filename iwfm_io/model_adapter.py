@@ -1075,6 +1075,22 @@ class IOModelAdapter:
         return export_gis(self, path, layers=layers, crs=crs,
                           node_data=node_data, element_data=element_data)
 
+    def to_vtk(self, path, point_data=None, cell_data=None,
+               z_scale=1.0, layers=None):
+        """Write the model as a 3D layered mesh to a VTK ``.vtu`` file.
+
+        Convenience wrapper around :func:`iwfm_io.export_vtk` — see it
+        for parameters (and :func:`iwfm_io.export_vtk_timeseries` for
+        animated heads). No VTK library needed.
+
+        >>> m = open_model("path/to/model")
+        >>> m.to_vtk("model.vtu", z_scale=20)
+        """
+        from iwfm_io.vtk import export_vtk
+        return export_vtk(self, path, point_data=point_data,
+                          cell_data=cell_data, z_scale=z_scale,
+                          layers=layers)
+
     # -- Model overview -------------------------------------------------
 
     def describe(self):

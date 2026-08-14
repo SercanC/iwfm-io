@@ -119,6 +119,18 @@ Join results onto layers via `node_data=`/`element_data=` (DataFrames
 keyed `node_id`/`element_id`), e.g. end-of-run depth to water. Layers as
 GeoDataFrames without writing: `iwfm_io.nodes_gdf(m)` etc.
 
+## 3D VTK export for ParaView (no extra install needed)
+
+```python
+m.to_vtk("model.vtu", z_scale=50)   # 3D layered mesh (wedges/hexes)
+from iwfm_io import export_vtk_timeseries
+export_vtk_timeseries(m, "anim", stride=30)   # -> anim/heads.pvd animation
+```
+
+Pure numpy. Cells carry `layer`/`thickness`/`subregion`; per-node data
+via `point_data={"name": arr}` with shape `(n_nodes,)` or
+`(n_nodes, n_layers)`. Suggest `z_scale` 20–100 for regional models.
+
 ## Calibration statistics (observed vs simulated)
 
 ```python

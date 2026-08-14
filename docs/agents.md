@@ -204,6 +204,19 @@ with `node_data=` / `element_data=` (DataFrames keyed `node_id` /
 `element_id`), and get any layer as a GeoDataFrame without writing via
 `iwfm_io.nodes_gdf(m)`, `elements_gdf(m)`, `streams_gdf(m)`, ….
 
+## 3D VTK export for ParaView (no extra install)
+
+```python
+m.to_vtk("model.vtu", z_scale=50)            # 3D layered mesh, exaggerated
+from iwfm_io import export_vtk_timeseries
+export_vtk_timeseries(m, "anim", stride=30)  # heads animation -> anim/heads.pvd
+```
+
+Pure numpy — no VTK library. Cells carry `layer`/`thickness`/
+`subregion`; add results via `point_data={"head": arr}` with shape
+`(n_nodes,)` or `(n_nodes, n_layers)`. Open the `.vtu`/`.pvd` in
+ParaView and color by any array.
+
 ## Conventions and gotchas
 
 - **Dates** are strings in `MM/DD/YYYY_HH:MM` format; hour `24:00`
