@@ -226,6 +226,26 @@ from iwfm_io.wells import (
     gwl_metadata_from_legacy,
 )
 
+# Stream gauges: metadata, hydrograph linking, series extraction
+from iwfm_io.gauges import (
+    validate_gauge_metadata,
+    GaugeLink,
+    link_stream_hydrographs,
+    stream_hydrograph_series,
+    assign_gauge_sequences,
+)
+
+# HEC-DSS reading + CalSim channel-flow linking (pydsstools loaded lazily
+# at call time — importing these costs nothing without the [dss] extra)
+from iwfm_io.dss import (
+    dss_catalog,
+    read_dss_timeseries,
+    cfs_to_taf,
+    CalSimLink,
+    link_calsim_channels,
+    calsim_streamflow_series,
+)
+
 # Multi-run collection helpers
 from iwfm_io.collect import (
     collect_budgets,
@@ -373,6 +393,17 @@ __all__ = [
     "composite_well_hydrographs",
     "enrich_gwl_metadata",
     "gwl_metadata_from_legacy",
+    "validate_gauge_metadata",
+    "GaugeLink",
+    "link_stream_hydrographs",
+    "stream_hydrograph_series",
+    "assign_gauge_sequences",
+    "dss_catalog",
+    "read_dss_timeseries",
+    "cfs_to_taf",
+    "CalSimLink",
+    "link_calsim_channels",
+    "calsim_streamflow_series",
     "collect_budgets",
     "collect_zbudgets",
     "collect_hydrographs",

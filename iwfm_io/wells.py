@@ -653,6 +653,12 @@ def assign_sequences(gwl_metadata, link: Optional[HydrographLink] = None,
         raise ValueError(
             f"no {coord_col!r} available: add x/y columns or pass link=")
 
+    return _fill_sequences(out, coords, ascending)
+
+
+def _fill_sequences(out, coords, ascending) -> "pd.DataFrame":
+    """Shared seq-ledger core: fill missing per-group numbers only."""
+    id_col = "well_id" if "well_id" in out.columns else "gauge_id"
     n_assigned = 0
     for group, idx in out.groupby("group").groups.items():
         rows = out.loc[idx]
@@ -668,12 +674,41 @@ def assign_sequences(gwl_metadata, link: Optional[HydrographLink] = None,
                 "well_id order", group, int(no_coord.sum()))
         ordered = list(c[~no_coord].sort_values(ascending=ascending).index)
         ordered += list(out.loc[todo][no_coord.values]
-                        .sort_values("well_id").index)
+                        .sort_values(id_col).index)
         for k, i in enumerate(ordered):
             out.at[i, "seq"] = start + k
         n_assigned += len(ordered)
     logger.info("assign_sequences: %d new sequence number(s)", n_assigned)
     return out
+
+
+def normalize_hydrograph_output(hyd_output) -> "pd.DataFrame":
+    """Normalize a hydrograph-output frame for id-based selection.
+
+    Promotes a ``datetime``/``date``/``time`` column to the index
+    (parsing raw IWFM ``24:00`` stamps when needed) and converts
+    positional ``col_N`` labels to integer hydrograph ids (``N`` is the
+    1-based file order, which equals the spec order).
+    """
+    h = hyd_output.copy()
+    for time_col in ("datetime", "date", "time"):
+        if time_col in h.columns:
+            try:
+                when = pd.to_datetime(h[time_col])
+            except (ValueError, TypeError):
+                # raw IWFM stamps ("09/30/2000_24:00")
+                from iwfm_io._tokens import parse_iwfm_date
+                when = pd.to_datetime(
+                    [parse_iwfm_date(str(v)) for v in h[time_col]])
+            h = h.set_index(when).drop(columns=time_col)
+            h.index.name = "datetime"
+            break
+    cols = []
+    for c in h.columns:
+        m = re.match(r"^col_(\d+)$", str(c))
+        cols.append(int(m.group(1)) if m else int(c))
+    h.columns = cols
+    return h
 
 
 def composite_well_hydrographs(link: HydrographLink, hyd_output,
@@ -703,24 +738,7 @@ def composite_well_hydrographs(link: HydrographLink, hyd_output,
         layer has no linked hydrograph raises (silent gaps would bias
         the composite).
     """
-    h = hyd_output.copy()
-    for time_col in ("datetime", "date", "time"):
-        if time_col in h.columns:
-            try:
-                when = pd.to_datetime(h[time_col])
-            except (ValueError, TypeError):
-                # raw IWFM stamps ("09/30/2000_24:00")
-                from iwfm_io._tokens import parse_iwfm_date
-                when = pd.to_datetime(
-                    [parse_iwfm_date(str(v)) for v in h[time_col]])
-            h = h.set_index(when).drop(columns=time_col)
-            h.index.name = "datetime"
-            break
-    cols = []
-    for c in h.columns:
-        m = re.match(r"^col_(\d+)$", str(c))
-        cols.append(int(m.group(1)) if m else int(c))
-    h.columns = cols
+    h = normalize_hydrograph_output(hyd_output)
 
     if isinstance(fractions, WellMapping):
         frac = (fractions.weights.groupby(["well_id", "layer"])["weight"]

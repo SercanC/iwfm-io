@@ -104,6 +104,50 @@ from iwfm_io.readers.stream import read_stream_main, read_diversions
 Writers mirror readers (`iwfm_io.writers.*`) for round-trip edits —
 prefer `create_scenario` + change functions over hand-editing.
 
+## Calibration statistics (observed vs simulated)
+
+```python
+from iwfm_io.pest import read_smp, match_sim_to_obs, residual_stats
+obs = read_smp(r"<obs_heads.smp>")            # site, datetime, value
+matched = match_sim_to_obs(sim, obs)          # sim interpolated to obs times
+stats = residual_stats(matched, by="site")    # bias, RMSE, R2, NSE, KGE per well
+```
+
+`sim` is any long-form `site, datetime, value` frame — e.g. melt
+`m.hydrograph_df(...)` columns, or composite multi-layer wells first:
+`link_hydrographs(gwl_metadata, gw_main)` + `composite_well_hydrographs`.
+Obs-vs-sim figures: `iwfm_io.plots.calibration` (scatter, residual
+histogram/map, hydrograph panels).
+
+## PESTPP-IES run post-processing
+
+```python
+from iwfm_io.pest import load_ies_ensembles, ies_stats
+r = load_ies_ensembles(r"<master_dir>\<case>.pst")
+r.describe()          # orient FIRST: iterations, files found, phi summary
+r.phi_summary()       # convergence table; r.best_realization() = min-phi
+stats = ies_stats(r)  # fit metrics per (iteration, realization)
+```
+
+`.jcb` binary ensembles need pyemu (`pip install iwfm-io[pest]`); CSV
+ensembles work with nothing extra. Diagnostics plots:
+`iwfm_io.pest.diagnostics` (phi evolution, parameter-change, PDC).
+
+## CalSim streamflows from HEC-DSS (needs `pip install iwfm-io[dss]`)
+
+```python
+import pandas as pd
+from iwfm_io import dss_catalog, link_calsim_channels, calsim_streamflow_series
+cat = dss_catalog(r"<DV.dss>")                    # all records, parts a-f
+md = pd.DataFrame({"gauge_id": ["freeport"], "calsim_bpart": ["C_SAC048"]})
+link = link_calsim_channels(md, cat, cpart="CHANNEL")
+flows = calsim_streamflow_series(link, r"<DV.dss>", units="taf")
+```
+
+Monthly period-average records; a January value is stamped Feb 1 00:00
+(same end-of-period convention as IWFM's `24:00`), so these align with
+IWFM series directly. `units="cfs"` (as stored) or `"taf"`.
+
 ## DLL (only for live simulation state)
 
 ```python

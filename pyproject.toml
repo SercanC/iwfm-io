@@ -60,6 +60,16 @@ viz = [
     "plotly>=5.0",
     "kaleido",
 ]
+# HEC-DSS reading (dss_catalog, read_dss_timeseries, CalSim channel-flow
+# extraction); pydsstools >= 3 reads both DSS-6 and DSS-7 files
+dss = [
+    "pydsstools>=3",
+]
+# pyemu companion for iwfm_io.pest — only needed to read .jcb binary IES
+# ensembles (ies_save_binary runs); everything else in pest is pure pandas
+pest = [
+    "pyemu",
+]
 
 [tool.setuptools.packages.find]
 include = ["iwfm_io*"]

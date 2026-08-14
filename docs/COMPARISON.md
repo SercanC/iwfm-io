@@ -18,7 +18,8 @@ tool; corrections are welcome via issues/PRs.
 | Scenario workflow | ✅ `create_scenario → run_model → compare_models` | ❌ (but can step a live simulation via DLL) | partial (new-file generators, land-use scenario tools) |
 | Live simulation control (step a run from Python) | via DLL wrapper | ✅ (its core strength; `simulate_all`, per-interval stepping) | via its DLL subpackage |
 | Plotting | 58 functions, 13 modules ([gallery](GALLERY.md)) | 2 (`plot_nodes`, `plot_elements`) | plot module (maps/hydrographs utilities) |
-| Calibration / PEST utilities | ❌ (planned) | ❌ | ✅ 15 CLI commands (obs `.smp`, sim-vs-obs stats) |
+| Calibration / PEST utilities | ✅ `iwfm_io.pest`: obs-name codec, PESTPP-IES ensemble loader + diagnostics, residual stats (RMSE/NSE/KGE/phi), SMP I/O, sim-to-obs matching, derived/budget observations, zone + pilot-point parameterization, `PestSetup` builder | ❌ | ✅ 15 CLI commands (obs `.smp`, sim-vs-obs stats) |
+| HEC-DSS / CalSim streamflows | ✅ `[dss]` extra: DSS-6/7 catalog + read, CalSim channel-arc linking, CFS/TAF extraction | ❌ | ❌ |
 | GIS export | ❌ (planned; GeoDataFrames via `[geo]` extra) | ❌ | ✅ (shapefiles, Surfer, webmaps) |
 | Model subsetting (extract a submodel) | ❌ | ❌ | ✅ |
 | DLL handling | optional; `download_dll()` (sha256-verified GitHub release assets), multi-version management | required; CLI downloads official builds from CNRA; one DLL per environment | bundles a 2015-era DLL in-repo |
@@ -34,13 +35,18 @@ tool; corrections are welcome via issues/PRs.
   (couple IWFM to another model, adjust pumping mid-run) — PyWFM is
   purpose-built for that; iwfm-io's DLL wrapper covers similar ground
   with file-based fallbacks.
-- **PEST calibration prep, shapefile exports, model subsetting, or
-  California data plumbing (CDEC/DETAW)** — cfbrush/iwfm has mature
-  utilities none of the others match.
+- **PEST(++) calibration of an IWFM model** — iwfm-io: build the PEST
+  interface (`PestSetup`), post-process IES ensembles, and compute
+  calibration statistics as DataFrames; validated against a production
+  CalSim3+C2VSimCG IES run.
+- **Shapefile exports, model subsetting, or California data plumbing
+  (CDEC/DETAW)** — cfbrush/iwfm has mature utilities none of the others
+  match.
 
 They can coexist in one environment: the import names (`iwfm_io`,
 `pywfm`, `iwfm`) no longer collide as of iwfm-io 2.0.
 
 *Comparison last verified 2026-07-09 against PyWFM v0.2.6 and
-cfbrush/iwfm as of July 2026. If you maintain one of these packages and
-spot an error, please open an issue.*
+cfbrush/iwfm as of July 2026; iwfm-io column updated 2026-08-13. If you
+maintain one of these packages and spot an error, please open an
+issue.*

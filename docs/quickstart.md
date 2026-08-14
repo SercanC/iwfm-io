@@ -11,8 +11,10 @@ This tutorial walks through the three main workflows of `iwfm-io`:
 ## Installation
 
 ```bash
-pip install iwfm-io          # core: file I/O, DLL wrapper, plotting
+pip install iwfm-io          # core: file I/O, DLL wrapper, plotting, pest
 pip install iwfm-io[geo]     # + geopandas/shapely for GeoDataFrame output
+pip install iwfm-io[viz]     # + plotly/kaleido for interactive plots
+pip install iwfm-io[dss]     # + pydsstools for HEC-DSS / CalSim reading
 ```
 
 Or from a source checkout:
@@ -442,5 +444,6 @@ See `examples/06_multi_run_budgets.py` for a full example.
 
 - Browse the [API Reference](api-reference.md) for all public functions
 - Explore the [Plot Gallery](plotting.md) for visualization examples
-- Run `examples/01_read_inputs.py` through `06_multi_run_budgets.py` for hands-on demos
+- Calibrating? `iwfm_io.pest` covers the whole PEST(++) workflow — building the interface (`PestSetup`), IES ensemble post-processing, and calibration statistics; `iwfm_io.dss` reads CalSim/HEC-DSS streamflows. See the [API Reference](api-reference.md#iwfm_iopest--pest-calibration-support) and the [Agents & Scripting Guide](agents.md)
+- Run `examples/01_read_inputs.py` through `09_full_input_datasets.py` for hands-on demos
 - Check `CLAUDE.md` in the repo root for architecture details and conventions

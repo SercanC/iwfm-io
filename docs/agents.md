@@ -139,6 +139,56 @@ with iwfm_io.dll.IWFMModel(
     m.heads_df(layer=1)  # via wrapper methods
 ```
 
+## Calibration post-processing (PEST / PESTPP-IES)
+
+`iwfm_io.pest` is a lazy subpackage (pure pandas; `pyemu` only needed
+for `.jcb` binary ensembles):
+
+```python
+from iwfm_io.pest import load_ies_ensembles, ies_stats
+
+r = load_ies_ensembles("master_dir/case.pst")
+r.describe()                  # JSON-serializable run inventory + phi summary
+r.phi_summary()               # per-iteration phi statistics
+r.best_realization()          # minimum-phi realization name
+stats = ies_stats(r)          # per-(iteration, realization) fit metrics
+```
+
+Pair observed and simulated series, then compute statistics:
+
+```python
+from iwfm_io.pest import read_smp, match_sim_to_obs, residual_stats
+
+obs = read_smp("obs_heads.smp")                    # site, datetime, value
+matched = match_sim_to_obs(sim, obs)               # sim interpolated to obs times
+residual_stats(matched, by="site")                 # bias, RMSE, R2, NSE, KGE per site
+```
+
+Well/gauge identity flows through metadata frames, not config files:
+`link_hydrographs(gwl_metadata, gw_main)` + `composite_well_hydrographs`
+on the GW side; `link_stream_hydrographs(gauge_metadata, stream_main)` +
+`stream_hydrograph_series` on the stream side. Building a full PEST
+interface (parameters, template/instruction files, worker dirs) is
+`iwfm_io.pest.PestSetup` — see the API reference.
+
+## CalSim / HEC-DSS streamflows (optional `[dss]` extra)
+
+For CalSim-coupled models, streamflows live in the DV `.dss` file, not
+IWFM hydrograph outputs:
+
+```python
+from iwfm_io import dss_catalog, link_calsim_channels, calsim_streamflow_series
+
+cat = dss_catalog("DV.dss")                        # every record, parts a–f
+link = link_calsim_channels(gauge_metadata, cat,   # match metadata calsim_bpart
+                            cpart="CHANNEL")       #   against C_* channel arcs
+flows = calsim_streamflow_series(link, "DV.dss", units="taf")  # time × gauge_id
+```
+
+DSS end-of-period stamps read back as next-day midnight — the same
+convention as IWFM's `24:00` — so CalSim and IWFM series align without
+shifting.
+
 ## Conventions and gotchas
 
 - **Dates** are strings in `MM/DD/YYYY_HH:MM` format; hour `24:00`

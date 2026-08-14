@@ -2,6 +2,8 @@
 
 Python file I/O, DLL wrapper, and visualization library for the Integrated Water Flow Model (IWFM).
 
+**[📓 Tutorial notebooks](https://github.com/SercanC/iwfm-io/blob/main/notebooks/README.md)** — eleven executed Jupyter notebooks covering every feature area, from reading files to PEST++ calibration and CalSim/HEC-DSS integration.
+
 **[📊 Example plot gallery](https://github.com/SercanC/iwfm-io/blob/main/docs/GALLERY.md)** — all 58 plot functions rendered from DWR's C2VSimFG v1.5 Central Valley model.
 
 **[⚖️ How does this compare to PyWFM and cfbrush/iwfm?](https://github.com/SercanC/iwfm-io/blob/main/docs/COMPARISON.md)** — a factual feature comparison of the IWFM Python packages.
@@ -16,6 +18,13 @@ Python file I/O, DLL wrapper, and visualization library for the Integrated Water
   - **Model comparison**: `compare_models()` reports what changed between two model versions (checksum file diff + grid + head/budget statistics); `head_difference()`/`budget_difference()` return aligned `B − A` DataFrames
   - **Scenario builder**: `create_scenario()` copies a model and applies input changes (`set_keyed_value`, `replace_text`, or your own functions)
 - **Run models from Python** (Windows): `iwfm_io.run_model()` drives the PreProcessor → Simulation → Budget → ZBudget executables with error detection — the full loop is `create_scenario()` → `run_model()` → `compare_models()`
+- **`iwfm_io.pest`** — PEST(++) calibration support (pure Python; `pyemu` optional via `iwfm-io[pest]`):
+  - Observation-name codec, PESTPP-IES ensemble loader + diagnostics, residual/calibration statistics (bias, RMSE, R², NSE, KGE, phi) at ensemble scale
+  - SMP file I/O, sim-to-obs time matching (IWFM2OBS equivalent), budget-component and derived observations (head changes, vertical gradients, gauge accretion–depletion)
+  - Multi-layer transmissivity-weighted well observations, paired output/instruction-file writers, worker orchestration, parameter write-back
+  - Zone/group and pilot-point parameterization on the FE mesh, constrained reparameterization with Texture2Par hooks, and a `PestSetup` builder that assembles the whole PEST interface
+  - DataFrame-first **well** (`gwl_metadata`) and **stream-gauge** (`gauge_metadata`) metadata suites: link metadata to IWFM hydrograph outputs by name, composite per-layer heads, extract per-gauge flow/stage series — no hand-maintained configuration files
+- **HEC-DSS + CalSim** (`iwfm-io[dss]`, cross-platform via `pydsstools`): catalog and read DSS-6/DSS-7 time series, link gauges to CalSim channel arcs, and extract monthly channel flows (CFS or TAF) whose timestamps align with IWFM's `24:00` convention out of the box
 - **Python ctypes wrapper** for IWFM DLL — Windows x64 only (8 modules)
 - **58 plotting functions** across 13 modules — matplotlib PNGs by default, and key plots (Sankey, budget time series/pie/bars, hydrographs, butterfly) accept `engine="plotly"` for interactive HTML with hover, zoom, and range sliders (`pip install iwfm-io[viz]`):
   - **Maps** (11 functions) — Grid, heads, streams, wells, lakes, tile drains
@@ -50,9 +59,11 @@ Python file I/O, DLL wrapper, and visualization library for the Integrated Water
 ### Install
 
 ```bash
-pip install iwfm-io          # core: file I/O, DLL wrapper, plotting
+pip install iwfm-io          # core: file I/O, DLL wrapper, plotting, pest
 pip install iwfm-io[geo]     # + geopandas/shapely for GeoDataFrame output
 pip install iwfm-io[viz]     # + plotly/kaleido for interactive Sankey diagrams
+pip install iwfm-io[dss]     # + pydsstools for HEC-DSS / CalSim reading
+pip install iwfm-io[pest]    # + pyemu (only needed for .jcb IES binaries)
 ```
 
 Without the `geo` extra, spatial tables are returned as plain pandas
@@ -147,6 +158,8 @@ timeseries.plot_gw_head_hydrographs(
 ```
 
 ## Examples
+
+**Prefer notebooks?** The [`notebooks/`](notebooks/README.md) folder holds eleven fully-executed Jupyter notebooks covering the same ground with narrative and rendered output — quickstart, every reader/writer, the DLL wrapper, scenario runs, plotting, and the complete PEST++/CalSim calibration workflow.
 
 | File | Requires | Description |
 |------|----------|-------------|
@@ -263,7 +276,7 @@ The `iwfm` package wraps the IWFM C DLL using ctypes:
 **`iwfm_io` (cross-platform):**
 - `IOModelAdapter.subsidence_df()` returns an empty DataFrame (per-node subsidence exists only as DLL state; observation-point series are readable via `read_hydrograph_out`)
 - `stream_flows_df()` needs a stream *node budget* HDF in Results (returns empty otherwise); `supply_demand_df()`/land-use areas need the L&WU or RootZone budget HDF; aquifer parameters need a per-node (NGROUP=0) parameter block — parametric-grid models require the DLL
-- HEC-DSS file reading is not supported (DSS pathnames are stored but not parsed)
+- HEC-DSS reading needs the optional `[dss]` extra (`iwfm_io.dss`); the input-file readers store DSSFL pathname assignments but do not auto-fetch the referenced values — read them explicitly with `read_dss_timeseries`
 - Binary `PreProcessor.bin` files cannot be read — only the text input files
 
 See `docs/TEST_PLOTS_RESULTS.md` for detailed plot-test results and known issues.

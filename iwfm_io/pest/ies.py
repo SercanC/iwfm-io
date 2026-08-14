@@ -156,8 +156,9 @@ class IesResults:
         except ImportError:
             raise RuntimeError(
                 f"{path.name} is a PEST++ binary ensemble (ies_save_binary); "
-                f"reading it requires pyemu (pip install pyemu), or convert "
-                f"the run's .jcb files to .csv once with pyemu elsewhere"
+                f"reading it requires pyemu (pip install iwfm-io[pest]), or "
+                f"convert the run's .jcb files to .csv once with pyemu "
+                f"elsewhere"
             ) from None
         pst = pyemu.Pst(str(self.directory / f"{self.case}.pst"))
         cls = (pyemu.ParameterEnsemble if kind == "par"

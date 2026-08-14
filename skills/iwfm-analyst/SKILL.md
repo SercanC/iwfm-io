@@ -7,7 +7,11 @@ description: >
   groundwater model folder with Preprocessor/Simulation/Results
   subfolders, or asks about groundwater budgets, heads, depth to water,
   subsidence, stream flows, land use areas, pumping, zone budgets,
-  IWFM scenarios, or plots/maps of any of these.
+  IWFM scenarios, or plots/maps of any of these. Also covers PEST/
+  PEST++ calibration of IWFM models (IES ensembles, residual/fit
+  statistics like RMSE/NSE/KGE, observation wells vs simulated heads,
+  SMP files, calibration figures) and CalSim-coupled models (channel
+  flows from HEC-DSS / DV.dss files).
 ---
 
 # IWFM Model Analyst
@@ -60,7 +64,27 @@ model, and use its budget names/locations verbatim.
 Load `references/recipes.md` for ready-made patterns:
 budgets, heads and depth-to-water, hydrographs, zone budgets,
 comparing two model runs, building and running a scenario, reading or
-editing individual input files, and using the DLL.
+editing individual input files, calibration statistics (observed vs
+simulated, PESTPP-IES runs), CalSim/HEC-DSS streamflows, and using
+the DLL.
+
+## Calibration (PEST / PESTPP-IES)
+
+`iwfm_io.pest` post-processes calibration runs without any PEST
+knowledge required from the user: `load_ies_ensembles(<case.pst or
+master dir>)` → `.describe()` orients you (iterations, phi summary);
+`ies_stats`/`residual_stats` compute per-well or per-group fit metrics
+(bias, RMSE, R², NSE, KGE); `read_smp` reads observed records;
+`match_sim_to_obs` pairs them with simulated series. Observation wells
+link to model hydrographs through a `gwl_metadata` DataFrame
+(`link_hydrographs` + `composite_well_hydrographs`), stream gauges
+through `gauge_metadata` (`link_stream_hydrographs` +
+`stream_hydrograph_series`). Calibration figures live in
+`iwfm_io.plots.calibration` (obs-vs-sim scatter, residual maps,
+phi evolution). For CalSim-coupled models, channel flows come from the
+DV `.dss` file: `link_calsim_channels` + `calsim_streamflow_series`
+(needs `pip install iwfm-io[dss]`). Recipes in `references/recipes.md`;
+full surface in the api-reference `iwfm_io.pest` section.
 
 ## Plotting
 

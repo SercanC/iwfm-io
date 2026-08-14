@@ -394,6 +394,41 @@ layer`; extras pass through; persist with plain pandas if desired).
 | `enrich_gwl_metadata(model, gwl_metadata, link=None, obs=None)` | Derived columns on demand: subregion, gse, obs-record stats |
 | `gwl_metadata_from_legacy(df)` | One-time converter from historical keys frames (maps the -1/0 layer codes onto the schema) |
 
+### Stream gauges (`iwfm_io/gauges.py` — core)
+
+The stream-side counterpart of the GWL suite (no vertical dimension). The
+`gauge_metadata` frame: `gauge_id, group, seq, site_code` (+ extras).
+
+| Function / class | Purpose |
+|---|---|
+| `validate_gauge_metadata(df)` | Schema problem-string list |
+| `link_stream_hydrographs(gauge_metadata, stream_main, on="site_code", name_sep=None)` | Join metadata against the NOUTR hydrograph spec names (full-name or stem matching); `GaugeLink` carries hyd_id (spec position = output column), node_id, and the file's IHSQR flag; reports unmatched gauges / orphan names |
+| `stream_hydrograph_series(link, hyd_output, quantity=None)` | time × gauge_id series from the hydrograph output (`col_N` + IWFM date handling); IHSQR=2 outputs carry both quantities as two blocks in spec order (flows 1..NOUTR, stages NOUTR+1..2·NOUTR — validated vs a sample-model IHSQR=2 run) — pass `quantity="flow"` or `"stage"` |
+| `assign_gauge_sequences(gauge_metadata, link, order="stream_node")` | Fill-only seq ledger; default ordering along the stream-node numbering, spatial orders via metadata x/y |
+
+Gauge pairs feed `accretion_depletion`; series feed `match_sim_to_obs` and
+`residual_stats`; the `"grouped"` naming scheme applies unchanged.
+
+### HEC-DSS + CalSim channel flows (`iwfm_io/dss.py` — core, optional `[dss]` extra)
+
+Reads value data out of HEC-DSS files (`pip install iwfm-io[dss]`;
+pydsstools ≥ 3, imported lazily at call time, reads DSS-6 and DSS-7).
+CalSim prints streamflows as monthly `PER-AVER` CFS records in the DV
+`.dss` file, one per channel arc (B part, e.g. `C_SAC041`); DSS
+end-of-period stamps read back as next-day midnight — the same convention
+as IWFM's `24:00`, so CalSim and IWFM series align without shifting.
+
+| Function / class | Purpose |
+|---|---|
+| `dss_catalog(dss_file, pattern="")` | DataFrame of record pathnames split into parts `a`–`f` + the `condensed` (D-blanked) record identity |
+| `read_dss_timeseries(dss_file, paths)` | Wide time × pathname frame (condensed paths read whole records across blocks); NaN for missing; record units/type in `df.attrs` |
+| `cfs_to_taf(frame)` | Period-average CFS → TAF/month using each stamp's period day count (pure function) |
+| `link_calsim_channels(gauge_metadata, dss, on="calsim_bpart", cpart=, epart=, fpart=, arc_prefix="C_")` | Case-insensitive B-part match of metadata against the catalog (a catalog frame also accepted); per-row `dss_path` override; `CalSimLink` reports unmatched gauges / orphan arcs; C/E/F-part filters resolve multi-scenario ambiguity |
+| `calsim_streamflow_series(link, dss_file, units="cfs")` | time × gauge_id channel flows; `units="taf"` converts (guards that records are CFS) |
+
+Downstream unchanged: `match_sim_to_obs`, `residual_stats`,
+`accretion_depletion` for arc pairs, `"grouped"` naming.
+
 ### Multi-layer well observations (`iwfm_io/wells.py`, re-exported by `iwfm_io.pest`)
 
 Map real observation wells onto the FE mesh and composite simulated heads
