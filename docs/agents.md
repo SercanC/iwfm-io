@@ -221,7 +221,18 @@ ParaView and color by any array.
 
 - **Dates** are strings in `MM/DD/YYYY_HH:MM` format; hour `24:00`
   means end of day (`"09/30/1990_24:00"` is the instant 1990-10-01 00:00).
-  Convert with `iwfm_io.parse_iwfm_date` / `format_iwfm_date`.
+  Convert with `iwfm_io.parse_iwfm_date` / `format_iwfm_date`. When
+  *grouping* output by calendar period, use `iwfm_io.iwfm_day(index)`
+  (the day a stamp belongs to) or `water_year(index)` — never
+  `.dt.year`/`.dt.month` on the raw stamps, which drift at period
+  boundaries.
+- **Budget aggregation**: use `iwfm_io.aggregate_budget(df, period="WY")`
+  rather than `.resample().sum()` — storage columns are stocks
+  (Beginning Storage → period's first value, Ending Storage and
+  Cumulative columns → last), only flow components sum.
+- **Calendar-idiom access**: `heads_df`/`budget_df`/`hydrograph_df`
+  accept `day_index=True` to re-index by the owning day, making
+  `resample("YE-SEP")` and `.dt.*` labels correct for flow columns.
 - **Indices are 1-based** everywhere the IWFM file formats and DLL are
   involved (node IDs, layer numbers, budget locations).
 - **Element connectivity** is 4 node IDs; `node4 == 0` means a triangle.

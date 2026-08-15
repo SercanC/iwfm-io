@@ -89,6 +89,66 @@ def format_iwfm_date(dt: datetime) -> str:
     return f"{dt.month:02d}/{dt.day:02d}/{dt.year:04d}_{dt.hour:02d}:{dt.minute:02d}"
 
 
+def iwfm_day(times):
+    """The day each timestamp *belongs to* under the ``24:00`` convention.
+
+    IWFM stamps a period at the first instant after it ends, so a value
+    for ``09/30/2024_24:00`` parses to ``10/01/2024 00:00`` — the
+    correct instant, but the value belongs to September 30. This helper
+    returns that owning day: midnight stamps map to the **previous**
+    day, any other time of day maps to its own day.
+
+    Use it (not the raw index) whenever you group IWFM output by day,
+    month, or year; :func:`water_year` builds on it.
+
+    Parameters
+    ----------
+    times : str, datetime, pandas Series, DatetimeIndex, or array-like
+        A single IWFM date string / datetime, or a vector of datetimes.
+
+    Returns
+    -------
+    Normalized (midnight) timestamp(s) of the owning day — a
+    ``pd.Timestamp`` for scalar input, a Series for Series input, a
+    ``DatetimeIndex`` otherwise.
+    """
+    import pandas as pd
+
+    if isinstance(times, str):
+        times = parse_iwfm_date(times)
+    if isinstance(times, datetime):  # includes pd.Timestamp
+        return (pd.Timestamp(times) - pd.Timedelta(seconds=1)).normalize()
+    if isinstance(times, pd.Series):
+        return (pd.to_datetime(times)
+                - pd.Timedelta(seconds=1)).dt.normalize()
+    idx = pd.DatetimeIndex(pd.to_datetime(times))
+    return (idx - pd.Timedelta(seconds=1)).normalize()
+
+
+def water_year(times):
+    """Water year each timestamp belongs to (Oct 1 – Sep 30, labeled by
+    the ending year), honoring the ``24:00`` convention via
+    :func:`iwfm_day` — so a ``09/30_24:00`` stamp closes the water year
+    ending that day, and an ``10/01_24:00`` stamp opens the next one.
+
+    Parameters
+    ----------
+    times : str, datetime, pandas Series, DatetimeIndex, or array-like
+
+    Returns
+    -------
+    ``int`` for scalar input, an integer Series/Index otherwise.
+    """
+    import pandas as pd
+
+    d = iwfm_day(times)
+    if isinstance(d, pd.Timestamp):
+        return int(d.year + (1 if d.month >= 10 else 0))
+    if isinstance(d, pd.Series):
+        return d.dt.year + (d.dt.month >= 10).astype(int)
+    return pd.Index(d.year + (d.month >= 10).astype(int))
+
+
 # Pattern to find the keyword separator: whitespace followed by /
 # This distinguishes from slashes inside dates (09/30/1990)
 _KEYED_SEP_RE = re.compile(r"\s+/")

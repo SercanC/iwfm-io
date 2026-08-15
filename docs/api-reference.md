@@ -68,8 +68,10 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 
 | Function | Description |
 |----------|-------------|
-| `parse_iwfm_date(s)` | Parse `"MM/DD/YYYY_HH:MM"` → `datetime`. Handles `24:00`. |
-| `format_iwfm_date(dt)` | Format `datetime` → `"MM/DD/YYYY_HH:MM"`. |
+| `parse_iwfm_date(s)` | Parse `"MM/DD/YYYY_HH:MM"` → `datetime`. Handles `24:00` (the parsed instant is next-day midnight — the moment the period ends). |
+| `format_iwfm_date(dt)` | Format `datetime` → `"MM/DD/YYYY_HH:MM"`. Midnight formats as `24:00` of the previous day (exact inverse of the parser). |
+| `iwfm_day(times)` | The day a stamp *belongs to*: midnight stamps map to the previous day (the day they close), intraday stamps to their own day. Scalar, Series, or DatetimeIndex. Use this — not `.dt.day`/`.dt.month` on raw stamps — when grouping IWFM output by calendar period. |
+| `water_year(times)` | Water year (Oct 1–Sep 30, labeled by ending year) each stamp belongs to, built on `iwfm_day` — a `9/30_24:00` stamp closes its water year. |
 
 ### Preprocessor Readers
 
@@ -213,6 +215,8 @@ adapter.heads_df(layer=1, begin_date=..., end_date=...)  # DataFrame
 adapter.budget_df("GW", location=1)  # DataFrame
 ```
 
+`heads_df` / `budget_df` / `hydrograph_df` (on both `IOModelAdapter` and the DLL `IWFMModel`) accept **`day_index=True`**: the frame comes back indexed by `iwfm_day` — the day each `24:00` stamp belongs to — so calendar idioms like `resample("YE-SEP")`, `.dt.year`, and `.dt.month` label periods correctly. Default `False` keeps the true end-of-period instants (what DSS/CalSim alignment and exact-timestamp joins need). For water-year budget totals prefer `aggregate_budget`, which also handles the storage stocks.
+
 DLL-free simulation-state equivalents (v1.2+), served from the model's
 input and budget-output files:
 
@@ -268,6 +272,8 @@ All four accept `max_workers=N` to read the runs' HDF5 files concurrently (worth
 | `collect_zbudgets(runs_dict, zone_def, zone)` | Combine zone budgets from multiple runs |
 | `collect_hydrographs(runs_dict)` | Combine hydrograph outputs |
 | `collect_gwheads(runs_dict, n_nodes, n_layers)` | Combine head outputs |
+| `aggregate_budget(df, period="WY")` | Component-aware budget aggregation to water years / calendar years / months: flow components sum, `Beginning Storage` takes the period's first value, `Ending Storage` and `Cumulative …` the last; period membership honors the `24:00` convention. Accepts a wide `budget_df()` frame or the long `collect_budgets` frame |
+| `budget_component_agg(name)` | The rule (`"sum"`/`"first"`/`"last"`) `aggregate_budget` applies to a component name |
 
 ### GIS Exports (`iwfm_io/gis.py` — core, requires the `[geo]` extra)
 

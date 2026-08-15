@@ -575,3 +575,116 @@ def collect_gwheads(
     combined = combined[["run", "node", "layer", "datetime", "head"]]
     combined["datetime"] = pd.to_datetime(combined["datetime"])
     return combined
+
+
+# ---------------------------------------------------------------------------
+# Component-aware budget aggregation
+# ---------------------------------------------------------------------------
+
+#: Label column written by :func:`aggregate_budget` for each period kind.
+_PERIOD_LABELS = {"WY": "water_year", "CY": "year", "MON": "month"}
+
+
+def budget_component_agg(name) -> str:
+    """How an IWFM budget component aggregates over a period.
+
+    Most budget columns are *flows* and sum over the period, but the
+    storage columns are *stocks* and must not be summed:
+
+    - ``Beginning Storage`` → the period's **first** value
+    - ``Ending Storage`` → the period's **last** value
+    - ``Cumulative …`` (e.g. Cumulative Subsidence) → the **last** value
+    - everything else → ``sum``
+
+    Returns ``"first"``, ``"last"``, or ``"sum"``.
+    """
+    u = str(name).upper()
+    if "STORAGE" in u:
+        if "BEGINNING" in u:
+            return "first"
+        if "ENDING" in u:
+            return "last"
+    if "CUMULATIVE" in u:
+        return "last"
+    return "sum"
+
+
+def _period_labels(times, period: str):
+    from iwfm_io._tokens import iwfm_day, water_year
+
+    if period == "WY":
+        return water_year(times)
+    day = iwfm_day(times)
+    accessor = day.dt if isinstance(day, pd.Series) else day
+    if period == "CY":
+        return accessor.year
+    if period == "MON":
+        return accessor.to_period("M")
+    raise ValueError(f"period must be 'WY', 'CY', or 'MON', got {period!r}")
+
+
+def aggregate_budget(df: pd.DataFrame, period: str = "WY") -> pd.DataFrame:
+    """Aggregate IWFM budget output over water years, calendar years,
+    or months — with the right rule per component.
+
+    Flow components sum over the period; the storage *stocks* do not:
+    ``Beginning Storage`` keeps the period's first value, ``Ending
+    Storage`` and ``Cumulative …`` columns keep the last (see
+    :func:`budget_component_agg`). Period membership honors IWFM's
+    ``24:00`` convention via :func:`iwfm_io.water_year` /
+    :func:`iwfm_io.iwfm_day`, so a ``09/30_24:00`` stamp lands in the
+    water year ending that day.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Either a **wide** budget frame — DatetimeIndex, one column per
+        component (from ``model.budget_df()`` / ``read_budget_hdf``) —
+        or the **long** frame from :func:`collect_budgets` (columns
+        ``datetime``, ``component``, ``value`` plus any of ``run``,
+        ``budget_type``, ``location``).
+    period : str
+        ``"WY"`` water years (labeled by ending year), ``"CY"``
+        calendar years, or ``"MON"`` months.
+
+    Returns
+    -------
+    DataFrame
+        Wide input → wide output indexed by the period label.  Long
+        input → long output with the label column (``water_year`` /
+        ``year`` / ``month``) replacing ``datetime``.
+    """
+    label_name = _PERIOD_LABELS.get(period)
+    if label_name is None:
+        raise ValueError(f"period must be one of {sorted(_PERIOD_LABELS)}, "
+                         f"got {period!r}")
+
+    long_form = {"datetime", "component", "value"}.issubset(df.columns)
+    if long_form:
+        keys = [c for c in ("run", "budget_type", "location")
+                if c in df.columns]
+        out = df.sort_values("datetime").copy()
+        out[label_name] = _period_labels(out["datetime"], period).values
+        how = out["component"].map(budget_component_agg)
+        pieces = []
+        for rule in ("sum", "first", "last"):
+            part = out[how.values == rule]
+            if len(part):
+                pieces.append(
+                    part.groupby(keys + [label_name, "component"],
+                                 observed=True)["value"]
+                    .agg(rule).reset_index())
+        result = pd.concat(pieces, ignore_index=True)
+        return result.sort_values(
+            keys + [label_name, "component"]).reset_index(drop=True)
+
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError(
+            "aggregate_budget expects a wide budget frame with a "
+            "DatetimeIndex, or a long frame with datetime/component/"
+            "value columns")
+    df = df.sort_index()
+    labels = _period_labels(df.index, period)
+    agg = {col: budget_component_agg(col) for col in df.columns}
+    out = df.groupby(pd.Index(labels, name=label_name)).agg(agg)
+    return out

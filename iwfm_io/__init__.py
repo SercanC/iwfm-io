@@ -58,7 +58,12 @@ from iwfm_io.run import (
     run_zbudget,
 )
 
-from iwfm_io._tokens import parse_iwfm_date, format_iwfm_date
+from iwfm_io._tokens import (
+    parse_iwfm_date,
+    format_iwfm_date,
+    iwfm_day,
+    water_year,
+)
 from iwfm_io._parser import IWFMFileReader
 from iwfm_io._writer import IWFMFileWriter
 from iwfm_io.model_adapter import IOModelAdapter, open_model
@@ -276,12 +281,14 @@ from iwfm_io.vtk import (
     export_vtk_timeseries,
 )
 
-# Multi-run collection helpers
+# Multi-run collection helpers + component-aware budget aggregation
 from iwfm_io.collect import (
     collect_budgets,
     collect_zbudgets,
     collect_hydrographs,
     collect_gwheads,
+    aggregate_budget,
+    budget_component_agg,
 )
 
 def __getattr__(name):
@@ -319,6 +326,10 @@ __all__ = [
     # Date utilities
     "parse_iwfm_date",
     "format_iwfm_date",
+    "iwfm_day",
+    "water_year",
+    "aggregate_budget",
+    "budget_component_agg",
     # Parser/writer engine
     "IWFMFileReader",
     "IWFMFileWriter",

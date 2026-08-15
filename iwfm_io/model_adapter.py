@@ -32,6 +32,24 @@ except ImportError:
     _HAS_GEO = False
 
 
+def _maybe_day_index(df, day_index):
+    """Optionally re-index a DatetimeIndex frame by the owning day.
+
+    IWFM stamps each value at the first instant after its period ends
+    (``24:00`` = next-day midnight); with ``day_index=True`` the frame
+    is re-indexed by :func:`iwfm_io.iwfm_day` so calendar idioms —
+    ``resample("YE-SEP")``, ``.dt.year``, ``.dt.month`` — label periods
+    correctly. The underlying timestamps are unchanged elsewhere.
+    """
+    if not day_index:
+        return df
+    from iwfm_io._tokens import iwfm_day
+
+    out = df.copy(deep=False)
+    out.index = iwfm_day(df.index)
+    return out
+
+
 class IOModelAdapter:
     """Adapter presenting IO-reader data through the same ``_df()`` API
     as :class:`~iwfm_io.dll.model.IWFMModel`.
@@ -329,12 +347,17 @@ class IOModelAdapter:
 
     # -- Time-series results -------------------------------------------
 
-    def heads_df(self, layer, begin_date=None, end_date=None):
+    def heads_df(self, layer, begin_date=None, end_date=None,
+                 day_index=False):
         """Return DataFrame(DatetimeIndex) with one column per node.
 
         Reads from ``GWHeadAll.hdf`` when available, otherwise from the
         text equivalent ``GWHeadAll.out`` (what a fresh simulation run
         writes) — both are layer-major with identical column ordering.
+
+        ``day_index=True`` re-indexes by :func:`iwfm_io.iwfm_day` — the
+        day each ``24:00`` stamp belongs to — so calendar idioms like
+        ``resample("YE-SEP")`` and ``.dt.year`` label periods correctly.
         """
         if self._heads_hdf is None:
             raise RuntimeError("IOModelAdapter: heads_hdf path required")
@@ -363,7 +386,7 @@ class IOModelAdapter:
         if end_date is not None:
             from iwfm_io._tokens import parse_iwfm_date
             result = result[result.index <= parse_iwfm_date(end_date)]
-        return result
+        return _maybe_day_index(result, day_index)
 
     def _strat_node_arrays(self):
         """Per-node x, y, GSE, and layer top/bottom elevations (cached)."""
@@ -472,15 +495,22 @@ class IOModelAdapter:
         return dates, heads
 
     def budget_df(self, budget_name, location, begin_date=None, end_date=None,
-                  interval=None, columns=None, **kwargs):
+                  interval=None, columns=None, day_index=False, **kwargs):
         """Return DataFrame(DatetimeIndex) of budget time series.
 
         Parameters
         ----------
         budget_name : str
-            Key in ``budget_hdfs`` dict (e.g. ``"GW"``).
+            Key in ``budget_hdfs`` dict (e.g. ``"GW"``), or a text
+            ``.bud`` budget discovered by ``open_model``.
         location : int or str
             1-based location index or location name.
+        day_index : bool
+            Re-index by :func:`iwfm_io.iwfm_day` (the day each ``24:00``
+            stamp belongs to) so ``resample("YE-SEP")``/``.dt.year``
+            label periods correctly. For water-year aggregation prefer
+            :func:`iwfm_io.aggregate_budget`, which also handles the
+            storage stocks.
         """
         bud = self._read_budget_source(budget_name, interval=interval)
         locs = bud["locations"]
@@ -499,10 +529,10 @@ class IOModelAdapter:
             df = df[df.index <= parse_iwfm_date(end_date)]
         if columns is not None:
             df = df.iloc[:, [c - 1 for c in columns]]
-        return df
+        return _maybe_day_index(df, day_index)
 
     def hydrograph_df(self, hdf_name, column=None, begin_date=None,
-                      end_date=None, **kwargs):
+                      end_date=None, day_index=False, **kwargs):
         """Return DataFrame(DatetimeIndex) from a hydrograph HDF5.
 
         Parameters
@@ -526,7 +556,7 @@ class IOModelAdapter:
         if column is not None:
             col_name = df.columns[column]
             df = pd.DataFrame({"value": df[col_name]}, index=df.index)
-        return df
+        return _maybe_day_index(df, day_index)
 
     # -- Budget-backed state (DLL-free) ---------------------------------
 

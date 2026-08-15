@@ -2204,7 +2204,8 @@ class IWFMModel:
 
     # -- Time-series results -------------------------------------------
 
-    def heads_df(self, layer, begin_date=None, end_date=None):
+    def heads_df(self, layer, begin_date=None, end_date=None,
+                 day_index=False):
         """Return DataFrame(DatetimeIndex) with one column per node.
 
         Parameters
@@ -2213,6 +2214,9 @@ class IWFMModel:
             1-based layer index.
         begin_date, end_date : str, optional
             IWFM date strings. Defaults to full simulation period.
+        day_index : bool
+            Re-index by :func:`iwfm_io.iwfm_day` (the day each ``24:00``
+            stamp belongs to) so calendar idioms label correctly.
         """
         ts = self.get_time_specs()
         if begin_date is None:
@@ -2224,7 +2228,9 @@ class IWFMModel:
         node_ids = self.get_node_ids()
         cols = [f"node_{int(nid)}" for nid in node_ids]
         # heads shape: (n_nodes, n_times) -> transpose to (n_times, n_nodes)
-        return pd.DataFrame(heads[:, :len(idx)].T, index=idx, columns=cols)
+        df = pd.DataFrame(heads[:, :len(idx)].T, index=idx, columns=cols)
+        from iwfm_io.model_adapter import _maybe_day_index
+        return _maybe_day_index(df, day_index)
 
     def subsidence_df(self, factor=1.0):
         """Return DataFrame of current-timestep subsidence: node_id, layer_1, ..., layer_N."""
@@ -2239,7 +2245,7 @@ class IWFMModel:
 
     def budget_df(self, budget_type, location, begin_date=None, end_date=None,
                   interval=None, columns=None, fact_lt=1.0, fact_ar=1.0,
-                  fact_vl=1.0):
+                  fact_vl=1.0, day_index=False):
         """Return DataFrame(DatetimeIndex) of budget time series.
 
         Parameters
@@ -2269,10 +2275,14 @@ class IWFMModel:
         # titles[0] is 'Time', skip it; columns are 1-based matching titles[1:]
         col_names = [titles[c] if c < len(titles) else f"col_{c}"
                      for c in columns]
-        return pd.DataFrame(raw["values"][:len(idx)], index=idx, columns=col_names)
+        df = pd.DataFrame(raw["values"][:len(idx)], index=idx,
+                          columns=col_names)
+        from iwfm_io.model_adapter import _maybe_day_index
+        return _maybe_day_index(df, day_index)
 
     def hydrograph_df(self, hyd_type, index, layer, begin_date=None,
-                      end_date=None, interval=None, fact_lt=1.0, fact_vl=1.0):
+                      end_date=None, interval=None, fact_lt=1.0, fact_vl=1.0,
+                      day_index=False):
         """Return DataFrame(DatetimeIndex) with a single 'value' column."""
         ts = self.get_time_specs()
         if begin_date is None:
@@ -2288,7 +2298,9 @@ class IWFMModel:
         # Filter out invalid dates
         mask = dates > 0
         idx = self._excel_dates_to_index(dates[mask])
-        return pd.DataFrame({"value": vals[mask][:len(idx)]}, index=idx)
+        df = pd.DataFrame({"value": vals[mask][:len(idx)]}, index=idx)
+        from iwfm_io.model_adapter import _maybe_day_index
+        return _maybe_day_index(df, day_index)
 
     def stream_flows_df(self, factor=1.0):
         """Return DataFrame of current-timestep stream flow components.

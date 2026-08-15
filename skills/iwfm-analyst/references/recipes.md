@@ -21,7 +21,14 @@ df = m.budget_df("<budget name from describe()>", location=1)
 - Location 1 is usually "ENTIRE MODEL AREA"; subregions follow.
 - Values are model-internal volume units; convert to acre-feet with the
   GW main's FACTVLOU (commonly 2.2957e-5 from cubic feet).
-- Water-year totals: `df.resample("YS-OCT").sum()`.
+- Water-year totals: `iwfm_io.aggregate_budget(df, period="WY")` —
+  NEVER plain `.resample().sum()`: storage columns are stocks
+  (Beginning → first, Ending/Cumulative → last, flows → sum) and the
+  24:00 stamps put 9/30 values in the year they close. Group by
+  calendar period with `iwfm_io.iwfm_day(index)` / `water_year(index)`,
+  not `.dt.year`/`.dt.month` on raw stamps; or pass `day_index=True` to
+  `budget_df`/`heads_df`/`hydrograph_df` to get an owning-day index up
+  front (then `resample("YE-SEP")` labels correctly for flow columns).
 - Older/packaged models may only have **text** budgets (`.bud`) —
   `open_model` discovers them automatically (in `Results/` and
   `Budget/`) and `budget_df` serves them the same way; `describe()`
