@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iwfm-io"
-version = "2.7.1"
+version = "2.8.0"
 description = "Read, write, analyze and visualize IWFM (Integrated Water Flow Model) models: pure-Python file I/O, DLL wrapper, and 58 plot functions"
 readme = "README.md"
 license = "Apache-2.0"
@@ -41,6 +41,9 @@ dependencies = [
     "h5py>=3.0",
     "matplotlib>=3.3",
 ]
+
+[project.scripts]
+iwfm-io = "iwfm_io.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/SercanC/iwfm-io"

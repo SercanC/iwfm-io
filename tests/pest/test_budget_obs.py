@@ -88,6 +88,51 @@ class TestFrameSource:
         out = budget_observations(_long_frame(), aggregate="annual")
         assert validate_obs_names(out["obsnme"]) == []
 
+    def test_annual_storage_stocks_first_last_not_summed(self):
+        from iwfm_io.pest import budget_observations
+
+        dates = pd.date_range("1999-10-31", periods=24, freq="ME")
+        rows = []
+        for comp, values in [
+            ("Beginning Storage (+)", 1000.0 + np.arange(24)),
+            ("Ending Storage (-)", 1001.0 + np.arange(24)),
+            ("Cumulative Subsidence", np.linspace(0.1, 2.4, 24)),
+            ("Pumping (-)", np.full(24, -5.0)),
+        ]:
+            for d, v in zip(dates, values):
+                rows.append(("r1", comp, d, v))
+        frame = pd.DataFrame(rows, columns=["location", "component",
+                                            "datetime", "value"])
+
+        out = budget_observations(frame, aggregate="annual")
+        sub = out.set_index("obsnme")
+        # WY2000 = the first 12 monthly values
+        assert sub.loc["bud_beginning_storage_r1_20000930",
+                       "value"] == 1000.0                      # first
+        assert sub.loc["bud_ending_storage_r1_20000930",
+                       "value"] == 1012.0                      # last
+        assert sub.loc["bud_cumulative_subsidence_r1_20000930",
+                       "value"] == pytest.approx(
+                           np.linspace(0.1, 2.4, 24)[11])      # last
+        assert sub.loc["bud_pumping_r1_20000930",
+                       "value"] == pytest.approx(-60.0)        # sum
+        # stock continuity across the two water years
+        assert sub.loc["bud_beginning_storage_r1_20010930", "value"] == \
+            sub.loc["bud_ending_storage_r1_20000930", "value"]
+
+    def test_annual_unsorted_input_stocks_chronological(self):
+        from iwfm_io.pest import budget_observations
+
+        dates = pd.date_range("1999-10-31", periods=12, freq="ME")
+        frame = pd.DataFrame({
+            "location": "r1",
+            "component": "Beginning Storage (+)",
+            "datetime": dates,
+            "value": 100.0 + np.arange(12),
+        }).iloc[::-1]                       # reversed order
+        out = budget_observations(frame, aggregate="annual")
+        assert out["value"].iloc[0] == 100.0   # chronological first
+
     def test_iwfm_midnight_stamp_buckets_to_prior_wy(self):
         from iwfm_io.pest import budget_observations
 

@@ -72,6 +72,12 @@ Currently provided:
   actions, observation tables + paired specs, and run steps → a
   complete runnable PEST++ v2 template directory (control file,
   external tables, templates, instructions, fail-fast forward run).
+- Quickstart (``pest_setup_from_model``): one call from a model folder
+  + observed heads to a runnable pestpp-ies template — multiplier
+  parameters zoned by subregion × layer, observations paired to the
+  model's own hydrograph outputs, generated run/extract steps. Also
+  the engine behind the ``iwfm-io pest`` command line
+  (``iwfm-io pest setup/agents/run/analyze``).
 
 Quick-start::
 
@@ -164,6 +170,10 @@ from iwfm_io.pest.stats import (
     rei_stats,
     ies_stats,
 )
+from iwfm_io.pest.quickstart import (
+    QuickstartSetup,
+    pest_setup_from_model,
+)
 from iwfm_io.pest.names import (
     ObsName,
     NameScheme,
@@ -228,6 +238,8 @@ __all__ = [
     "residual_stats",
     "rei_stats",
     "ies_stats",
+    "QuickstartSetup",
+    "pest_setup_from_model",
     "ObsName",
     "NameScheme",
     "StandardScheme",

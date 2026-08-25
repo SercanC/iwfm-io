@@ -139,10 +139,37 @@ with iwfm_io.dll.IWFMModel(
     m.heads_df(layer=1)  # via wrapper methods
 ```
 
-## Calibration post-processing (PEST / PESTPP-IES)
+## Calibration setup in one call (PEST / PESTPP-IES)
 
 `iwfm_io.pest` is a lazy subpackage (pure pandas; `pyemu` only needed
-for `.jcb` binary ensembles):
+for `.jcb` binary ensembles). The fastest route from a model folder to
+a runnable pestpp-ies template:
+
+```python
+from iwfm_io.pest import pest_setup_from_model
+
+qs = pest_setup_from_model(
+    "path/to/model",        # must have been run once (hydrograph output)
+    "obs_heads.smp",        # or a site/datetime/value frame or CSV;
+                            # sites = GW hydrograph names from the GW main
+    "pest_template",
+    parameters=("kh", "ss", "sy", "strk"),   # multipliers, zoned sr x layer
+    ies_num_reals=50)
+qs.summary()                # parameters, obs counts, dropped rows, baseline fit
+```
+
+The same workflow is available as a console script — useful when no
+Python session is warranted:
+
+```bash
+iwfm-io describe path/to/model                 # model inventory as JSON
+iwfm-io pest setup --model-dir M --obs obs.smp --dest T
+iwfm-io pest run --template T                  # noptmax=0 check run
+iwfm-io pest run --template T -n 8             # manager + 8 local agents
+iwfm-io pest analyze T                         # phi + diagnostics report
+```
+
+## Calibration post-processing
 
 ```python
 from iwfm_io.pest import load_ies_ensembles, ies_stats

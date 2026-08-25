@@ -444,6 +444,6 @@ See `examples/06_multi_run_budgets.py` for a full example.
 
 - Browse the [API Reference](api-reference.md) for all public functions
 - Explore the [Plot Gallery](plotting.md) for visualization examples
-- Calibrating? `iwfm_io.pest` covers the whole PEST(++) workflow — building the interface (`PestSetup`), IES ensemble post-processing, and calibration statistics; `iwfm_io.dss` reads CalSim/HEC-DSS streamflows. See the [API Reference](api-reference.md#iwfm_iopest--pest-calibration-support) and the [Agents & Scripting Guide](agents.md)
-- Run `examples/01_read_inputs.py` through `09_full_input_datasets.py` for hands-on demos
+- Calibrating? `iwfm_io.pest` covers the whole PEST(++) workflow — one call from model folder + observed heads to a runnable pestpp-ies template (`pest_setup_from_model`, or `iwfm-io pest setup/run/analyze` from the command line), the full building-block API (`PestSetup`), IES ensemble post-processing, and calibration statistics; `iwfm_io.dss` reads CalSim/HEC-DSS streamflows. See the [API Reference](api-reference.md#iwfm_iopest--pest-calibration-support) and the [Agents & Scripting Guide](agents.md)
+- Run `examples/01_read_inputs.py` through `10_pest_calibration.py` for hands-on demos
 - Check `CLAUDE.md` in the repo root for architecture details and conventions

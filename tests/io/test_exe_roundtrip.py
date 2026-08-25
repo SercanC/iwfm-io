@@ -45,6 +45,11 @@ def test_regenerated_inputs_reproduce_baseline_heads(tmp_path):
         read_ponded_ag_main, write_ponded_ag_main,
         read_urban_main, write_urban_main,
         read_native_veg_main, write_native_veg_main,
+        read_et, write_et,
+        read_precip, write_precip,
+        read_stream_inflow, write_stream_inflow,
+        read_ts_pumping, write_ts_pumping,
+        read_boundary_ts, write_boundary_ts,
     )
     from iwfm_io.readers.text_output import read_head_all_out
 
@@ -79,6 +84,17 @@ def test_regenerated_inputs_reproduce_baseline_heads(tmp_path):
          read_native_veg_main, write_native_veg_main, True),
         (sim / "Stream" / "Stream_MAIN.dat", read_stream_main,
          write_stream_main, True),
+        # time-series files: the comment terminating the 5-parameter
+        # spec block is load-bearing (both inline-data and
+        # DSS-pathname layouts)
+        (sim / "ET.dat", read_et, write_et, False),
+        (sim / "Precip.dat", read_precip, write_precip, False),
+        (sim / "Stream" / "StreamInflow.dat", read_stream_inflow,
+         write_stream_inflow, False),
+        (sim / "GW" / "TSPumping.dat", read_ts_pumping,
+         write_ts_pumping, False),
+        (sim / "GW" / "BoundTSD.dat", read_boundary_ts,
+         write_boundary_ts, False),
     ]
     for path, rd, wr, takes_base in pairs:
         obj = rd(path)

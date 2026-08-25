@@ -691,15 +691,24 @@ def normalize_hydrograph_output(hyd_output) -> "pd.DataFrame":
     1-based file order, which equals the spec order).
     """
     h = hyd_output.copy()
+    _iwfm_stamp = re.compile(r"^\d{2}/\d{2}/\d{4}_\d{2}:\d{2}$")
     for time_col in ("datetime", "date", "time"):
         if time_col in h.columns:
-            try:
-                when = pd.to_datetime(h[time_col])
-            except (ValueError, TypeError):
-                # raw IWFM stamps ("09/30/2000_24:00")
+            first = str(h[time_col].iloc[0]) if len(h) else ""
+            if _iwfm_stamp.match(first):
+                # raw IWFM stamps ("09/30/2000_24:00") — parse directly
+                # (pd.to_datetime would fall back to slow per-element
+                # dateutil parsing and warn before failing on 24:00)
                 from iwfm_io._tokens import parse_iwfm_date
                 when = pd.to_datetime(
                     [parse_iwfm_date(str(v)) for v in h[time_col]])
+            else:
+                try:
+                    when = pd.to_datetime(h[time_col])
+                except (ValueError, TypeError):
+                    from iwfm_io._tokens import parse_iwfm_date
+                    when = pd.to_datetime(
+                        [parse_iwfm_date(str(v)) for v in h[time_col]])
             h = h.set_index(when).drop(columns=time_col)
             h.index.name = "datetime"
             break

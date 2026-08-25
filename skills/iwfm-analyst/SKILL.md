@@ -8,10 +8,12 @@ description: >
   subfolders, or asks about groundwater budgets, heads, depth to water,
   subsidence, stream flows, land use areas, pumping, zone budgets,
   IWFM scenarios, or plots/maps of any of these. Also covers PEST/
-  PEST++ calibration of IWFM models (IES ensembles, residual/fit
-  statistics like RMSE/NSE/KGE, observation wells vs simulated heads,
-  SMP files, calibration figures) and CalSim-coupled models (channel
-  flows from HEC-DSS / DV.dss files).
+  PEST++ calibration of IWFM models — building a runnable pestpp-ies
+  setup from a model folder (pest_setup_from_model / the iwfm-io CLI)
+  and post-processing (IES ensembles, residual/fit statistics like
+  RMSE/NSE/KGE, observation wells vs simulated heads, SMP files,
+  calibration figures) — and CalSim-coupled models (channel flows from
+  HEC-DSS / DV.dss files).
 ---
 
 # IWFM Model Analyst
@@ -64,13 +66,28 @@ model, and use its budget names/locations verbatim.
 Load `references/recipes.md` for ready-made patterns:
 budgets, heads and depth-to-water, hydrographs, zone budgets,
 comparing two model runs, building and running a scenario, reading or
-editing individual input files, calibration statistics (observed vs
-simulated, PESTPP-IES runs), CalSim/HEC-DSS streamflows, and using
-the DLL.
+editing individual input files, building a PEST++ calibration setup,
+calibration statistics (observed vs simulated, PESTPP-IES runs),
+CalSim/HEC-DSS streamflows, and using the DLL.
 
 ## Calibration (PEST / PESTPP-IES)
 
-`iwfm_io.pest` post-processes calibration runs without any PEST
+**Building a setup** (creates files — confirm first): if the user wants
+to calibrate a model, `pest_setup_from_model(model_dir, obs, dest)`
+builds a complete runnable pestpp-ies template in one call — multiplier
+parameters (kh/ss/sy/stream conductance, zoned by subregion × layer),
+observations paired to the model's own hydrograph outputs, a hardlinked
+model copy, and the full forward run. Requirements: the model has been
+run once, and observation site names match GW hydrograph names from the
+GW main file (show the user the available names if they don't).
+`qs.summary()` reports parameters, dropped observations, and baseline
+fit — present that. The same workflow exists as a console script the
+user can run themselves: `iwfm-io pest setup / run / analyze` (and
+`iwfm-io describe <model_dir>`). Launching `pestpp-ies` runs the model
+once per realization per iteration — estimate the runtime from one
+forward run and warn before starting.
+
+**Post-processing:** `iwfm_io.pest` reads calibration runs without any PEST
 knowledge required from the user: `load_ies_ensembles(<case.pst or
 master dir>)` → `.describe()` orients you (iterations, phi summary);
 `ies_stats`/`residual_stats` compute per-well or per-group fit metrics
@@ -102,10 +119,11 @@ and several outputs exist in both text and HDF form.
 
 ## Safety rails
 
-- Reading and plotting are always safe. **Editing model inputs or
-  running simulations changes/creates files — confirm with the user
-  first**, and use `create_scenario()` so the original model is never
-  modified in place.
+- Reading and plotting are always safe. **Editing model inputs, running
+  simulations, or building a PEST++ setup changes/creates files —
+  confirm with the user first**, and use `create_scenario()` /
+  `pest_setup_from_model` (which copies the model into the template)
+  so the original model is never modified in place.
 - Simulation runtimes vary wildly: the 441-node sample runs in ~40 s;
   C2VSimFG takes ~8 hours. Warn before launching anything big and run
   it in the background.

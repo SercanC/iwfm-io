@@ -127,8 +127,15 @@ def budget_observations(source, budget: Optional[str] = None,
     aggregate : {"none", "mean", "annual"}
         ``none`` — one observation per timestep (dated names);
         ``mean`` — one long-term mean per location × component
-        (dateless names, the classic budget-observation setup);
-        ``annual`` — water-year sums (named by the Sep-30 WY end).
+        (dateless names, the classic budget-observation setup; a mean
+        is meaningful for storage levels too, so every component uses
+        it);
+        ``annual`` — water-year aggregation named by the Sep-30 WY
+        end, with the rule per component from
+        :func:`iwfm_io.budget_component_agg`: flow components sum,
+        ``Beginning Storage`` takes the water year's first value,
+        ``Ending Storage`` and ``Cumulative …`` components the last —
+        storage stocks are levels and are never summed.
     obs_type : str, default "bud"
         Observation-type token for the name codec.
     scheme : str or NameScheme
@@ -175,12 +182,24 @@ def budget_observations(source, budget: Optional[str] = None,
         out["obsnme"] = encode_obs_names(
             obs_type, out["_site"], None, scheme=scheme).values
     elif aggregate == "annual":
-        # water year: Oct 1 – Sep 30, labeled by the ending Sep 30
-        wy = long["datetime"].sub(pd.Timedelta(seconds=1))
-        wy_end = wy.dt.year.where(wy.dt.month < 10, wy.dt.year + 1)
-        out = (long.assign(_site=site, _wy=wy_end)
-               .groupby(["_site", "location", "component", "_wy"],
-                        as_index=False)["value"].sum())
+        # Water year (Oct 1 – Sep 30, labeled by the ending Sep 30),
+        # 24:00-aware via the shared helper. Each component aggregates
+        # by its semantics: flows sum, storage stocks take the water
+        # year's first/last value (never a sum of levels).
+        from iwfm_io._tokens import water_year
+        from iwfm_io.collect import budget_component_agg
+
+        data = long.assign(_site=site).sort_values("datetime")
+        data["_wy"] = water_year(data["datetime"])
+        how = data["component"].map(budget_component_agg)
+        pieces = []
+        for rule in ("sum", "first", "last"):
+            part = data[how.values == rule]
+            if len(part):
+                pieces.append(
+                    part.groupby(["_site", "location", "component", "_wy"],
+                                 as_index=False)["value"].agg(rule))
+        out = pd.concat(pieces, ignore_index=True)
         out["datetime"] = pd.to_datetime(
             out.pop("_wy").astype(str) + "-09-30")
         out["obsnme"] = encode_obs_names(

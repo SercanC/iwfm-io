@@ -154,6 +154,37 @@ stats = residual_stats(matched, by="site")    # bias, RMSE, R2, NSE, KGE per wel
 Obs-vs-sim figures: `iwfm_io.plots.calibration` (scatter, residual
 histogram/map, hydrograph panels).
 
+## Build a PEST++ calibration setup (confirm with user first)
+
+One call from model folder + observed heads to a runnable pestpp-ies
+template. Needs: the model run at least once (hydrograph outputs must
+exist), and obs `site` names matching GW hydrograph names from the GW
+main (`read_gw_main(...).hydrographs["name"]` lists them).
+
+```python
+from iwfm_io.pest import pest_setup_from_model
+qs = pest_setup_from_model(
+    r"<model_root>", r"<obs_heads.smp>", r"<dest>\pest_template",
+    parameters=("kh", "ss", "sy", "strk"),   # multipliers, zoned sr x layer
+    ies_num_reals=50, noptmax=0)             # noptmax=0 = cheap check run
+qs.summary()   # parameters, obs counts, dropped rows, baseline fit — show this
+```
+
+Equivalent console commands (users can run these without Python):
+
+```bash
+iwfm-io describe <model_root>
+iwfm-io pest setup --model-dir <model_root> --obs obs.smp --dest pest_template
+iwfm-io pest run --template pest_template          # single check run
+iwfm-io pest run --template pest_template -n 8     # manager + 8 local agents
+iwfm-io pest analyze pest_template                 # phi + diagnostics
+```
+
+Each pestpp-ies iteration runs the model once per realization — time one
+forward run first and warn before launching a real calibration. Custom
+parameterizations (pilot points, budget obs, weights) use the full API:
+`ParamSpec`/`build_parameters`, `ObsFileSpec`, `PestSetup`.
+
 ## PESTPP-IES run post-processing
 
 ```python

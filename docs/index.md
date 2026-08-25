@@ -26,7 +26,8 @@ Python file I/O, DLL wrapper, and visualization library for the **Integrated Wat
 ├───────────────────────────────────────────────────────┤
 │  iwfm_io.pest     PEST(++) calibration support        │
 │                   obs codec · IES loader · stats ·    │
-│                   parameterization · PestSetup        │
+│                   parameterization · PestSetup ·      │
+│                   quickstart + iwfm-io CLI            │
 ├───────────────────────────────────────────────────────┤
 │  iwfm_io.dll      DLL wrapper (Windows x64 only)      │
 │                   IWFMModel · IWFMBudget · IWFMZBudget│
@@ -43,7 +44,7 @@ Python file I/O, DLL wrapper, and visualization library for the **Integrated Wat
 - **Just need to read/write IWFM files?** Use `iwfm_io` — works on any OS, no DLL required.
 - **Need live model queries?** Use `iwfm_io.dll.IWFMModel` — requires Windows + the IWFM DLL.
 - **Want visualizations?** The plot library works with either `IWFMModel` or `IOModelAdapter`.
-- **Calibrating with PEST(++)?** `iwfm_io.pest` builds the interface and post-processes the results; `iwfm_io.dss` (optional `[dss]` extra) reads CalSim/HEC-DSS streamflows.
+- **Calibrating with PEST(++)?** `iwfm_io.pest` builds the interface and post-processes the results — start with `pest_setup_from_model` or the `iwfm-io pest` command line; `iwfm_io.dss` (optional `[dss]` extra) reads CalSim/HEC-DSS streamflows.
 
 ## Examples
 

@@ -33,6 +33,51 @@ class TestFormatToken:
         assert _format_token(float("inf"), 12) == "inf"
 
 
+class TestTimeSeriesSpecTerminator:
+    """The comment terminating the 5-parameter time-series spec block is
+    load-bearing: without it the IWFM executables consume the first
+    data/pathname line while resolving the (possibly blank) DSS
+    filename, shifting the whole read (a recurring-year ET file then
+    fails with "End-of-file reached")."""
+
+    def _spec(self, dss_file=""):
+        from iwfm_io.models.base import TimeSeriesSpec
+
+        return TimeSeriesSpec(n_columns=3, factor=1.0, n_steps_update=1,
+                              repeat_freq=0, dss_file=dss_file)
+
+    def test_comment_follows_dssfl(self):
+        from iwfm_io._tokens import is_comment
+        from iwfm_io._writer import IWFMFileWriter
+
+        for dss in ("", "TSDATA_IN.DSS"):
+            w = IWFMFileWriter.__new__(IWFMFileWriter)
+            w._lines = []
+            w.write_timeseries_spec(self._spec(dss))
+            dssfl_at = next(i for i, l in enumerate(w._lines)
+                            if "DSSFL" in l)
+            assert is_comment(w._lines[dssfl_at + 1]), \
+                "spec block must end with a comment line"
+
+    def test_written_et_file_keeps_terminator(self, tmp_path):
+        from pathlib import Path
+
+        from iwfm_io._tokens import is_comment
+
+        sample = (Path(__file__).resolve().parents[2] / ".assets"
+                  / "sample_model" / "Simulation" / "ET.dat")
+        if not sample.is_file():
+            pytest.skip("sample model not available")
+        from iwfm_io import read_et, write_et
+
+        out = tmp_path / "ET.dat"
+        write_et(read_et(sample), out)
+        lines = out.read_text().splitlines()
+        dssfl_at = next(i for i, l in enumerate(lines)
+                        if not is_comment(l) and "DSSFL" in l)
+        assert is_comment(lines[dssfl_at + 1])
+
+
 class TestDataLineSeparation:
     def test_overflowing_token_keeps_separator(self):
         from iwfm_io._writer import IWFMFileWriter

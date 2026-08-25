@@ -402,7 +402,7 @@ regularizers of DWR-style calibrations.
 
 | Function | Purpose |
 |---|---|
-| `budget_observations(source, budget=None, locations=None, components=None, aggregate="none")` | Source: `IOModelAdapter`/model dir (+ `budget="GW"`), a budget `.hdf` path, or a long-form frame (covers z-budgets). `aggregate`: `"none"` (full series), `"mean"` (dateless long-term means — the classic setup), `"annual"` (water-year sums named by Sep-30 WY end, 24:00-aware). Names via the obs-name codec: `bud_{component}_{location}[_{date}]` |
+| `budget_observations(source, budget=None, locations=None, components=None, aggregate="none")` | Source: `IOModelAdapter`/model dir (+ `budget="GW"`), a budget `.hdf` path, or a long-form frame (covers z-budgets). `aggregate`: `"none"` (full series), `"mean"` (dateless long-term means — the classic setup), `"annual"` (water-year aggregation named by Sep-30 WY end, 24:00-aware, per-component rules via `budget_component_agg` — flows sum, Beginning Storage takes the WY's first value, Ending Storage/Cumulative the last). Names via the obs-name codec: `bud_{component}_{location}[_{date}]` |
 | `slugify_label(label)` | PEST-safe label slugs: `"Region1 (SR1)"` → `region1_sr1` |
 
 ### Derived observations (`iwfm_io/pest/derived.py`)
@@ -515,7 +515,7 @@ writers — no template markers in fixed-format IWFM files.
 
 | Function / class | Purpose |
 |---|---|
-| `ApplyAction(reader, path, table, column, values_file, key_cols, op, lower, upper)` | One declarative write-back: `reader` ∈ gw_main/stream_main/subsidence; `op` ∈ multiply/replace/add; bounds clip with a logged count; value rows matching no table row are an error |
+| `ApplyAction(reader, path, table, column, values_file, key_cols, op, lower, upper, base_dir)` | One declarative write-back: `reader` ∈ gw_main/stream_main/subsidence; `table` reaches nested tables via dotted paths (`"parametric_grids.0.params"` for NGROUP>0 GW mains); `op` ∈ multiply/replace/add; bounds clip with a logged count; value rows matching no table row are an error; `base_dir` (the simulation working dir, relative to the run dir) makes the writer re-relativise referenced file paths so repeated rewrites stay valid |
 | `apply_parameters(run_dir, actions, log_path=...)` | Apply all actions (targets read once), rewrite atomically, and write the bookkeeping CSV (the `mult2model_info` role) |
 | `write_gw_overwrite(path, df, factors=None, time_unit="1MON")` / `read_gw_overwrite(path)` | IWFM's native GW parameter overwrite file (`node layer PKH PS PN PV PL SCE SCI`, `-1` = keep) |
 
@@ -565,6 +565,28 @@ empty setups are hard errors. Verified end-to-end against the real
 pestpp-ies executable (base run of a toy problem; residuals load back
 through `load_ies_ensembles`/`rei_stats`).
 
+### One-call quickstart (`iwfm_io/pest/quickstart.py`)
+
+`pest_setup_from_model(model_dir, obs, dest_dir, ...)` builds a runnable
+pestpp-ies template directly from a model folder plus observed heads
+(long-form frame, SMP, or CSV — site names matched to GW hydrograph
+names/ids case-insensitively). It composes the verified pieces: multiplier
+parameters for the requested properties (`kh, ss, sy, kv, aquitard_kv`
+from the GW main's table — NGROUP=0 or a single parametric grid — plus
+`strk` stream conductance), zoned `subregion` × layer / `layer` /
+`global`; observations paired against the model's own hydrograph output
+via `match_sim_to_obs` (unmatched/unpairable rows reported in
+`.dropped`); a model copy under `template/model/` (hardlinked); and a
+generated forward run — apply → `run_model` → re-extract at the
+observation timestamps (`run_forward`/`run_extract`, driven by
+`_quickstart.json` + `_obs_index.csv`). Returns `QuickstartSetup`
+(`template, paired, par_data, obs_data, dropped, stats, summary()`).
+Key options: `parameters`, `zones`, `bounds`, `max_gap`, `weight`,
+`noptmax` (default 0 — first run is a cheap check), `ies_num_reals`,
+`pestpp_options`, `run_steps`. Exe-verified on the sample model: the
+generated forward run reproduces baseline heads at every observation
+through the real IWFM executables.
+
 ### Phi-budget weight balancing (`iwfm_io/pest/weights.py`)
 
 Rescales observation weights so each observation *category* contributes a
@@ -608,6 +630,22 @@ histograms, bound railing, ensemble hydrographs, and residual maps. See the
 Calibration section of [plotting.md](plotting.md) for the full table; all
 follow the package plotting interface (`ax`/`figsize`/`save_path`/`dpi`,
 return `(fig, ax)`).
+
+---
+
+## `iwfm-io` — Command Line
+
+Installed as a console script (`iwfm_io/cli.py`); every command is a thin
+wrapper over the public API, so anything the CLI does can be scripted with
+the same names. `--traceback` shows full stack traces.
+
+| Command | Purpose |
+|---|---|
+| `iwfm-io describe <model_dir>` | `open_model(...).describe()` as JSON |
+| `iwfm-io pest setup --model-dir M --obs obs.smp --dest T [--parameters kh ss sy strk] [--zones subregion\|layer\|global] [--reals N] [--noptmax N] [--max-gap 45D] [--date-format ...]` | `pest_setup_from_model` → runnable pestpp-ies template |
+| `iwfm-io pest agents --template T -n 8 [--port 4004] [--exe pestpp-ies]` | `setup_agents` + `write_manager_script` (start manually) |
+| `iwfm-io pest run --template T [-n 8] [--exe pestpp-ies] [--port 4004]` | Run PEST++: serial, or launch the manager plus N local hardlinked agents and wait |
+| `iwfm-io pest analyze <master_dir or .pst> [--json out.json] [--par-data csv]` | `load_ies_ensembles` + `diagnose_ies` summary (auto-discovers `*_par_data.csv` for railing checks) |
 
 ---
 

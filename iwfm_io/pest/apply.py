@@ -74,7 +74,10 @@ class ApplyAction:
     table : str
         DataFrame attribute on the parsed dataclass (e.g.
         ``"aquifer_params"``, ``"reach_params"``,
-        ``"subsidence_params"``).
+        ``"subsidence_params"``). Dotted paths reach nested tables
+        through list indices and dict keys — e.g.
+        ``"parametric_grids.0.params"`` for the parameter table of an
+        NGROUP>0 groundwater main's first parametric grid.
     column : str
         Column to modify (e.g. ``"kh"``, ``"conductance"``).
     values_file : str
@@ -87,6 +90,15 @@ class ApplyAction:
     op : {"multiply", "replace", "add"}
     lower, upper : float, optional
         Clip applied results (bounds enforcement after the operation).
+    base_dir : str, optional
+        The simulation working directory (the folder of the simulation
+        main file), relative to the run directory — passed to the
+        component writer so referenced file paths are re-written
+        relative to it, exactly as IWFM resolves them. Without it the
+        writer emits the parsed path strings as-is, which survives one
+        rewrite only when the run directory equals the simulation
+        working directory. Actions sharing a target file must agree on
+        it.
     """
 
     reader: str
@@ -98,6 +110,7 @@ class ApplyAction:
     op: str = "multiply"
     lower: Optional[float] = None
     upper: Optional[float] = None
+    base_dir: Optional[str] = None
 
     def __post_init__(self):
         if self.op not in ("multiply", "replace", "add"):
@@ -105,6 +118,38 @@ class ApplyAction:
                 f"op must be 'multiply', 'replace', or 'add', got {self.op!r}")
         if self.reader not in ("gw_main", "stream_main", "subsidence"):
             raise ValueError(f"unknown reader {self.reader!r}")
+
+
+def _walk_table_path(obj, parts):
+    for p in parts:
+        if isinstance(obj, (list, tuple)):
+            obj = obj[int(p)]
+        elif isinstance(obj, dict):
+            obj = obj[p]
+        else:
+            obj = getattr(obj, p)
+    return obj
+
+
+def _resolve_table(obj, table: str):
+    """Fetch a (possibly nested) table: attributes, list indices, dict
+    keys along a dotted path (``"parametric_grids.0.params"``)."""
+    try:
+        return _walk_table_path(obj, str(table).split("."))
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def _assign_table(obj, table: str, value) -> None:
+    parts = str(table).split(".")
+    parent = _walk_table_path(obj, parts[:-1])
+    last = parts[-1]
+    if isinstance(parent, list):
+        parent[int(last)] = value
+    elif isinstance(parent, dict):
+        parent[last] = value
+    else:
+        setattr(parent, last, value)
 
 
 def _apply_one(df, action: ApplyAction, values: "pd.DataFrame"):
@@ -193,10 +238,16 @@ def apply_parameters(run_dir, actions: Sequence[ApplyAction],
     for (reader, rel), acts in by_file.items():
         read_fn, write_fn = registry[reader]
         target = run_dir / rel
+        bases = {a.base_dir for a in acts}
+        if len(bases) > 1:
+            raise ValueError(
+                f"actions targeting {rel} disagree on base_dir: "
+                f"{sorted(str(b) for b in bases)}")
+        base_dir = bases.pop()
         obj = read_fn(target)
         for a in acts:
-            df = getattr(obj, a.table, None)
-            if df is None or not isinstance(df, pd.DataFrame):
+            df = _resolve_table(obj, a.table)
+            if not isinstance(df, pd.DataFrame):
                 raise KeyError(
                     f"{reader} result has no DataFrame table {a.table!r}")
             values = pd.read_csv(run_dir / a.values_file)
@@ -204,7 +255,7 @@ def apply_parameters(run_dir, actions: Sequence[ApplyAction],
                 raise ValueError(
                     f"{a.values_file} needs a 'value' column")
             new_df, n = _apply_one(df, a, values)
-            setattr(obj, a.table, new_df)
+            _assign_table(obj, a.table, new_df)
             log_rows.append({
                 "reader": reader, "path": rel, "table": a.table,
                 "column": a.column, "op": a.op,
@@ -212,7 +263,10 @@ def apply_parameters(run_dir, actions: Sequence[ApplyAction],
                 "min_value": float(values["value"].min()),
                 "max_value": float(values["value"].max()),
             })
-        write_fn(obj, target)
+        if base_dir is not None:
+            write_fn(obj, target, base_dir=run_dir / base_dir)
+        else:
+            write_fn(obj, target)
     log = pd.DataFrame(log_rows)
     if log_path is not None:
         replace_file_text(run_dir / log_path, log.to_csv(index=False))

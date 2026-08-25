@@ -408,6 +408,8 @@ def write_boundary_ts(
     w.write_keyed_value(spec.n_steps_update, "NSPHTS")
     w.write_keyed_value(spec.repeat_freq, "NFQHTS")
     w.write_keyed_value(spec.dss_file, "DSSFL")
+    # Load-bearing comment — see IWFMFileWriter.write_timeseries_spec
+    w.write_comment("C  end of specification")
 
     if bt.dss_pathnames:
         w.write_dss_pathnames(bt.dss_pathnames)

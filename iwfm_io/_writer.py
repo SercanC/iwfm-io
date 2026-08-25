@@ -232,6 +232,13 @@ class IWFMFileWriter:
         self.write_keyed_value(spec.n_steps_update, keywords[2])
         self.write_keyed_value(spec.repeat_freq, keywords[3])
         self.write_keyed_value(spec.dss_file, keywords[4])
+        # A comment line must terminate the specification block: IWFM's
+        # file reader otherwise consumes the first data/pathname line
+        # while resolving the (possibly blank) DSS filename, shifting
+        # the whole time-series read (verified against the executables —
+        # without this line a recurring-year ET file fails with
+        # "End-of-file reached"). Load-bearing, not decoration.
+        self.write_comment("C  end of specification")
 
     def write_timeseries_data(self, df: pd.DataFrame, col_width: int = 14) -> None:
         """Write time-series data rows.

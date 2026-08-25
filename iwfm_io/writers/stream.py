@@ -132,6 +132,10 @@ def write_stream_inflow(sf: StreamInflowFile, path: str | Path) -> None:
     # Column-to-node assignments
     for col_id, node_id in sf.node_assignments:
         w.write_data_line([col_id, node_id], widths=[6, 8])
+    # Load-bearing comment terminating the node list — like the spec
+    # block, IWFM otherwise consumes the first data line (verified
+    # against the executables)
+    w.write_comment("C  end of inflow node list")
 
     if sf.dss_pathnames:
         w.write_dss_pathnames(sf.dss_pathnames)
