@@ -112,6 +112,34 @@ from iwfm_io.readers.stream import read_stream_main, read_diversions
 Writers mirror readers (`iwfm_io.writers.*`) for round-trip edits —
 prefer `create_scenario` + change functions over hand-editing.
 
+Land use area tables (all four root-zone area files share one format):
+
+```python
+from iwfm_io import read_land_use_area, write_land_use_area
+np_ag = read_nonponded_ag_main(r"...\RootZone\NonPondedAg\NonPondedAg_MAIN.dat")
+lu = read_land_use_area(np_ag.file_paths["land_use_area"],
+                        columns=np_ag.crop_codes)  # names area cols by crop
+lu.data          # long DataFrame: date, element_id, one column per crop
+lu.factor        # 0.0 = fractions of element area, else unit conversion
+write_land_use_area(lu, out_path)   # after editing lu.data
+```
+
+Works the same for the ponded (5 fixed types), urban (1), and
+native/riparian (2) area files, referenced by each sub-main's
+`file_paths["land_use_area"]`.
+
+All four groups combined, with each file's FACT applied (every column
+becomes an area in model plane units):
+
+```python
+from iwfm_io import read_all_land_use_areas, read_preprocessor
+df = read_all_land_use_areas(r"...\RootZone\RootZone_MAIN.dat")
+# FACT=0.0 files hold fractions of element area; without element_areas=
+# the fractions are kept as-is. To convert them to areas:
+pp = read_preprocessor(r"...\Preprocessor\<main>.in")
+df = read_all_land_use_areas(rz_main_path, element_areas=pp)
+```
+
 ## GIS export (needs `pip install iwfm-io[geo]`)
 
 ```python
@@ -153,6 +181,24 @@ stats = residual_stats(matched, by="site")    # bias, RMSE, R2, NSE, KGE per wel
 `link_hydrographs(gwl_metadata, gw_main)` + `composite_well_hydrographs`.
 Obs-vs-sim figures: `iwfm_io.plots.calibration` (scatter, residual
 histogram/map, hydrograph panels).
+
+SMP extras: `read_smp` returns an `excluded` column from the trailing
+`x` flag (filter with `obs[~obs.excluded]`); `fixed_width=True` handles
+site names with spaces (IWFM2OBS column layout). `match_sim_to_obs`
+takes `extrapolate="30D"` to serve endpoint values to observations just
+outside the simulated period.
+
+Typical (cluster-average) hydrographs — the CalcTypHyd workflow:
+
+```python
+from iwfm_io.pest import typical_hydrographs   # + PERIODS_SPRING_FALL preset
+typ_obs = typical_hydrographs(obs, clusters)   # clusters: {well: cluster} or
+typ_sim = typical_hydrographs(sim, clusters)   #   fuzzy-weight frame
+paired = match_sim_to_obs(typ_sim.series, typ_obs.series, method="nearest")
+```
+
+Both sides are de-meaned per well, so this compares seasonal shape, not
+absolute level.
 
 ## Build a PEST++ calibration setup (confirm with user first)
 

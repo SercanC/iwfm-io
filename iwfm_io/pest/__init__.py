@@ -31,7 +31,13 @@ Currently provided:
   compact JSON state + boolean signals + text summary.
 - Sim-to-obs matching (``match_sim_to_obs``, ``resample_month_end``):
   IWFM2OBS-equivalent time interpolation of simulated hydrographs to
-  observation timestamps, gap-guarded, 24:00-convention aware.
+  observation timestamps, gap-guarded, 24:00-convention aware, with
+  optional bounded endpoint extrapolation.
+- Typical hydrographs (``typical_hydrographs`` →
+  :class:`TypicalHydrographs`): CalcTypHyd-equivalent cluster-average
+  anomaly hydrographs — period-year slot averages per well, de-meaned,
+  combined with (fuzzy) cluster weights; identical call on observed
+  and simulated series yields point-for-point-comparable targets.
 - Budget observations (``budget_observations``): named observation
   tables from budget/zbudget output — full series, long-term means, or
   water-year totals per location × component.
@@ -154,6 +160,13 @@ from iwfm_io.pest.sim2obs import (
     match_sim_to_obs,
     resample_month_end,
 )
+from iwfm_io.pest.typhyd import (
+    Period,
+    PERIODS_QUARTERLY,
+    PERIODS_SPRING_FALL,
+    TypicalHydrographs,
+    typical_hydrographs,
+)
 from iwfm_io.pest.diagnostics import (
     DiagThresholds,
     IesDiagnostics,
@@ -196,6 +209,11 @@ __all__ = [
     "write_smp",
     "match_sim_to_obs",
     "resample_month_end",
+    "Period",
+    "PERIODS_QUARTERLY",
+    "PERIODS_SPRING_FALL",
+    "TypicalHydrographs",
+    "typical_hydrographs",
     "budget_observations",
     "slugify_label",
     "head_changes",

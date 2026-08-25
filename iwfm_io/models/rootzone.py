@@ -230,6 +230,60 @@ class UrbanFile:
 
 
 @dataclass
+class LandUseAreaFile:
+    """Parsed land use area file (LUFLNP / LUFLP / LUFLU / LUFLNVRV).
+
+    All four root-zone land use area files share one format: a
+    4-parameter spec (conversion factor, update/repetition frequency,
+    optional DSS file), then per-timestep blocks of one row per element
+    where only the first row of a block carries the date.  The number
+    of area columns is implied by the land use type: NCROP for
+    non-ponded crops, 5 for ponded crops, 1 for urban, 2 for
+    native/riparian vegetation.
+
+    Attributes
+    ----------
+    header : FileHeader
+    factor : float
+        FACTLN conversion factor for the areas (0.0 = areas are given
+        as fractions of the element area).
+    n_steps_update : int
+        NSPLN number of time steps between land use updates.
+    repeat_freq : int
+        NFQLN repetition frequency (0 = full time series).
+    dss_file : str
+        DSSFL; empty when data is inline.
+    keywords : list[str]
+        The four spec keywords as read from the file (e.g. FACTLNNP,
+        NSPLNNP, NFQLNNP, DSSFL), replayed on write.
+    data : pd.DataFrame or None
+        Long-format inline data: ``date`` (IWFM date strings — kept as
+        strings because recurring-year data uses years like 2500),
+        ``element_id``, then one area column per land use type
+        (``area_1..area_n`` unless names were passed to the reader).
+    dss_pathnames : pd.DataFrame or None
+        When DSSFL is set: element_id, lu_type (1-based land use
+        index), pathname.
+    """
+
+    header: FileHeader = field(default_factory=FileHeader)
+    factor: float = 0.0
+    n_steps_update: int = 1
+    repeat_freq: int = 0
+    dss_file: str = ""
+    keywords: list[str] = field(default_factory=list)
+    data: Any = None  # DataFrame
+    dss_pathnames: Any = None  # DataFrame
+
+    @property
+    def n_land_uses(self) -> int:
+        """Number of area columns (crops / land use types)."""
+        if self.data is None:
+            return 0
+        return len(self.data.columns) - 2
+
+
+@dataclass
 class NativeVegFile:
     """Parsed native and riparian vegetation main file (NVRVFL).
 

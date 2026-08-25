@@ -92,7 +92,9 @@ knowledge required from the user: `load_ies_ensembles(<case.pst or
 master dir>)` → `.describe()` orients you (iterations, phi summary);
 `ies_stats`/`residual_stats` compute per-well or per-group fit metrics
 (bias, RMSE, R², NSE, KGE); `read_smp` reads observed records;
-`match_sim_to_obs` pairs them with simulated series. Observation wells
+`match_sim_to_obs` pairs them with simulated series;
+`typical_hydrographs` condenses well clusters into CalcTypHyd-style
+cluster-average targets. Observation wells
 link to model hydrographs through a `gwl_metadata` DataFrame
 (`link_hydrographs` + `composite_well_hydrographs`), stream gauges
 through `gauge_metadata` (`link_stream_hydrographs` +

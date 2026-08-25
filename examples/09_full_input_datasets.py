@@ -179,7 +179,7 @@ def demo_unsatzone():
 def demo_rootzone():
     from iwfm_io import (read_rootzone_main, read_nonponded_ag_main,
                          read_ponded_ag_main, read_urban_main,
-                         read_native_veg_main)
+                         read_native_veg_main, read_land_use_area)
 
     print("\n=== Root zone: per-element soil table ===")
     rz = read_rootzone_main(RZ_DIR / "RootZone_MAIN.dat")
@@ -216,6 +216,26 @@ def demo_rootzone():
     print(f"  Root depths: native={nv.root_depth_native}, "
           f"riparian={nv.root_depth_riparian}")
     print(nv.element_params.head(2).to_string(index=False))
+
+    print("\n=== Land use area tables (same format for all 4 files) ===")
+    lu = read_land_use_area(np_.file_paths["land_use_area"],
+                            columns=np_.crop_codes)
+    print(f"  factor={lu.factor} (0.0 = fractions of element area)")
+    print(f"  {lu.data['date'].nunique()} timestep(s) x "
+          f"{lu.data['element_id'].nunique()} elements, "
+          f"crops {np_.crop_codes}")
+    print(lu.data.head(3).to_string(index=False))
+
+    print("\n=== All land use groups combined (FACT applied) ===")
+    from iwfm_io import read_all_land_use_areas, read_preprocessor
+    # sample model files hold fractions (FACT=0.0), so element areas
+    # from the preprocessor grid convert them to real areas
+    pp = read_preprocessor(SAMPLE_MODEL / "Preprocessor"
+                           / "PreProcessor_MAIN.IN")
+    all_lu = read_all_land_use_areas(RZ_DIR / "RootZone_MAIN.dat",
+                                     element_areas=pp)
+    print(f"  columns: {all_lu.columns.tolist()}")
+    print(all_lu.head(3).to_string(index=False))
 
 
 # ── 9. Edit a DataFrame, write the file back ─────────────────────────────────

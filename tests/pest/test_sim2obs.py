@@ -68,6 +68,48 @@ class TestLinear:
         assert out.loc[0, "simulated"] == pytest.approx(102.0)
 
 
+class TestExtrapolate:
+    def test_endpoint_values_within_window(self):
+        from iwfm_io.pest import match_sim_to_obs
+
+        # w1 spans Jan 31 .. Apr 30 (100 .. 103)
+        obs = pd.concat([_obs("w1", "2000-01-10"),    # 21 d before start
+                         _obs("w1", "2000-05-15")],   # 15 d after end
+                        ignore_index=True)
+        out = match_sim_to_obs(_sim_long(), obs, extrapolate="30D")
+        assert out.loc[0, "simulated"] == pytest.approx(100.0)
+        assert out.loc[1, "simulated"] == pytest.approx(103.0)
+
+    def test_beyond_window_stays_nan(self):
+        from iwfm_io.pest import match_sim_to_obs
+
+        out = match_sim_to_obs(_sim_long(), _obs("w1", "2000-06-15"),
+                               extrapolate="30D")
+        assert np.isnan(out.loc[0, "simulated"])
+
+    def test_interior_gap_still_guarded(self):
+        from iwfm_io.pest import match_sim_to_obs
+
+        # remove Feb/Mar: interior 90-day gap; obs past the end
+        sim = _sim_long()
+        sim = sim[~((sim.site == "w1")
+                    & sim.datetime.isin(pd.to_datetime(
+                        ["2000-02-29", "2000-03-31"])))]
+        obs = pd.concat([_obs("w1", "2000-03-01"),    # inside the gap
+                         _obs("w1", "2000-06-15")],   # 46 d past the end
+                        ignore_index=True)
+        out = match_sim_to_obs(sim, obs, max_gap="30D", extrapolate="60D")
+        assert np.isnan(out.loc[0, "simulated"])
+        assert out.loc[1, "simulated"] == pytest.approx(103.0)
+
+    def test_error_with_nearest(self):
+        from iwfm_io.pest import match_sim_to_obs
+
+        with pytest.raises(ValueError, match="extrapolate"):
+            match_sim_to_obs(_sim_long(), _obs("w1", "2000-03-15"),
+                             method="nearest", extrapolate="30D")
+
+
 class TestNearest:
     def test_nearest_value(self):
         from iwfm_io.pest import match_sim_to_obs

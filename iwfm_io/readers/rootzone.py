@@ -17,6 +17,7 @@ import pandas as pd
 from iwfm_io._parser import IWFMFileReader
 from iwfm_io._tokens import split_keyed_line, tokenize_data_line
 from iwfm_io.models.rootzone import (
+    LandUseAreaFile,
     NativeVegFile,
     NonPondedAgFile,
     PondedAgFile,
@@ -475,6 +476,284 @@ def read_urban_main(path: str | Path) -> UrbanFile:
         element_params=element_params,
         initial_conditions=initial_conditions,
     )
+
+
+# ------------------------------------------------------------------
+# Land use area files
+# ------------------------------------------------------------------
+
+#: First token of a land use data row that starts a new timestep block.
+_LU_DATE_RE = r"\d{1,2}/\d{1,2}/\d{4}_\d{1,2}:\d{2}"
+
+
+def read_land_use_area(
+    path: str | Path,
+    columns: list[str] | None = None,
+) -> LandUseAreaFile:
+    """Read an IWFM land use area file (LUFLNP / LUFLP / LUFLU / LUFLNVRV).
+
+    All four root-zone land use area files (non-ponded crops, ponded
+    crops, urban, native/riparian vegetation) share this format.  Each
+    timestep is a block of one row per element; only the block's first
+    row carries the date.  The parse is vectorized — C2VSimFG's 1 GB
+    non-ponded crop area file (3.25M rows x 20 crops) reads in about
+    two minutes (but needs a few GB of RAM).
+
+    Parameters
+    ----------
+    path : str or Path
+    columns : list[str], optional
+        Names for the area columns, e.g. the crop codes from the
+        non-ponded ag main (``NonPondedAgFile.crop_codes``) or
+        :data:`PONDED_CROP_TYPES`.  Defaults to ``area_1..area_n``
+        with n inferred from the data.
+
+    Returns
+    -------
+    LandUseAreaFile
+        ``data`` is long-format: date, element_id, one column per land
+        use.  Dates stay strings (recurring-year data uses year 2500).
+    """
+    import io as _io
+
+    import numpy as np
+
+    reader = IWFMFileReader(path)
+    header = reader.read_header()
+
+    keywords: list[str] = []
+
+    def _kw(keyword: str) -> None:
+        keywords.append(keyword.split()[0] if keyword else "")
+
+    factor, kw = reader.read_keyed_float()
+    _kw(kw)
+    n_steps_update, kw = reader.read_keyed_int()
+    _kw(kw)
+    repeat_freq, kw = reader.read_keyed_int()
+    _kw(kw)
+    dss_file, kw = reader.read_keyed_value()
+    _kw(kw)
+
+    result = LandUseAreaFile(
+        header=header,
+        factor=factor,
+        n_steps_update=n_steps_update,
+        repeat_freq=repeat_freq,
+        dss_file=dss_file,
+        keywords=keywords,
+    )
+
+    from iwfm_io._tokens import is_comment
+    raw = [line for line in reader.skip_to_end() if not is_comment(line)]
+
+    if dss_file:
+        # DSS input: IE  LUTYPE  PATH rows instead of inline data.
+        # Plain split, not tokenize_data_line — DSS pathnames are full
+        # of "/" which the tokenizer would treat as inline comments.
+        rows = []
+        for line in raw:
+            toks = line.split(None, 2)
+            if len(toks) < 3:
+                break
+            rows.append((int(toks[0]), int(toks[1]), toks[2].strip()))
+        if rows:
+            result.dss_pathnames = pd.DataFrame(
+                rows, columns=["element_id", "lu_type", "pathname"])
+        return result
+
+    if not raw:
+        result.data = None
+        return result
+
+    # Vectorized block parse: rows starting with a date open a new
+    # timestep block; the date is split off so every row is numeric,
+    # then dates forward-fill down their block.
+    s = pd.Series(raw).str.lstrip()
+    is_date = s.str.match(_LU_DATE_RE)
+    if not is_date.iloc[0]:
+        raise ValueError(
+            f"{path}: first land use data row does not start with an "
+            "IWFM date")
+    split = s[is_date].str.split(n=1, expand=True)
+    body = s.copy()
+    body[is_date] = split[1]
+    dates = pd.Series(np.nan, index=s.index, dtype=object)
+    dates[is_date] = split[0]
+
+    df = pd.read_csv(_io.StringIO("\n".join(body)), sep=r"\s+",
+                     header=None)
+    n_areas = len(df.columns) - 1
+    if columns is not None:
+        if len(columns) != n_areas:
+            raise ValueError(
+                f"{path}: {len(columns)} column names given but the "
+                f"file has {n_areas} area columns")
+        names = list(columns)
+    else:
+        names = [f"area_{i + 1}" for i in range(n_areas)]
+    df.columns = ["element_id"] + names
+    df["element_id"] = df["element_id"].astype(int)
+    df[names] = df[names].astype(float)
+    df.insert(0, "date", dates.ffill().to_numpy())
+
+    result.data = df
+    return result
+
+
+def _element_areas_from_preprocessor(pp) -> "pd.Series":
+    """Element areas (shoelace) from preprocessor nodes + elements.
+
+    Pure numpy — no geopandas needed.  ``node4 == 0`` (triangles) is
+    handled by repeating the first vertex, which contributes zero area.
+    """
+    import numpy as np
+
+    nodes = pp.nodes
+    elements = pp.elements
+    xs = pd.Series(nodes["x"].to_numpy(float),
+                   index=nodes["node_id"].to_numpy(int))
+    ys = pd.Series(nodes["y"].to_numpy(float),
+                   index=nodes["node_id"].to_numpy(int))
+
+    conf = elements[["node1", "node2", "node3", "node4"]].to_numpy(int)
+    conf[:, 3] = np.where(conf[:, 3] == 0, conf[:, 0], conf[:, 3])
+    x = xs.reindex(conf.ravel()).to_numpy().reshape(conf.shape)
+    y = ys.reindex(conf.ravel()).to_numpy().reshape(conf.shape)
+    xn = np.roll(x, -1, axis=1)
+    yn = np.roll(y, -1, axis=1)
+    area = 0.5 * np.abs((x * yn - xn * y).sum(axis=1))
+    return pd.Series(area, index=elements["element_id"].to_numpy(int),
+                     name="area")
+
+
+def read_all_land_use_areas(
+    rootzone_main,
+    element_areas=None,
+) -> pd.DataFrame:
+    """Read all land use area files of a model into one DataFrame.
+
+    Walks the root-zone sub-component mains (non-ponded ag, ponded ag,
+    urban, native/riparian vegetation), reads each one's land use area
+    file, converts every column to **areas in the model's plane units**
+    (e.g. square feet when node coordinates are in feet), and merges
+    them on ``date`` + ``element_id``.
+
+    Each file's conversion factor is applied: files with a non-zero
+    FACT have their values multiplied by it.  Files with FACT = 0.0
+    hold *fractions of the element area*: when ``element_areas`` is
+    given they are multiplied by it (becoming areas); without it the
+    fractions are kept as-is, and a warning is raised only if the
+    result would mix fractions with area columns from non-zero-FACT
+    files.
+
+    Parameters
+    ----------
+    rootzone_main : RootZoneMain, str, or Path
+        A parsed :class:`~iwfm_io.models.rootzone.RootZoneMain` or the
+        path to the root zone main file.
+    element_areas : optional
+        Element areas in model plane units, used to convert
+        fraction-based files (FACT = 0.0) to areas.  Accepts a
+        ``PreprocessorMain`` (areas are computed from its
+        nodes/elements), a ``pd.Series`` indexed by element id, or a
+        ``{element_id: area}`` dict.  When omitted, fraction-based
+        files keep their fractions.
+
+    Returns
+    -------
+    pd.DataFrame
+        Long-format: ``date``, ``element_id``, then one area column
+        per land use — non-ponded crops named by their crop codes,
+        ponded crops by :data:`PONDED_CROP_TYPES`, plus ``urban``,
+        ``native`` and ``riparian``.  A duplicate name is prefixed
+        with its group.  Files whose dates differ (e.g. recurring-year
+        vs full time series) merge outer, leaving NaN where a file has
+        no block for a date.
+    """
+    from iwfm_io.models.rootzone import RootZoneMain
+
+    if not isinstance(rootzone_main, RootZoneMain):
+        rootzone_main = read_rootzone_main(rootzone_main)
+
+    if element_areas is not None and not isinstance(
+            element_areas, (dict, pd.Series)):
+        element_areas = _element_areas_from_preprocessor(element_areas)
+    if isinstance(element_areas, dict):
+        element_areas = pd.Series(element_areas)
+
+    # (role, group label, area-column names — None = crop codes from
+    # the sub-main)
+    groups = [
+        ("nonponded_ag", "nonponded", None),
+        ("ponded_ag", "ponded", list(PONDED_CROP_TYPES)),
+        ("urban", "urban", ["urban"]),
+        ("native_veg", "native_veg", ["native", "riparian"]),
+    ]
+
+    merged: pd.DataFrame | None = None
+    used: set[str] = set()
+    kept_fractions = False
+    scaled_areas = False
+    for role, label, names in groups:
+        main_path = rootzone_main.file_paths.get(role)
+        if not main_path:
+            continue
+        if role == "nonponded_ag":
+            sub = read_nonponded_ag_main(main_path)
+            names = list(sub.crop_codes)
+            area_path = sub.file_paths.get("land_use_area")
+        elif role == "ponded_ag":
+            area_path = read_ponded_ag_main(main_path).file_paths.get(
+                "land_use_area")
+        elif role == "urban":
+            area_path = read_urban_main(main_path).file_paths.get(
+                "land_use_area")
+        else:
+            area_path = read_native_veg_main(main_path).file_paths.get(
+                "land_use_area")
+        if not area_path:
+            continue
+
+        names = [f"{label}_{n}" if n in used else n for n in names]
+        used.update(names)
+        lu = read_land_use_area(area_path, columns=names)
+        df = lu.data
+        if df is None:
+            raise ValueError(
+                f"{area_path}: DSS-based land use data (DSSFL set) "
+                "cannot be combined — read the DSS file directly")
+
+        if lu.factor == 0.0:
+            # fractions of the element area
+            if element_areas is None:
+                kept_fractions = True  # leave the fractions as-is
+            else:
+                scale = df["element_id"].map(element_areas)
+                if scale.isna().any():
+                    missing = df.loc[scale.isna(), "element_id"].unique()
+                    raise ValueError(
+                        f"element_areas is missing element ids "
+                        f"{missing[:5].tolist()}...")
+                df[names] = df[names].mul(scale.to_numpy(), axis=0)
+        else:
+            df[names] = df[names] * lu.factor
+            scaled_areas = True
+
+        merged = df if merged is None else merged.merge(
+            df, on=["date", "element_id"], how="outer")
+
+    if merged is None:
+        raise ValueError(
+            "root zone main references no land use area files")
+    if kept_fractions and scaled_areas:
+        import warnings
+        warnings.warn(
+            "combined land use table mixes units: some files have a "
+            "non-zero FACT (columns are areas) while others hold "
+            "fractions of the element area and no element_areas= was "
+            "given to convert them", stacklevel=2)
+    return merged
 
 
 # ------------------------------------------------------------------

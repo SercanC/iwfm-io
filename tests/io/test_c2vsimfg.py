@@ -442,3 +442,24 @@ class TestResultsHDF:
         t = pd.to_numeric(txt_sr1["col_1"], errors="coerce").to_numpy()
         assert len(h) == len(t) == 576
         np.testing.assert_allclose(h, t, rtol=5e-4, atol=0.1)
+
+
+class TestLandUseArea:
+    """The urban area file: 100 annual timesteps x 32,537 elements."""
+
+    AREA = C2VSIMFG / "Simulation" / "RootZone" / "C2VSimFG_Urban_Area.dat"
+
+    def test_read_urban_area(self):
+        from iwfm_io import read_land_use_area
+        lu = read_land_use_area(self.AREA)
+        assert lu.factor == 43560.0  # acres -> sq.ft
+        assert lu.n_land_uses == 1
+        df = lu.data
+        assert df["date"].nunique() == 100
+        assert df["date"].iloc[0] == "09/30/1922_24:00"
+        assert df["date"].iloc[-1] == "09/30/2021_24:00"
+        assert len(df) == 100 * 32537
+        # every timestep block covers all elements in order
+        assert df["element_id"].iloc[0] == 1
+        assert df["element_id"].iloc[32536] == 32537
+        assert df["element_id"].iloc[32537] == 1

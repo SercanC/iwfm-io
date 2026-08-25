@@ -47,7 +47,7 @@ def _to_wide(sim) -> "pd.DataFrame":
 
 
 def match_sim_to_obs(sim, obs, method: str = "linear",
-                     max_gap=None) -> "pd.DataFrame":
+                     max_gap=None, extrapolate=None) -> "pd.DataFrame":
     """Interpolate simulated series to observation timestamps.
 
     Parameters
@@ -60,13 +60,21 @@ def match_sim_to_obs(sim, obs, method: str = "linear",
         :func:`~iwfm_io.pest.smp.read_smp`).
     method : {"linear", "nearest"}
         ``linear`` interpolates in time between the bracketing simulated
-        values (never extrapolates — observations outside the simulated
-        period get NaN). ``nearest`` takes the closest simulated value.
+        values (never extrapolates unless ``extrapolate`` permits —
+        observations outside the simulated period get NaN). ``nearest``
+        takes the closest simulated value.
     max_gap : str, Timedelta, or None
         Data-gap guard. For ``linear``, both bracketing simulated points
         must lie within ``max_gap`` of the observation time; for
         ``nearest``, the closest point must. Violations yield NaN
         rather than silently interpolating across a gap.
+    extrapolate : str, Timedelta, or None
+        Endpoint-extrapolation window for ``linear`` (IWFM2OBS's
+        threshold behavior): observations outside the simulated period
+        but within ``extrapolate`` of its first/last point take that
+        endpoint's value; farther out stays NaN. ``nearest`` already
+        serves endpoint values (bound it with ``max_gap``), so
+        combining it with ``extrapolate`` is an error.
 
     Returns
     -------
@@ -87,6 +95,13 @@ def match_sim_to_obs(sim, obs, method: str = "linear",
     gap_ns = None
     if max_gap is not None:
         gap_ns = pd.Timedelta(max_gap).value
+    extrap_ns = None
+    if extrapolate is not None:
+        if method == "nearest":
+            raise ValueError(
+                "extrapolate applies to method='linear' only; 'nearest' "
+                "already serves endpoint values (bound it with max_gap)")
+        extrap_ns = pd.Timedelta(extrapolate).value
 
     wide = _to_wide(sim)
     obs = obs.copy()
@@ -136,6 +151,13 @@ def match_sim_to_obs(sim, obs, method: str = "linear",
                     d_hi = t_sim[hi] - t_obs
                     bad = ((d_lo > gap_ns) | (d_hi > gap_ns)) & ~exact
                     simulated[bad] = np.nan
+                if extrap_ns is not None:
+                    before = (t_obs < t_sim[0]) \
+                        & (t_sim[0] - t_obs <= extrap_ns)
+                    after = (t_obs > t_sim[-1]) \
+                        & (t_obs - t_sim[-1] <= extrap_ns)
+                    simulated[before] = v_sim[0]
+                    simulated[after] = v_sim[-1]
         pieces.append(pd.DataFrame({
             "site": site,
             "datetime": group["datetime"].values,

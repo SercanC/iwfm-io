@@ -13,6 +13,12 @@ line, whitespace-delimited::
 ``iwfm_io.collect_hydrographs``); :func:`write_smp` regenerates a file
 from it, round-trip safe.
 
+Two DWR-toolchain extensions are supported: an optional trailing ``x``
+field flags a record as excluded (returned as a boolean ``excluded``
+column and written back), and ``fixed_width=True`` reads the IWFM2OBS
+fixed-column layout (site 1–25, date 26–37, time 38–49, value 50–60,
+flag 61+) — required when site names contain spaces.
+
 Date convention: the PEST standard is day-first (``dd/mm/yyyy``), but
 US-locale toolchains (including DWR workflows) commonly use
 month-first (``mm/dd/yyyy``). :func:`read_smp` auto-detects when the data
@@ -55,7 +61,24 @@ def _detect_date_format(dates: "pd.Series", path) -> str:
     )
 
 
-def read_smp(path, date_format: Optional[str] = None) -> "pd.DataFrame":
+def _read_fixed_width(path) -> "pd.DataFrame":
+    """Read the IWFM2OBS fixed-column SMP layout into string columns."""
+    rows = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for raw in f:
+            line = raw.rstrip("\r\n")
+            if not line.strip():
+                continue
+            rows.append((line[:25].strip(), line[25:37].strip(),
+                         line[37:49].strip(), line[49:60].strip(),
+                         line[60:].strip()))
+    df = pd.DataFrame(rows, columns=["site", "date", "time", "value",
+                                     "flag"])
+    return df.mask(df == "")  # empty fields -> NaN, like the split reader
+
+
+def read_smp(path, date_format: Optional[str] = None,
+             fixed_width: bool = False) -> "pd.DataFrame":
     """Read a PEST SMP bore-sample file.
 
     Parameters
@@ -64,23 +87,40 @@ def read_smp(path, date_format: Optional[str] = None) -> "pd.DataFrame":
     date_format : {"dd/mm/yyyy", "mm/dd/yyyy"}, optional
         Date convention. Default auto-detects from the data and raises
         if every component is <= 12 (ambiguous).
+    fixed_width : bool, default False
+        Read by the IWFM2OBS column layout (site 1–25, date 26–37,
+        time 38–49, value 50–60, flag 61+) instead of splitting on
+        whitespace. Required when site names contain spaces.
 
     Returns
     -------
     pandas.DataFrame
-        Long-form ``site, datetime, value``. Non-numeric values (e.g.
-        ``dry`` markers) become NaN with a logged warning.
+        Long-form ``site, datetime, value, excluded``. Non-numeric
+        values (e.g. ``dry`` markers) become NaN with a logged warning;
+        ``excluded`` is True for records carrying the trailing ``x``
+        flag.
     """
     path = Path(path)
-    df = pd.read_csv(
-        path, sep=r"\s+", header=None, dtype=str, comment=None,
-        names=["site", "date", "time", "value"],
-    )
+    if fixed_width:
+        df = _read_fixed_width(path)
+    else:
+        df = pd.read_csv(
+            path, sep=r"\s+", header=None, dtype=str, comment=None,
+            names=["site", "date", "time", "value", "flag"],
+        )
     missing = df[["site", "date", "time"]].isna().any(axis=1)
     if missing.any():
         raise ValueError(
             f"{path}: {int(missing.sum())} malformed line(s) with fewer "
             f"than 4 fields (first at data line {int(missing.idxmax()) + 1})"
+        )
+    flag = df["flag"].fillna("").str.strip()
+    bad_flag = ~flag.str.casefold().isin(("", "x"))
+    if bad_flag.any():
+        raise ValueError(
+            f"{path}: {int(bad_flag.sum())} record(s) with an unrecognized "
+            f"trailing field (expected the 'x' exclusion flag), e.g. "
+            f"{sorted(set(flag[bad_flag]))[:3]}"
         )
     if date_format is None:
         date_format = _detect_date_format(df["date"], path)
@@ -101,6 +141,7 @@ def read_smp(path, date_format: Optional[str] = None) -> "pd.DataFrame":
         "site": df["site"].str.strip(),
         "datetime": when,
         "value": values,
+        "excluded": flag.str.casefold() == "x",
     })
 
 
@@ -112,7 +153,9 @@ def write_smp(df, path, date_format: str = "dd/mm/yyyy",
     Parameters
     ----------
     df : pandas.DataFrame
-        Long-form ``site, datetime, value`` (extra columns ignored).
+        Long-form ``site, datetime, value``; a boolean ``excluded``
+        column writes the trailing ``x`` flag on flagged records.
+        Other extra columns are ignored.
     path : str or Path
     date_format : {"dd/mm/yyyy", "mm/dd/yyyy"}, default day-first (PEST
         standard) — use ``"mm/dd/yyyy"`` for DWR/US-locale toolchains.
@@ -138,6 +181,8 @@ def write_smp(df, path, date_format: str = "dd/mm/yyyy",
         "site": df["site"].astype(str).str.strip(),
         "datetime": pd.to_datetime(df["datetime"]),
         "value": pd.to_numeric(df["value"]),
+        "excluded": (df["excluded"].fillna(False).astype(bool).values
+                     if "excluded" in df.columns else False),
     })
     bad_site = out["site"].str.contains(r"\s") | (out["site"] == "")
     if bad_site.any():
@@ -165,6 +210,8 @@ def write_smp(df, path, date_format: str = "dd/mm/yyyy",
     stamp = out["datetime"].dt.strftime(_DATE_FORMATS[date_format] + " %H:%M:%S")
     lines = [
         f"{site:<{width}}  {when}  {float_format % value}"
-        for site, when, value in zip(out["site"], stamp, out["value"])
+        + ("  x" if excluded else "")
+        for site, when, value, excluded in zip(
+            out["site"], stamp, out["value"], out["excluded"])
     ]
     replace_file_text(Path(path), "\n".join(lines) + "\n")

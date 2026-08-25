@@ -130,6 +130,8 @@ from iwfm_io.readers.rootzone import (
     read_ponded_ag_main,
     read_urban_main,
     read_native_veg_main,
+    read_land_use_area,
+    read_all_land_use_areas,
 )
 
 # Misc readers
@@ -210,6 +212,7 @@ from iwfm_io.writers.rootzone import (
     write_ponded_ag_main,
     write_urban_main,
     write_native_veg_main,
+    write_land_use_area,
 )
 
 # Misc writers
@@ -374,6 +377,8 @@ __all__ = [
     "read_ponded_ag_main",
     "read_urban_main",
     "read_native_veg_main",
+    "read_land_use_area",
+    "read_all_land_use_areas",
     # Misc readers
     "read_swshed",
     "read_unsatzone",
@@ -432,6 +437,7 @@ __all__ = [
     "write_ponded_ag_main",
     "write_urban_main",
     "write_native_veg_main",
+    "write_land_use_area",
     # Misc writers
     "write_swshed",
     "write_unsatzone",

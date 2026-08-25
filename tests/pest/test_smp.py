@@ -23,6 +23,7 @@ class TestRoundTrip:
         back = read_smp(f)
         expected = _sample_df().sort_values(
             ["site", "datetime"]).reset_index(drop=True)
+        expected["excluded"] = False
         pd.testing.assert_frame_equal(back, expected)
 
     def test_round_trip_mm_dd_yyyy(self, tmp_path):
@@ -140,3 +141,75 @@ class TestValidation:
         f.write_text("w1  31/10/2000  00:00:00  1.0\nw2  31/10/2000\n")
         with pytest.raises(ValueError, match="malformed"):
             read_smp(f)
+
+
+class TestExclusionFlag:
+    def test_flag_read(self, tmp_path):
+        from iwfm_io.pest import read_smp
+
+        f = tmp_path / "a.smp"
+        f.write_text("w1  31/10/2000  00:00:00  1.0  x\n"
+                     "w1  30/11/2000  00:00:00  2.0\n"
+                     "w1  31/12/2000  00:00:00  3.0  X\n")
+        df = read_smp(f)
+        assert df["excluded"].tolist() == [True, False, True]
+        assert df["value"].tolist() == [1.0, 2.0, 3.0]
+
+    def test_flag_round_trip(self, tmp_path):
+        from iwfm_io.pest import read_smp, write_smp
+
+        df = _sample_df()
+        df["excluded"] = [True, False, False]
+        f = tmp_path / "obs.smp"
+        write_smp(df, f, sort=False)
+        first = f.read_text().splitlines()[0]
+        assert first.split()[-1] == "x"
+        back = read_smp(f)
+        assert back["excluded"].tolist() == [True, False, False]
+        assert back["value"].tolist() == df["value"].tolist()
+
+    def test_unknown_trailing_field_raises(self, tmp_path):
+        from iwfm_io.pest import read_smp
+
+        f = tmp_path / "a.smp"
+        f.write_text("w1  31/10/2000  00:00:00  1.0  q\n")
+        with pytest.raises(ValueError, match="trailing"):
+            read_smp(f)
+
+
+class TestFixedWidth:
+    @staticmethod
+    def _line(site, date, time, value, flag=""):
+        return f"{site:<25}{date:<12}{time:<12}{value:>11.3f}{flag}\n"
+
+    def test_site_names_with_spaces(self, tmp_path):
+        from iwfm_io.pest import read_smp
+
+        f = tmp_path / "a.smp"
+        f.write_text(
+            self._line("STATE WELL 12N03E22Q001M", "31/10/2000",
+                       "00:00:00", 386.69)
+            + self._line("STATE WELL 12N03E22Q001M", "30/11/2000",
+                         "00:00:00", 385.59, "x"))
+        df = read_smp(f, fixed_width=True)
+        assert df["site"].tolist() == ["STATE WELL 12N03E22Q001M"] * 2
+        assert df["value"].tolist() == [386.69, 385.59]
+        assert df["excluded"].tolist() == [False, True]
+        assert df["datetime"].iloc[0] == pd.Timestamp("2000-10-31")
+
+    def test_month_first_explicit(self, tmp_path):
+        from iwfm_io.pest import read_smp
+
+        f = tmp_path / "a.smp"
+        f.write_text(self._line("w1", "03/04/2000", "12:30:00", 1.0))
+        df = read_smp(f, fixed_width=True, date_format="mm/dd/yyyy")
+        assert df["datetime"].iloc[0] == pd.Timestamp("2000-03-04 12:30")
+
+    def test_missing_field_raises(self, tmp_path):
+        from iwfm_io.pest import read_smp
+
+        f = tmp_path / "a.smp"
+        f.write_text(self._line("w1", "31/10/2000", "00:00:00", 1.0)
+                     + f"{'w2':<25}{'31/10/2000':<12}\n")
+        with pytest.raises(ValueError, match="malformed"):
+            read_smp(f, fixed_width=True)

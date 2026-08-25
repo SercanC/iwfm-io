@@ -12,6 +12,7 @@ from pathlib import Path
 
 from iwfm_io._writer import IWFMFileWriter
 from iwfm_io.models.rootzone import (
+    LandUseAreaFile,
     NativeVegFile,
     NonPondedAgFile,
     PondedAgFile,
@@ -299,6 +300,72 @@ def write_urban_main(
 
     _write_element_table(w, ur.element_params, "Urban element parameters")
     _write_element_table(w, ur.initial_conditions, "Initial conditions")
+    w.flush()
+
+
+# ------------------------------------------------------------------
+# Land use area files
+# ------------------------------------------------------------------
+
+def write_land_use_area(lu: LandUseAreaFile, path: str | Path) -> None:
+    """Write an IWFM land use area file (LUFLNP / LUFLP / LUFLU / LUFLNVRV).
+
+    Regenerates the shared land use area layout: the 4-parameter spec
+    block, then per-timestep blocks of one row per element where only
+    the block's first row carries the date.  The row formatting is
+    vectorized so C2VSimFG-sized files (millions of rows) write in
+    well under a minute.
+
+    Parameters
+    ----------
+    lu : LandUseAreaFile
+    path : str or Path
+    """
+    import numpy as np
+
+    w = IWFMFileWriter(path)
+    w.write_header(lu.header)
+
+    kw = lu.keywords if len(lu.keywords) == 4 else [
+        "FACTLN", "NSPLN", "NFQLN", "DSSFL"]
+    w.write_keyed_value(lu.factor, kw[0])
+    w.write_keyed_value(lu.n_steps_update, kw[1])
+    w.write_keyed_value(lu.repeat_freq, kw[2])
+    w.write_keyed_value(lu.dss_file, kw[3])
+    # Same load-bearing terminating comment as the 5-parameter
+    # time-series spec block: without it IWFM consumes the first data
+    # row while resolving the (possibly blank) DSS filename.
+    w.write_comment("C  end of specification")
+
+    if lu.dss_file and lu.dss_pathnames is not None:
+        for _, row in lu.dss_pathnames.iterrows():
+            w.write_data_line(
+                [int(row["element_id"]), int(row["lu_type"]),
+                 str(row["pathname"])],
+                widths=[8, 8, 4])
+        w.flush()
+        return
+
+    df = lu.data
+    if df is not None and len(df):
+        value_cols = [c for c in df.columns
+                      if c not in ("date", "element_id")]
+        dates = df["date"].astype(str).to_numpy()
+        # A row opens a new timestep block when its date differs from
+        # the previous row's; only those rows carry the date.
+        new_block = np.empty(len(df), dtype=bool)
+        new_block[0] = True
+        new_block[1:] = dates[1:] != dates[:-1]
+        date_field = np.where(
+            new_block, np.char.rjust(dates.astype("U19"), 19), " " * 19)
+        elem_field = np.char.mod("%7d",
+                                 df["element_id"].to_numpy(int))
+        vals = df[value_cols].to_numpy(float)
+        lines = np.char.add(date_field, elem_field)
+        for j in range(vals.shape[1]):
+            lines = np.char.add(lines, np.char.mod("%15.6g", vals[:, j]))
+        w.lines.extend(lines.tolist())
+
     w.flush()
 
 

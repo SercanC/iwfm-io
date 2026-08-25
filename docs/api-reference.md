@@ -132,6 +132,8 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 | `read_ponded_ag_main(path)` | Ponded crops main (PFL) — rice/refuge parameters and pointer tables |
 | `read_urban_main(path)` | Urban main (URBFL) — per-element urban water use parameters |
 | `read_native_veg_main(path)` | Native/riparian vegetation main (NVRVFL) |
+| `read_land_use_area(path, columns=None)` | Land use area file (LUFLNP/LUFLP/LUFLU/LUFLNVRV — all four share one format) → long DataFrame `date, element_id, area_1..n`; pass `columns=` to name the area columns with crop codes. Vectorized: C2VSimFG's 1 GB non-ponded file (3.25M rows × 20 crops) reads in ~2 min |
+| `read_all_land_use_areas(rootzone_main, element_areas=None)` | All four land use area files combined into one DataFrame (`date, element_id`, crop-code columns + `urban`/`native`/`riparian`), each file's FACT applied so every column is an **area in model plane units**. Fraction-based files (FACT=0.0) are converted with `element_areas=` — pass the parsed `PreprocessorMain` (areas computed from the grid), a Series, or a dict; omit it and the fractions are kept as-is (a warning fires only if that mixes fractions with area columns) |
 | `read_swshed(path)` | `SWShed.dat` — watershed definitions, root zone/aquifer parameters, initial conditions |
 | `read_unsatzone(path)` | `UnsatZone.dat` — per-element parameters and initial moisture |
 
@@ -173,7 +175,7 @@ write_gw_main(gw, "GW_MAIN_new.dat", base_dir=sim_dir)
 
 Component-main writers (`write_gw_main`, `write_subsidence_file`, `write_stream_main`, `write_rootzone_main`, `write_bc_main`, and the four root-zone sub-main writers) accept `base_dir` — pass the simulation working directory (the folder of the simulation main file) so referenced paths are written relative to it; IWFM does not accept absolute paths.
 
-Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_supply_adjust`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_spec_flow_bc`, `write_general_head_bc`, `write_constrained_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_well_spec`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_nonponded_ag_main`, `write_ponded_ag_main`, `write_urban_main`, `write_native_veg_main`, `write_swshed`, `write_unsatzone`.
+Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_supply_adjust`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_spec_flow_bc`, `write_general_head_bc`, `write_constrained_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_well_spec`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_nonponded_ag_main`, `write_ponded_ag_main`, `write_urban_main`, `write_native_veg_main`, `write_land_use_area`, `write_swshed`, `write_unsatzone`.
 
 **Every reader now has a mirror writer** — the reader/writer pairs cover the complete input tree, and the exe round-trip test regenerates all of them (root-zone sub-mains and BC files included) and reproduces baseline heads exactly.
 
@@ -379,8 +381,8 @@ standard long-form columns `site, datetime, value` (same as
 
 | Function | Purpose |
 |---|---|
-| `read_smp(path, date_format=None)` | Read to a long-form frame. Auto-detects `dd/mm/yyyy` vs `mm/dd/yyyy` from the data; refuses to guess when ambiguous (pass `date_format` explicitly) |
-| `write_smp(df, path, date_format="dd/mm/yyyy", max_site_len=10, sort=True)` | Write atomically; validates site names (10-char classic-PEST limit, no whitespace), drops NaN values with a warning, sorts site-then-time |
+| `read_smp(path, date_format=None, fixed_width=False)` | Read to a long-form frame (+ boolean `excluded` from the optional trailing `x` flag). Auto-detects `dd/mm/yyyy` vs `mm/dd/yyyy` from the data; refuses to guess when ambiguous (pass `date_format` explicitly). `fixed_width=True` reads the IWFM2OBS column layout (site 1–25, date 26–37, time 38–49, value 50–60, flag 61+) — required when site names contain spaces |
+| `write_smp(df, path, date_format="dd/mm/yyyy", max_site_len=10, sort=True)` | Write atomically; validates site names (10-char classic-PEST limit, no whitespace), drops NaN values with a warning, sorts site-then-time; an `excluded` column writes the trailing `x` flag |
 
 ### Sim-to-obs matching (`iwfm_io/pest/sim2obs.py`)
 
@@ -392,7 +394,7 @@ by time interpolation. Long-form `site, datetime, value` in (from `read_smp`,
 
 | Function | Purpose |
 |---|---|
-| `match_sim_to_obs(sim, obs, method="linear", max_gap=None)` | Interpolate sim to obs timestamps. `linear` never extrapolates; `max_gap` refuses to bridge data gaps (NaN instead); `nearest` also supported. Sites without simulation are dropped with a warning |
+| `match_sim_to_obs(sim, obs, method="linear", max_gap=None, extrapolate=None)` | Interpolate sim to obs timestamps. `linear` never extrapolates unless `extrapolate` sets an endpoint window (IWFM2OBS threshold behavior: obs within it take the first/last simulated value, farther out stays NaN); `max_gap` refuses to bridge data gaps (NaN instead); `nearest` also supported. Sites without simulation are dropped with a warning |
 | `resample_month_end(df, how="mean", iwfm_convention=True)` | Month-end aggregation honoring IWFM's 24:00 end-of-timestep stamps (a `10/31 24:00` value buckets into October, not November) |
 
 ### Budget observations (`iwfm_io/pest/budget_obs.py`)
@@ -419,6 +421,34 @@ setup's successive-change observations exactly (106k values, bit-for-bit).
 | `vertical_head_difference(df, pairs)` | `shallow − deep` at multi-completion well pairs (positive = downward gradient); pairs as tuples or `{label: (a, b)}` |
 | `accretion_depletion(df, pairs)` | `downstream − upstream` gauge flow difference (positive = stream gains) |
 | `long_term_stats(df, stat="mean", min_n=1)` | One whole-record statistic per site, dateless names |
+
+### Typical hydrographs (`iwfm_io/pest/typhyd.py`)
+
+CalcTypHyd equivalent: condense many noisy well records into one
+cluster-average "typical hydrograph" per well cluster — the smooth,
+representative calibration targets of the C2VSim workflow. Per cluster:
+period-year slot averages per well → per-well mean *of the slot averages* →
+de-meaned anomalies → membership-weighted average, stamped at each period's
+representative date. Pure transform on long-form `site, datetime, value`:
+the identical call on observed and simulated series yields
+point-for-point-comparable outputs (each side de-meaned by its own well
+means, so the comparison targets shape/seasonal dynamics, not absolute
+level). Periods spanning New Year bin by nearest representative date
+(December joins the following January's winter slot).
+
+| Function / class | Purpose |
+|---|---|
+| `typical_hydrographs(df, clusters, periods=None, start=None, end=None, min_obs=1, demean=True)` | → `TypicalHydrographs` with `.series` (long-form, `site` = cluster label, + `period`, `n_wells`), `.well_means`, `.wells`. `clusters`: site→cluster mapping/Series (crisp), long `site/well_id, cluster[, weight]` frame, or wide fuzzy-weight frame (site index × cluster columns). Respects `read_smp`'s `excluded` column |
+| `Period(name, months, rep)` | One averaging period: month set + `"MM/DD"` representative date (day ≤ 28) |
+| `PERIODS_QUARTERLY` / `PERIODS_SPRING_FALL` | Presets: the classic four seasons; the CASGEM-style spring-high/fall-low pair |
+
+```python
+from iwfm_io.pest import typical_hydrographs, match_sim_to_obs
+
+typ_obs = typical_hydrographs(obs, clusters)     # site, datetime, value, ...
+typ_sim = typical_hydrographs(sim, clusters)
+paired = match_sim_to_obs(typ_sim.series, typ_obs.series, method="nearest")
+```
 
 ### Wells & GWL metadata (`iwfm_io/wells.py` — core)
 

@@ -46,6 +46,7 @@ def test_regenerated_inputs_reproduce_baseline_heads(tmp_path):
         read_urban_main, write_urban_main,
         read_native_veg_main, write_native_veg_main,
         read_et, write_et,
+        read_land_use_area, write_land_use_area,
         read_precip, write_precip,
         read_stream_inflow, write_stream_inflow,
         read_ts_pumping, write_ts_pumping,
@@ -95,6 +96,15 @@ def test_regenerated_inputs_reproduce_baseline_heads(tmp_path):
          write_ts_pumping, False),
         (sim / "GW" / "BoundTSD.dat", read_boundary_ts,
          write_boundary_ts, False),
+        # land use area files (shared format, one per land use type)
+        (rz / "NonPondedAg" / "CropAreas.dat", read_land_use_area,
+         write_land_use_area, False),
+        (rz / "PondedAg" / "RiceAreas.dat", read_land_use_area,
+         write_land_use_area, False),
+        (rz / "Urban" / "UrbanAreas.dat", read_land_use_area,
+         write_land_use_area, False),
+        (rz / "NativeVeg" / "NativeVegArea.dat", read_land_use_area,
+         write_land_use_area, False),
     ]
     for path, rd, wr, takes_base in pairs:
         obj = rd(path)
