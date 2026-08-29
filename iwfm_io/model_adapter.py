@@ -1162,6 +1162,145 @@ class IOModelAdapter:
                           cell_data=cell_data, z_scale=z_scale,
                           layers=layers)
 
+    # -- Cross-file relationships ---------------------------------------
+    #
+    # IWFM files reference each other: pointer columns hold 1-based
+    # column numbers into role-referenced time-series files, ID columns
+    # reference the grid tables, and (type, dest) pairs pick a
+    # destination.  The registry in ``iwfm_io._links`` (internal) knows
+    # every such relationship; these methods surface it.
+
+    def component(self, name):
+        """A parsed component/sub-file by registry name, lazily read
+        and cached (e.g. ``"rootzone"``, ``"nonponded_ag"``,
+        ``"well_spec"``, ``"bc_main"``).  Returns None when the model
+        does not reference it."""
+        from iwfm_io._links import load_component
+        return load_component(self, name)
+
+    def timeseries(self, role):
+        """The parsed time-series file for a pointer-target role,
+        lazily read and cached (e.g. ``"et"``, ``"irig_period"``,
+        ``"ts_pumping"``, ``"return_flow"``).  Returns None when the
+        model does not reference it."""
+        from iwfm_io._links import load_timeseries
+        return load_timeseries(self, role)
+
+    def series(self, role, column, raw=False, expand=True):
+        """One referenced time-series column as a ``date``/``value``
+        DataFrame — the thing a pointer column points at.
+
+        The file's conversion factor is applied (pass ``raw=True`` for
+        file-native values) and recurring-year data (sentinel years
+        2500/4000) is expanded onto the simulation period (pass
+        ``expand=False`` for the raw pattern).  Values are step
+        functions: each applies from its stamp until the next.
+
+        Example: the ET series driving crop TO at element 12::
+
+            col = m.component("nonponded_ag").et_columns
+            n = col.loc[col.element_id == 12, "TO"].iloc[0]
+            et = m.series("et", n)
+        """
+        from iwfm_io._links import series
+        return series(self, role, column, raw=raw, expand=expand)
+
+    def column_usage(self, role):
+        """Reverse lookup: who references each column of a time-series
+        file.  Long DataFrame (column, source, table, pointer_column,
+        n_refs, examples) — the way to answer "what is ``col_5`` of
+        the ET file?"."""
+        from iwfm_io._links import column_usage
+        return column_usage(self, role)
+
+    def validate_references(self):
+        """Validate every cross-file reference: pointer columns within
+        the target file's column count, entity IDs present in the grid
+        tables, (type, dest) pairs valid under their code tables.
+        Returns a findings DataFrame (empty = everything resolves)."""
+        from iwfm_io._links import validate_references
+        return validate_references(self)
+
+    # -- Convenience accessors ------------------------------------------
+    #
+    # One-call answers to common modeling questions, built on series():
+    # the consumer row is looked up (honoring the element_id=0
+    # "all elements" sentinel), per-consumer share fractions are
+    # applied where they exist, factors are applied (raw=True for
+    # file-native values), and recurring-year data is expanded onto
+    # the simulation period (expand=False for the raw pattern).
+
+    def crop_series(self, kind, crop, element=None, raw=False,
+                    expand=True):
+        """A land-use driver series for one crop/land-use at an element.
+
+        *crop* is a non-ponded crop code (``"TO"``), a ponded type
+        (``"rice_fl"``, ``"rice_nfl"``, ``"rice_ndc"``, ``"refuge_sl"``,
+        ``"refuge_pr"``), or ``"native"`` / ``"riparian"``.  *kind* is
+        ``"et"``, ``"irrigation_period"``, ``"supply_requirement"``,
+        ``"min_moisture"``, ``"target_moisture"``, ``"return_flow"``,
+        ``"reuse"``, ``"min_perc"`` (non-ponded) or ``"ponding_depth"``
+        (ponded).  Example::
+
+            m.crop_series("et", "TO", element=12)
+            m.crop_series("irrigation_period", "rice_fl")
+        """
+        from iwfm_io._links import crop_series
+        return crop_series(self, kind, crop, element=element, raw=raw,
+                           expand=expand)
+
+    def urban_series(self, kind, element=None, raw=False, expand=True):
+        """An urban driver series at an element: ``"population"``,
+        ``"per_capita_use"``, ``"water_use_specs"``, ``"et"``,
+        ``"return_flow"``, or ``"reuse"``."""
+        from iwfm_io._links import urban_series
+        return urban_series(self, kind, element=element, raw=raw,
+                            expand=expand)
+
+    def well_pumping(self, well_id, kind="pumping", scaled=True,
+                     raw=False, expand=True):
+        """A well's pumping series from the time-series pumping file —
+        its ICOLWL column times its FRACWL share (``scaled=False`` for
+        the unscaled column; ``kind="max"`` for the maximum-pumping
+        column)."""
+        from iwfm_io._links import well_pumping
+        return well_pumping(self, well_id, kind=kind, scaled=scaled,
+                            raw=raw, expand=expand)
+
+    def element_pumping(self, element_id, kind="pumping", scaled=True,
+                        raw=False, expand=True):
+        """An element's pumping series from the time-series pumping
+        file — its ICOLSK column times its FRACSK share."""
+        from iwfm_io._links import element_pumping
+        return element_pumping(self, element_id, kind=kind,
+                               scaled=scaled, raw=raw, expand=expand)
+
+    def bc_series(self, node, layer=None, raw=False, expand=True):
+        """The boundary condition at a GW node (and layer), searching
+        all four BC files.  Time-series-driven BCs resolve their
+        column of the time-series BC file; constant BCs (ITSCOL=0)
+        return their value as a single stamp at the simulation start."""
+        from iwfm_io._links import bc_series
+        return bc_series(self, node, layer=layer, raw=raw,
+                         expand=expand)
+
+    def diversion_series(self, diversion_id, kind="delivery",
+                         scaled=True, raw=False, expand=True):
+        """One diversion's series from the Diversions file — its
+        ``"delivery"``, ``"max"``, ``"recoverable_loss"``,
+        ``"nonrecoverable_loss"``, or ``"spill"`` column times the
+        matching fraction (``scaled=False`` for the bare column)."""
+        from iwfm_io._links import diversion_series
+        return diversion_series(self, diversion_id, kind=kind,
+                                scaled=scaled, raw=raw, expand=expand)
+
+    def lake_max_elevation(self, lake_id=None, raw=False, expand=True):
+        """A lake's maximum-elevation series from the MaxLakeElev
+        file (``lake_id`` optional for single-lake models)."""
+        from iwfm_io._links import lake_max_elevation
+        return lake_max_elevation(self, lake_id=lake_id, raw=raw,
+                                  expand=expand)
+
     # -- Model overview -------------------------------------------------
 
     def describe(self):

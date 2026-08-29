@@ -63,6 +63,7 @@ from iwfm_io._tokens import (
     format_iwfm_date,
     iwfm_day,
     water_year,
+    expand_recurring,
 )
 from iwfm_io._parser import IWFMFileReader
 from iwfm_io._writer import IWFMFileWriter
@@ -338,6 +339,7 @@ __all__ = [
     "format_iwfm_date",
     "iwfm_day",
     "water_year",
+    "expand_recurring",
     "aggregate_budget",
     "budget_component_agg",
     # Parser/writer engine

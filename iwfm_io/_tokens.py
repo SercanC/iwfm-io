@@ -156,6 +156,81 @@ def water_year(times):
     return pd.Index(d.year + (d.month >= 10).astype(int))
 
 
+#: Years at or above this are IWFM recurring-data sentinels
+#: (2500 = constant / recurring, 4000 = recurring pattern).
+_RECURRING_YEAR = 2100
+
+
+def expand_recurring(data, begin, end):
+    """Expand IWFM recurring-year time-series data onto a real period.
+
+    IWFM marks non-time-tracked, recurring data with sentinel years
+    (4000 for e.g. a repeating monthly pattern, 2500 for a single
+    constant entry).  This maps such data onto the calendar between
+    *begin* and *end*: each pattern stamp recurs in every simulation
+    year (day 29 February entries fall back to 28 February in
+    non-leap years), and a single-entry pattern becomes one stamp at
+    *begin*.  Data whose dates are real calendar years is returned
+    unchanged.  Values are step functions: each value applies from its
+    stamp until the next one, matching IWFM semantics.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        With a ``date`` column of IWFM date strings (as produced by the
+        time-series readers).
+    begin, end : str or datetime
+        Period bounds — IWFM date strings (e.g. ``SimulationMain
+        .sim_begin`` / ``.sim_end``) or datetimes.
+
+    Returns
+    -------
+    pd.DataFrame
+        Same value columns, ``date`` as real ``pd.Timestamp``s within
+        ``[begin, end]``, sorted.
+    """
+    import pandas as pd
+
+    if isinstance(begin, str):
+        begin = parse_iwfm_date(begin)
+    if isinstance(end, str):
+        end = parse_iwfm_date(end)
+
+    parsed = [parse_iwfm_date(d) for d in data["date"]]
+    if not parsed:
+        return data.copy()
+    if max(p.year for p in parsed) < _RECURRING_YEAR:
+        out = data.copy()
+        out["date"] = pd.to_datetime(parsed)
+        return out[(out["date"] >= begin) & (out["date"] <= end)] \
+            .sort_values("date").reset_index(drop=True)
+
+    value_cols = [c for c in data.columns if c != "date"]
+    if len(data) == 1:
+        out = pd.DataFrame({"date": [pd.Timestamp(begin)]})
+        for c in value_cols:
+            out[c] = data[c].iloc[0]
+        return out
+
+    rows = []
+    for year in range(begin.year - 1, end.year + 1):
+        for stamp, (_, row) in zip(parsed, data.iterrows()):
+            day = stamp.day
+            while True:
+                try:
+                    t = pd.Timestamp(year=year, month=stamp.month,
+                                     day=day, hour=stamp.hour,
+                                     minute=stamp.minute)
+                    break
+                except ValueError:  # e.g. 29 Feb in a non-leap year
+                    day -= 1
+            rows.append([t] + [row[c] for c in value_cols])
+    out = pd.DataFrame(rows, columns=["date"] + value_cols)
+    out = out[(out["date"] >= pd.Timestamp(begin))
+              & (out["date"] <= pd.Timestamp(end))]
+    return out.sort_values("date").reset_index(drop=True)
+
+
 # Pattern to find the keyword separator: whitespace followed by /
 # This distinguishes from slashes inside dates (09/30/1990)
 _KEYED_SEP_RE = re.compile(r"\s+/")

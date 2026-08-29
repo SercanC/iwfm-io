@@ -64,6 +64,45 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
                    # simulation period, and every budget/hydrograph found
 ```
 
+### Cross-File Relationships
+
+IWFM files reference each other constantly: pointer columns hold 1-based column numbers into role-referenced time-series files (`et_columns` → the ET file, `icolwl` → TSPumping, ICIP → IrrPeriod, …), ID columns reference the grid tables, and `(TYPDST, DST)` pairs pick a destination. The model adapter knows every such relationship (via an internal registry) and surfaces it:
+
+| Method | Description |
+|----------|-------------|
+| `model.component(name)` | Lazily read + cache any component/sub-file by name: `"rootzone"`, `"nonponded_ag"`, `"ponded_ag"`, `"urban"`, `"native_veg"`, `"bc_main"`, `"pump_main"`, `"well_spec"`, `"elem_pump"`, `"spec_head"`, `"lake_main"`, `"swshed"`, … Returns None when the model doesn't reference it. |
+| `model.timeseries(role)` | The parsed time-series file a pointer targets, lazily read + cached: `"precip"`, `"et"`, `"irigfrac"`, `"supply_adjust"`, `"irig_period"`, `"return_flow"`, `"reuse_frac"`, `"ts_pumping"`, `"boundary_ts"`, `"diversions"`, `"max_lake_elev"`, `"population"`, `"per_capita_use"`, `"ponding_depth"`, `"surface_flow_dest"`, … |
+| `model.series(role, column, raw=False, expand=True)` | The actual series a pointer points at, as a `date`/`value` DataFrame — conversion factor applied (`raw=True` for file-native values), recurring-year data (sentinel years 2500/4000) expanded onto the simulation period (`expand=False` for the raw pattern). Values are step functions: each applies from its stamp until the next. |
+| `model.column_usage(role)` | **Reverse lookup**: who references each column of a time-series file — the way to answer "what is `col_5` of the ET file?" (e.g. on the sample model: col 1 = the tomato crop, col 7 = the lake). |
+| `model.validate_references()` | Validate every cross-file reference: pointers within the target's column count, entity IDs present in the grid, `(type, dest)` pairs valid under their per-file code tables. Returns a findings DataFrame (empty = everything resolves). This is the check that catches e.g. deliveries pointed at a never-irrigable crop column. |
+
+```python
+m = open_model("path/to/my_model")
+np_ag = m.component("nonponded_ag")
+n = int(np_ag.et_columns["TO"].iloc[0])   # ET column for crop TO
+et = m.series("et", n)                    # dated, factor-applied series
+m.column_usage("et")                      # which consumer uses each ET column
+issues = m.validate_references()          # empty DataFrame = model wiring OK
+```
+
+**Convenience accessors** answer the common questions in one call — the consumer row is looked up (honoring the `element_id=0` "all elements" sentinel), share fractions like FRACWL are applied where they exist, and factors/expansion behave as in `series()` (`raw=`, `expand=`, `scaled=` opt-outs):
+
+| Method | Description |
+|----------|-------------|
+| `m.crop_series(kind, crop, element=None)` | A land-use driver series: *crop* is a non-ponded code (`"TO"`), a ponded type (`"rice_fl"`, …), or `"native"`/`"riparian"`; *kind* ∈ `et`, `irrigation_period`, `supply_requirement`, `min_moisture`, `target_moisture`, `return_flow`, `reuse`, `min_perc`, `ponding_depth`. A pointer of 0 raises with "computed internally / none". |
+| `m.urban_series(kind, element=None)` | `population`, `per_capita_use`, `water_use_specs`, `et`, `return_flow`, or `reuse` at an element. |
+| `m.well_pumping(well_id)` / `m.element_pumping(element_id)` | The TSPumping series times the well's FRACWL / element's FRACSK share (`kind="max"` for the maximum-pumping column, `scaled=False` for the bare column). |
+| `m.bc_series(node, layer=None)` | The boundary condition at a GW node — searches all four BC files; time-series BCs resolve their BoundTSD column, constant BCs (ITSCOL=0) return their value as one stamp at the simulation start. |
+| `m.diversion_series(diversion_id, kind="delivery")` | A diversion's `delivery` / `max` / `recoverable_loss` / `nonrecoverable_loss` / `spill` column times the matching fraction. |
+| `m.lake_max_elevation(lake_id=None)` | A lake's maximum-elevation series. |
+
+```python
+m.crop_series("et", "TO", element=12)      # ET driving tomatoes at element 12
+m.crop_series("irrigation_period", "GR")   # when is grain irrigable?
+m.well_pumping(937)                        # that well's share of its pumping column
+m.bc_series(1, layer=1)                    # the BC at node 1, layer 1
+```
+
 ### Date Utilities
 
 | Function | Description |
@@ -72,6 +111,7 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 | `format_iwfm_date(dt)` | Format `datetime` → `"MM/DD/YYYY_HH:MM"`. Midnight formats as `24:00` of the previous day (exact inverse of the parser). |
 | `iwfm_day(times)` | The day a stamp *belongs to*: midnight stamps map to the previous day (the day they close), intraday stamps to their own day. Scalar, Series, or DatetimeIndex. Use this — not `.dt.day`/`.dt.month` on raw stamps — when grouping IWFM output by calendar period. |
 | `water_year(times)` | Water year (Oct 1–Sep 30, labeled by ending year) each stamp belongs to, built on `iwfm_day` — a `9/30_24:00` stamp closes its water year. |
+| `expand_recurring(data, begin, end)` | Map IWFM recurring-year data (sentinel years 4000/2500) onto a real calendar period: pattern stamps recur every year, a single constant entry becomes one stamp at `begin`, real-year data passes through filtered. Used by `model.series(...)`; available standalone for data read directly. |
 
 ### Preprocessor Readers
 
