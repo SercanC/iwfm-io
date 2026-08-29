@@ -26,8 +26,12 @@ def write_simulation_main(
     w = IWFMFileWriter(path)
     w.write_header(sim.header)
 
-    for title in sim.titles:
+    # IWFM reads exactly 3 title lines positionally (verified against
+    # the executable: fewer titles shift the file list) — pad to 3.
+    titles = (list(sim.titles) + [".", ".", "."])[:3]
+    for title in titles:
         w.write_raw(f"    {title}")
+    w.write_comment("C  end of titles")
 
     path_keys = [
         "preprocessor_bin", "gw_main", "stream_main", "lake_main",
@@ -53,11 +57,18 @@ def write_simulation_main(
         # varies by IWFM version (e.g. no crop_coeff entry in 2024.x).
         if key in sim.file_paths:
             w.write_keyed_path(sim.file_paths[key], label, base_dir=base_dir)
+    # Same READCH pattern: the file list ends at a comment line.
+    w.write_comment("C  end of file list")
 
     w.write_keyed_value(sim.sim_begin, "BDT")
     w.write_keyed_value(sim.restart, "RESTART")
+    if sim.time_step is not None:
+        # Non-time-tracked layout (BDT/EDT are plain numbers)
+        w.write_keyed_value(sim.time_step, "DELTAT")
     w.write_keyed_value(sim.time_unit, "UNITT")
     w.write_keyed_value(sim.sim_end, "EDT")
+    # separator (not load-bearing; the file-list terminator above is)
+    w.write_comment("C  end of simulation period")
 
     out = sim.output
     w.write_keyed_value(out.get("istrt", 0), "ISTRT")

@@ -349,12 +349,12 @@ def _build_parameter_specs(model, gw, sim, model_dir: Path,
         lo, hi = limits["strk"]
         specs.append(ParamSpec(
             name="strk", values_file="mult_strk.csv",
-            keys=stream.reach_params[["reach_id"]].copy(),
+            keys=stream.reach_params[["stream_node_id"]].copy(),
             transform="log", lower=lo, upper=hi, initial=1.0))
         actions.append(ApplyAction(
             reader="stream_main", path=f"model/{st_rel.as_posix()}",
             table="reach_params", column="conductance",
-            values_file="mult_strk.csv", key_cols=("reach_id",),
+            values_file="mult_strk.csv", key_cols=("stream_node_id",),
             op="multiply", base_dir=sim_base))
 
     if not specs:

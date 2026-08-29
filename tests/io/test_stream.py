@@ -27,8 +27,11 @@ class TestStreamMain:
         sm = read_stream_main(STREAM_DIR / "Stream_MAIN.dat")
         assert sm.reach_params is not None
         assert len(sm.reach_params) > 0
-        assert "reach_id" in sm.reach_params.columns
+        # one row per stream NODE: IR CSTRM DSTRM WETPR
+        assert "stream_node_id" in sm.reach_params.columns
         assert "conductance" in sm.reach_params.columns
+        assert "bed_thickness" in sm.reach_params.columns
+        assert "wetted_perimeter" in sm.reach_params.columns
 
     def test_stream_main_round_trip(self, tmp_output):
         from iwfm_io.readers.stream import read_stream_main
@@ -93,6 +96,67 @@ class TestDiverSpecs:
 
             ds2 = read_diver_specs(out)
             assert ds2.n_diversions == ds.n_diversions
+
+    def test_trailing_text_after_name(self, tmp_output):
+        # C2VSimFG v2.0-style rows: extra free text after the NAME
+        # field must not break the positional parse (issue #30).
+        from iwfm_io.readers.stream import read_diver_specs
+
+        spec = (
+            "C  test\n"
+            "        2   / NRDV\n"
+            "1\t0\t1\t1\t1\t0.03\t1\t0.54\t6\t1\t1\t0.43\t2\t2\t"
+            "DIV_001\tD_WKYTN_WTPBUK\n"
+            "2\t0\t2\t1\t2\t0.30\t2\t0.10\t4\t1\t2\t0.60\t1\t0\t"
+            "DIV_002\tEXTRA\n"
+            "        0   / NGRP\n"
+        )
+        path = tmp_output / "divspec_trailing.dat"
+        path.write_text(spec)
+        ds = read_diver_specs(path)
+        assert ds.data is not None
+        assert len(ds.data) == 2
+        assert list(ds.data["diversion_id"]) == [1, 2]
+        assert list(ds.data["dest_type"]) == [6, 4]
+        assert ds.data["name"].iloc[0] == "DIV_001 D_WKYTN_WTPBUK"
+        assert ds.data["spill_col"].isna().all()
+
+    def test_spill_layout_still_parses(self, tmp_output):
+        # Older 16-numeric-slot layout with the ICOLSL/FRACSL pair.
+        from iwfm_io.readers.stream import read_diver_specs
+
+        spec = (
+            "C  test\n"
+            "        1   / NRDV\n"
+            "  1  0  1  1.0  1  0.03  1  0.54  3  0.1  6  1  1  0.43"
+            "  2  2  DIV_001\n"
+            "        0   / NGRP\n"
+        )
+        path = tmp_output / "divspec_spill.dat"
+        path.write_text(spec)
+        ds = read_diver_specs(path)
+        assert ds.data is not None
+        assert ds.data["spill_col"].iloc[0] == 3
+        assert ds.data["spill_frac"].iloc[0] == 0.1
+        assert ds.data["dest_type"].iloc[0] == 6
+        assert ds.data["name"].iloc[0] == "DIV_001"
+
+    def test_unparseable_rows_warn(self, tmp_output):
+        # A spec table that cannot be parsed must warn, not silently
+        # return data=None.
+        from iwfm_io.readers.stream import read_diver_specs
+
+        spec = (
+            "C  test\n"
+            "        2   / NRDV\n"
+            "  1  0  garbage\n"
+            "        0   / NGRP\n"
+        )
+        path = tmp_output / "divspec_bad.dat"
+        path.write_text(spec)
+        with pytest.warns(UserWarning, match="0 of 2"):
+            ds = read_diver_specs(path)
+        assert ds.data is None
 
 
 class TestBypassSpecs:

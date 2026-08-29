@@ -121,7 +121,7 @@ gw = read_gw_main(".assets/sample_model/Simulation/GW/GW_MAIN.dat")
 print(f"{gw.n_hydrographs} GW hydrograph sites")
 
 sm = read_stream_main(".assets/sample_model/Simulation/Stream/Stream_MAIN.dat")
-print(f"{sm.reach_params.shape[0]} stream reaches")
+print(f"{sm.reach_params.shape[0]} stream-node bed rows")
 ```
 
 ### Read HDF5 output files

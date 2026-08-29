@@ -29,8 +29,17 @@ class StreamMain:
     node_budget_nodes : list[int]
         Stream node IDs for node budget output.
     reach_params : pd.DataFrame
-        Columns: reach_id (int), conductance (float), width (float),
-        bed_thickness (float).
+        Stream-node bed parameter table — one row per stream NODE (in
+        v4.2+ decks, additional rows repeat the stream node for each
+        extra GW node of wide stream nodes).  Columns use semantic
+        names regardless of file version: stream_node_id (IR),
+        conductance (CSTRM — bed hydraulic conductivity), bed_thickness
+        (DSTRM), wetted_perimeter (WETPR), and for v4.2+ also
+        gw_node_id (IGW).  The FILE column order differs by version
+        (v4.0: IR CSTRM DSTRM WETPR; v4.2+: IR WETPR IGW CSTRM DSTRM)
+        and the writer re-emits it per ``header.version``.  Extra
+        format-variant columns appear as col_6, …; ``notes`` holds the
+        row's trailing ``/`` annotation.
     evaporation : pd.DataFrame or None
         Stream evaporation table (None when evaporation is not
         simulated).  Columns: stream_node, icetst (column in the ET

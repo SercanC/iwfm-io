@@ -29,13 +29,15 @@ class GWMain:
     hydrograph_out_file : str or None
         Output file for GW hydrographs.
     hydrographs : pd.DataFrame or None
-        Columns: id, hydtyp, layer, x, y, node, name.
+        Columns: id, hydtyp, layer, x, y, node, name, notes (the
+        row's trailing ``/`` annotation, e.g. station details;
+        empty string when absent).
     n_face_flows : int
         Number of element face flow output specs (NOUTF).
     face_flow_out_file : str or None
         Output file for face flow hydrographs.
     face_flows : pd.DataFrame or None
-        Columns: id, layer, node_a, node_b, name.
+        Columns: id, layer, node_a, node_b, name, notes.
     ngroup : int or None
         Number of parametric grid groups (0 = parameters listed at
         every GW node).
@@ -111,7 +113,8 @@ class BCMain:
     bc_hyd_out_file : str or None
         Output file for boundary flow hydrographs.
     bc_hydrographs : pd.DataFrame or None
-        Columns: id, layer, node, name.
+        Columns: id, layer, node, name, notes (trailing ``/``
+        annotation; empty string when absent).
     """
 
     header: FileHeader = field(default_factory=FileHeader)
@@ -133,7 +136,8 @@ class SpecifiedHeadFile:
     factor : float
         Conversion factor for head values (FACT).
     data : pd.DataFrame or None
-        Columns: node_id, layer, ibctyp, head.
+        Columns: node_id, layer, itscol (column number in the
+        time-series BC file; 0 = constant head), head.
     """
 
     header: FileHeader = field(default_factory=FileHeader)
@@ -282,8 +286,10 @@ class ElemPumpFile:
     n_sinks : int
         Number of pumping elements (NSINK).
     data : pd.DataFrame or None
-        Columns: id, icolsk, fracsk, ioptsk, fracskl_1, fracskl_2,
-        typdstsk, dstsk, icfirigsk, icadjsk, icskmax, fskmax.
+        Columns: id, icolsk, fracsk, ioptsk, fracskl_1..fracskl_NL (one
+        per aquifer layer, inferred from the widest row), typdstsk,
+        dstsk, icfirigsk, icadjsk, icskmax, fskmax, name (trailing
+        ``/NAME`` comment, empty string when absent).
     n_groups : int
         Number of element groups for delivery (NGRP).
     """
@@ -326,7 +332,9 @@ class WellSpecFile:
         0=outside, 2=element, 4=subregion, 6=element group), dstwl
         (destination id), icfirigwl (column in the irrigation fractions
         file), icadjwl (column in the supply adjustment file), icwlmax
-        (max-pumping column in the time-series pumping file), fwlmax.
+        (max-pumping column in the time-series pumping file), fwlmax,
+        notes (trailing ``/`` annotation, e.g. the well's name; empty
+        string when absent).
     n_groups : int
         Number of delivery element groups (NGRP).
     """
@@ -444,7 +452,9 @@ class SubsidenceFile:
     hydrograph_out_file : str or None
         Output file for subsidence hydrographs.
     hydrographs : pd.DataFrame or None
-        Columns: id, subtyp, layer, x, y, node, name.
+        Columns: id, subtyp, layer, x, y, node, name, notes (the
+        row's trailing ``/`` annotation, e.g. InSAR site details;
+        empty string when absent).
     ngroup : int or None
         Number of parametric grid groups (0 = parameters listed at
         every GW node).
@@ -472,5 +482,8 @@ class SubsidenceFile:
     hydrographs: Any = None  # DataFrame
     ngroup: int | None = None
     param_factors: dict = field(default_factory=dict)
+    #: TUNIT* keyed lines in the parameter block (format variants only;
+    #: empty for v4.0 subsidence files).
+    param_time_units: dict = field(default_factory=dict)
     subsidence_params: Any = None  # DataFrame
     parametric_grids: list = field(default_factory=list)

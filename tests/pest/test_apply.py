@@ -124,7 +124,7 @@ class TestApplyParametersEndToEnd:
 
         before = read_stream_main(sm_path).reach_params
         pd.DataFrame({
-            "reach_id": before["reach_id"].iloc[:4],
+            "stream_node_id": before["stream_node_id"].iloc[:4],
             "value": [2.0, 0.5, 3.0, 1.0],
         }).to_csv(run / "mult_cond.csv", index=False)
 
@@ -132,18 +132,19 @@ class TestApplyParametersEndToEnd:
             reader="stream_main",
             path=str(sm_path.relative_to(run)),
             table="reach_params", column="conductance",
-            values_file="mult_cond.csv", key_cols=("reach_id",),
+            values_file="mult_cond.csv", key_cols=("stream_node_id",),
             lower=1e-6)])
         assert log.iloc[0]["n_applied"] == 4
         assert (run / "apply_parameters_log.csv").exists()
 
         after = read_stream_main(sm_path).reach_params
-        merged = before.merge(after, on="reach_id", suffixes=("_b", "_a"))
+        merged = before.merge(after, on="stream_node_id",
+                              suffixes=("_b", "_a"))
         assert merged["conductance_a"].iloc[:4].values == pytest.approx(
             [2.0, 0.5, 3.0, 1.0] * merged["conductance_b"].iloc[:4].values,
             rel=1e-6)
         assert merged["conductance_a"].iloc[4:].values == pytest.approx(
             merged["conductance_b"].iloc[4:].values)
         # other columns untouched
-        assert merged["width_a"].values == pytest.approx(
-            merged["width_b"].values)
+        assert merged["bed_thickness_a"].values == pytest.approx(
+            merged["bed_thickness_b"].values)

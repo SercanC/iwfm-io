@@ -121,7 +121,7 @@ def demo_stream():
     print("\n=== Stream files ===")
 
     sm = read_stream_main(STRM_DIR / "Stream_MAIN.dat")
-    print(f"  Stream main:   {sm.reach_params.shape[0]} reaches, "
+    print(f"  Stream main:   {sm.reach_params.shape[0]} stream-node bed rows, "
           f"{sm.config['n_hydrographs']} hydrograph sites")
 
     divers = read_diver_specs(STRM_DIR / "DiverSpecs.dat")

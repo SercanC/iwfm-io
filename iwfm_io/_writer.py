@@ -164,7 +164,8 @@ class IWFMFileWriter:
     # Tabular data writing
     # ------------------------------------------------------------------
 
-    def write_data_line(self, tokens: list[object], widths: list[int] | None = None) -> None:
+    def write_data_line(self, tokens: list[object], widths: list[int] | None = None,
+                        note: str = "") -> None:
         """Write a single row of whitespace-delimited data.
 
         Parameters
@@ -173,6 +174,10 @@ class IWFMFileWriter:
             Values for each column.
         widths : list[int], optional
             Column widths for right-alignment. If None, uses 12 per column.
+        note : str, optional
+            End-of-line annotation, emitted as ``/ note`` — transparent
+            to IWFM (list-directed reads stop at the slash) but kept by
+            the readers' notes/name capture.
         """
         if widths is None:
             widths = [12] * len(tokens)
@@ -182,7 +187,10 @@ class IWFMFileWriter:
             # a token at/over its column width would fuse with the
             # previous field — force at least one separating space
             parts.append(s.rjust(w) if len(s) < w else " " + s)
-        self._lines.append("".join(parts))
+        line = "".join(parts)
+        if note:
+            line += f"    / {note}"
+        self._lines.append(line)
 
     def write_data_table(
         self,
@@ -227,6 +235,7 @@ class IWFMFileWriter:
         """
         if keywords is None:
             keywords = ["NCOL", "FACT", "NSP", "NFQ", "DSSFL"]
+        self._last_spec_ncol = spec.n_columns
         self.write_keyed_value(spec.n_columns, keywords[0])
         self.write_keyed_value(spec.factor, keywords[1])
         self.write_keyed_value(spec.n_steps_update, keywords[2])
@@ -240,7 +249,7 @@ class IWFMFileWriter:
         # "End-of-file reached"). Load-bearing, not decoration.
         self.write_comment("C  end of specification")
 
-    def write_timeseries_data(self, df: pd.DataFrame, col_width: int = 14) -> None:
+    def write_timeseries_data(self, df: pd.DataFrame, col_width: int = 18) -> None:
         """Write time-series data rows.
 
         Supports two DataFrame formats:
@@ -254,21 +263,40 @@ class IWFMFileWriter:
             Width for value columns.
         """
         if "date" in df.columns:
-            # Date is a column, value columns follow
             value_cols = [c for c in df.columns if c != "date"]
+        else:
+            value_cols = list(df.columns)
+        expected = getattr(self, "_last_spec_ncol", None)
+        if expected is not None and expected != len(value_cols):
+            raise ValueError(
+                f"time-series spec declares {expected} data columns but "
+                f"the DataFrame has {len(value_cols)} — update NCOL or "
+                "the data")
+        if "date" in df.columns:
+            # Date is a column, value columns follow.  %.10g keeps full
+            # practical precision (%.6g measurably truncated values like
+            # 7-digit pumping rates on round-trip).
             for _, row in df.iterrows():
                 date_str = row["date"]
-                vals = "".join(f"{float(row[c]):>{col_width}.6g}" for c in value_cols)
+                vals = "".join(f"{float(row[c]):>{col_width}.10g}"
+                               for c in value_cols)
                 self._lines.append(f"  {date_str}{vals}")
         else:
             # DatetimeIndex format
             for dt, row in df.iterrows():
                 date_str = format_iwfm_date(dt)
-                vals = "".join(f"{v:>{col_width}.6g}" for v in row)
+                vals = "".join(f"{v:>{col_width}.10g}" for v in row)
                 self._lines.append(f"  {date_str}{vals}")
 
     def write_dss_pathnames(self, pathnames: list[tuple[int, str]]) -> None:
-        """Write DSS pathname assignments."""
+        """Write DSS pathname assignments (validated against the spec's
+        NCOL when a spec was written first — IWFM reads exactly NCOL
+        pathname rows)."""
+        expected = getattr(self, "_last_spec_ncol", None)
+        if expected is not None and expected != len(pathnames):
+            raise ValueError(
+                f"time-series spec declares {expected} columns but "
+                f"{len(pathnames)} DSS pathnames were provided")
         for col_id, pathname in pathnames:
             self._lines.append(f"     {col_id}    {pathname}")
 

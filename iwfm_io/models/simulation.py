@@ -26,6 +26,9 @@ class SimulationMain:
         Simulation end date (IWFM format).
     time_unit : str
         Timestep specification (e.g. ``1DAY``).
+    time_step : float or None
+        DELTAT — numeric time step, present only in the "date and time
+        NOT tracked" layout (None for time-tracked simulations).
     restart : int
         Restart flag.
     solver : dict
@@ -45,6 +48,7 @@ class SimulationMain:
     sim_begin: str = ""
     sim_end: str = ""
     time_unit: str = ""
+    time_step: float | None = None
     restart: int = 0
     solver: dict = field(default_factory=dict)
     output: dict = field(default_factory=dict)

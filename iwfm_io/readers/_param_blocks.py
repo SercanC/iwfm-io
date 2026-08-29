@@ -107,6 +107,7 @@ def parse_node_layer_table(
     n_leading: int = 1,
     leading_names: list[str] | None = None,
     max_blocks: int | None = None,
+    max_layers: int | None = None,
 ) -> pd.DataFrame | None:
     """Parse an IWFM per-node, per-layer parameter table.
 
@@ -144,6 +145,8 @@ def parse_node_layer_table(
             blocks += 1
             params = vals[n_leading:]
         elif len(vals) == n_params and current_lead is not None:
+            if max_layers is not None and layer >= max_layers:
+                break
             layer += 1
             params = vals
         else:
@@ -210,7 +213,7 @@ def parse_param_block(
             line = cursor.peek()
             if line is None:
                 break
-            node_range = tokenize_data_line(line)[0]
+            node_range = "".join(tokenize_data_line(line))
             cursor.next()
             ndp_val, _ = cursor.read_keyed_value()
             nep_val, _ = cursor.read_keyed_value()

@@ -15,6 +15,36 @@ from iwfm_io.models.base import FileHeader
 
 
 @dataclass
+class SurfaceFlowDestFile:
+    """Surface flow destination file (DESTFL, e.g. ``SurfaceFlowDest.dat``).
+
+    v4.12+ root zones route runoff/return flow through this file; the
+    soil table's ``icdstag``/``icdsturbin``/``icdsturbout``/``icdstnvrv``
+    pointers are 1-based column numbers into it.  Has a 3-param spec
+    (NDSTN, NSPDSTN, NFQDSTN — no FACT, no DSSFL); each data row is
+    ``DATE  (T,D) .. (T,D)`` with one type/destination tuple per column.
+
+    Attributes
+    ----------
+    header : FileHeader
+    n_columns : int
+        NDSTN — number of destination columns.
+    n_steps_update : int
+    repeat_freq : int
+    data : pd.DataFrame or None
+        ``date`` (kept as strings — recurring-year data uses year
+        2500) + ``type_i``/``dest_i`` int column pairs.  Types: 0 =
+        outside model, 1 = stream node, 3 = lake, 5 = groundwater.
+    """
+
+    header: FileHeader = field(default_factory=FileHeader)
+    n_columns: int = 0
+    n_steps_update: int = 1
+    repeat_freq: int = 0
+    data: Any = None  # DataFrame
+
+
+@dataclass
 class RootZoneMain:
     """Parsed root zone component main file (e.g. ``RootZone_MAIN.dat``).
 
@@ -76,6 +106,10 @@ class NonPondedAgFile:
         FLDMD flag for how agricultural water demand is computed.
     crop_codes : list[str]
         Two-character crop codes in column order (CCODE).
+    crop_names : dict[str, str]
+        Crop code -> human-readable description scraped from the inline
+        ``/``-comment on each CCODE line (e.g. ``01 / Almonds``); empty
+        string when the deck carries none.
     file_paths : dict[str, str or None]
         Sub-file references: land_use_area (LUFLNP), root_depth_fracs
         (RZFRACFL), min_soil_moisture (MINSMFL), target_soil_moisture
@@ -122,6 +156,7 @@ class NonPondedAgFile:
     n_crops: int = 0
     demand_from_moisture: int = 0
     crop_codes: list[str] = field(default_factory=list)
+    crop_names: dict[str, str] = field(default_factory=dict)
     file_paths: dict[str, str | None] = field(default_factory=dict)
     n_budget_crops: int = 0
     budget_crop_codes: list[str] = field(default_factory=list)

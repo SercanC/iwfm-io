@@ -11,6 +11,11 @@ from pathlib import Path
 import pandas as pd
 
 from iwfm_io._writer import IWFMFileWriter
+from iwfm_io.writers._param_blocks import (
+    check_count,
+    fmt_num,
+    write_element_groups,
+)
 from iwfm_io.models.stream import (
     BypassSpecsFile,
     DiverSpecsFile,
@@ -63,6 +68,8 @@ def write_stream_main(
     w.write_keyed_path(cfg.get("hydro_out_file"),          "STHYDOUTFL", base_dir=base_dir)
 
     # ---- Hydrograph spec lines ----
+    check_count(cfg.get("n_hydrographs", 0), len(sm.hydrograph_specs),
+                "Stream main: NOUTR")
     for spec in sm.hydrograph_specs:
         w.write_data_line(
             [spec["node_id"], spec["name"]],
@@ -70,6 +77,8 @@ def write_stream_main(
         )
 
     # ---- Node budget settings ----
+    check_count(cfg.get("n_node_budgets", 0), len(sm.node_budget_nodes),
+                "Stream main: NBUDR")
     w.write_keyed_value(cfg.get("n_node_budgets", 0), "NBUDR")
     w.write_keyed_path(cfg.get("node_bud_file"),      "STNDBUDFL", base_dir=base_dir)
 
@@ -82,19 +91,40 @@ def write_stream_main(
     w.write_keyed_value(cfg.get("factl", 1.0),   "FACTL")
 
     if sm.reach_params is not None and not sm.reach_params.empty:
-        extra_cols = [
-            c for c in sm.reach_params.columns
-            if c not in ("reach_id", "conductance", "width", "bed_thickness")
-        ]
-        for _, row in sm.reach_params.iterrows():
-            values = [
-                int(row["reach_id"]),
-                f"{row['conductance']:g}",
-                f"{row['width']:g}",
-                f"{row['bed_thickness']:g}",
-            ]
-            values += [f"{row[c]:g}" for c in extra_cols]
-            w.write_data_line(values, widths=[6, 12, 12, 12] + [10] * len(extra_cols))
+        rp = sm.reach_params
+        try:
+            _ver = float(sm.header.version) if sm.header.version else 4.0
+        except (TypeError, ValueError):
+            _ver = 4.0
+        if _ver >= 4.2:
+            base_cols = ["wetted_perimeter", "gw_node_id",
+                         "conductance", "bed_thickness"]
+        else:
+            base_cols = ["conductance", "bed_thickness",
+                         "wetted_perimeter"]
+        extra_cols = [c for c in rp.columns
+                      if c not in ("stream_node_id", "notes")
+                      and c not in base_cols]
+        prev_node = None
+        for _, row in rp.iterrows():
+            node = int(row["stream_node_id"])
+            cells: list = []
+            widths: list = []
+            if not (_ver >= 4.2 and node == prev_node):
+                cells.append(str(node))
+                widths.append(6)
+            for c in base_cols + extra_cols:
+                v = fmt_num(row[c])
+                if v == "":
+                    raise ValueError(
+                        f"NaN in stream bed table column {c!r} for "
+                        f"stream node {node} — fill or drop it first")
+                cells.append(v)
+                widths.append(12)
+            note = row.get("notes")
+            w.write_data_line(cells, widths,
+                              note=note if isinstance(note, str) else "")
+            prev_node = node
 
     # ---- Hydraulic disconnection type ----
     w.write_keyed_value(cfg.get("intrctype", 1), "INTRCTYPE")
@@ -156,11 +186,12 @@ def write_diver_specs(ds: DiverSpecsFile, path: str | Path) -> None:
     ds : DiverSpecsFile
     path : str or Path
     """
-    from iwfm_io.writers._param_blocks import fmt_num, write_element_groups
-
     w = IWFMFileWriter(path)
     w.write_header(ds.header)
 
+    check_count(ds.n_diversions,
+                0 if ds.data is None else len(ds.data),
+                "Diversion specs: NRDV")
     w.write_keyed_value(ds.n_diversions, "NRDV")
 
     if ds.data is None and ds.n_diversions > 0:
@@ -187,12 +218,19 @@ def write_diver_specs(ds: DiverSpecsFile, path: str | Path) -> None:
             ]
             line = "".join(str(t).rjust(wd) for t, wd in zip(
                 tokens, [8] + [10] * (len(tokens) - 1)))
+            # NAME is a positional field the model reads; a "/" would
+            # blank it for IWFM
             name = row.get("name") or ""
-            if name:
-                line += f"    /{name}"
+            if isinstance(name, str) and name:
+                line += f"    {name}"
+            notes = row.get("notes") or ""
+            if isinstance(notes, str) and notes:
+                line += f"    / {notes}"
             w.write_raw(line)
 
     w.write_comment("C  Delivery Element Groups")
+    check_count(ds.n_groups, len(ds.delivery_groups),
+                "Diversion specs: NGRP")
     w.write_keyed_value(ds.n_groups, "NGRP")
     write_element_groups(w, ds.delivery_groups)
 
@@ -218,6 +256,9 @@ def write_bypass_specs(bs: BypassSpecsFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(bs.header)
 
+    check_count(bs.n_bypasses,
+                0 if bs.bypass_data is None else len(bs.bypass_data),
+                "Bypass specs: NBYPS")
     w.write_keyed_value(bs.n_bypasses, "NBYPS")
 
     f = bs.factors
@@ -230,6 +271,7 @@ def write_bypass_specs(bs: BypassSpecsFile, path: str | Path) -> None:
     if bs.bypass_data is not None and not bs.bypass_data.empty:
         for _, row in bs.bypass_data.iterrows():
             bid = int(row["bypass_id"])
+            note = row.get("notes")
             w.write_data_line(
                 [
                     bid,
@@ -237,11 +279,12 @@ def write_bypass_specs(bs: BypassSpecsFile, path: str | Path) -> None:
                     int(row["dest_type"]),
                     int(row["dest"]),
                     int(row["idivc"]),
-                    f"{row['divrl']:.1f}",
-                    f"{row['divnl']:.1f}",
+                    fmt_num(row["divrl"]),
+                    fmt_num(row["divnl"]),
                     row["name"],
                 ],
                 widths=[4, 6, 10, 7, 7, 7, 8, 12],
+                note=note if isinstance(note, str) else "",
             )
 
             # Inline rating table when idivc < 0
@@ -249,8 +292,8 @@ def write_bypass_specs(bs: BypassSpecsFile, path: str | Path) -> None:
                 rt = bs.rating_tables[bid]
                 for _, rt_row in rt.iterrows():
                     w.write_data_line(
-                        [f"{rt_row['divx']:.1f}", f"{rt_row['divy']:.1f}"],
-                        widths=[28, 8],
+                        [fmt_num(rt_row["divx"]), fmt_num(rt_row["divy"])],
+                        widths=[28, 12],
                     )
 
     # ---- Seepage zone sections ----
@@ -258,18 +301,24 @@ def write_bypass_specs(bs: BypassSpecsFile, path: str | Path) -> None:
         bid = zone["bypass_id"]
         n_elem = zone["n_elements"]
         elements = zone.get("elements", [])
+        name = zone.get("name") or ""
 
         if n_elem == 0 or not elements:
-            w.write_data_line([bid, 0, 0, 0.0], widths=[4, 14, 12, 10])
+            w.write_data_line([bid, 0, 0, 0.0], widths=[4, 14, 12, 10],
+                              note=name)
         else:
+            check_count(n_elem, len(elements),
+                        f"Bypass specs: seepage zone {bid} NERELS")
             first = elements[0]
             w.write_data_line(
-                [bid, n_elem, first["element_id"], f"{first['fraction']:.1f}"],
+                [bid, n_elem, first["element_id"],
+                 fmt_num(first["fraction"])],
                 widths=[4, 14, 12, 10],
+                note=name,
             )
             for elem in elements[1:]:
                 w.write_data_line(
-                    ["", "", elem["element_id"], f"{elem['fraction']:.1f}"],
+                    ["", "", elem["element_id"], fmt_num(elem["fraction"])],
                     widths=[4, 14, 12, 10],
                 )
 

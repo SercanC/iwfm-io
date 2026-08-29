@@ -6,6 +6,8 @@ All functions return dataclass containers with pandas DataFrames.
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 from typing import Any
 
@@ -136,13 +138,15 @@ def read_stream_main(path: str | Path) -> StreamMain:
     hydro_out_file, _ = reader.read_keyed_path(base_dir)
     config["hydro_out_file"] = hydro_out_file
 
-    # ---- Hydrograph spec lines: IOUTR  NAME ----
+    # ---- Hydrograph spec lines: IOUTR  NAME (may be multi-word;
+    # internal spacing preserved) ----
     hydrograph_specs: list[dict] = []
     for _ in range(n_hydrographs):
         line = reader.next_data_line()
-        tokens = line.split()
-        node_id = int(tokens[0])
-        name = tokens[1] if len(tokens) > 1 else ""
+        body = re.split(r"\s+/", line, maxsplit=1)[0]
+        parts = body.split(None, 1)
+        node_id = int(parts[0])
+        name = parts[1].rstrip() if len(parts) > 1 else ""
         hydrograph_specs.append({"node_id": node_id, "name": name})
 
     # ---- Node budget settings ----
@@ -155,7 +159,7 @@ def read_stream_main(path: str | Path) -> StreamMain:
     node_budget_nodes: list[int] = []
     for _ in range(n_node_budgets):
         line = reader.next_data_line()
-        node_budget_nodes.append(int(line.strip()))
+        node_budget_nodes.append(int(tokenize_data_line(line)[0]))
 
     # ---- Stream bed parameters ----
     factk, _ = reader.read_keyed_float()
@@ -167,28 +171,65 @@ def read_stream_main(path: str | Path) -> StreamMain:
     factl, _ = reader.read_keyed_float()
     config["factl"] = factl
 
-    # Reach parameter rows: IR  CSTRM  DSTRM  WETPR  [extra cols...]
-    # Rows may carry a trailing "/ comment" (e.g. C2VSimFG reach names)
-    # and newer formats add columns, so a row is distinguished from the
-    # next keyed line by its token count after the comment is stripped —
-    # keyed scalar lines have a single value token, rows have >= 4.
+    # Stream-node bed parameter rows — one row per stream NODE (plus,
+    # in v4.2+, optional 4-token continuation rows for additional GW
+    # nodes of wide stream nodes).  The column ORDER changed across
+    # stream-package versions (confirmed against the IWFM source,
+    # Class_StrmGWConnector_v4*.f90):
+    #   v4.0/4.1:  IR  CSTRM  DSTRM  WETPR
+    #   v4.2+:     IR  WETPR  IGW  CSTRM  DSTRM
+    # Rows may carry a trailing "/ annotation" (kept in "notes").
+    try:
+        _stream_ver = float(header.version) if header.version else 4.0
+    except (TypeError, ValueError):
+        _stream_ver = 4.0
     reach_rows: list[dict] = []
+    _cur_node = None
     while not reader.eof:
         line = reader.peek_data_line()
         if line is None:
             break
         tokens = tokenize_data_line(line)
-        if len(tokens) < 4:
-            break
+        m = re.search(r"\s/(.+)$", line)
+        note = m.group(1).strip().lstrip("/").strip() if m else ""
+        if _stream_ver >= 4.2:
+            if len(tokens) >= 5:
+                _cur_node = int(tokens[0])
+                row = {
+                    "stream_node_id": _cur_node,
+                    "wetted_perimeter": float(tokens[1]),
+                    "gw_node_id": int(float(tokens[2])),
+                    "conductance": float(tokens[3]),
+                    "bed_thickness": float(tokens[4]),
+                }
+                extra_start = 5
+            elif len(tokens) == 4 and _cur_node is not None:
+                # continuation row: extra GW node of a wide stream node
+                row = {
+                    "stream_node_id": _cur_node,
+                    "wetted_perimeter": float(tokens[0]),
+                    "gw_node_id": int(float(tokens[1])),
+                    "conductance": float(tokens[2]),
+                    "bed_thickness": float(tokens[3]),
+                }
+                extra_start = 4
+            else:
+                break
+        else:
+            if len(tokens) < 4:
+                break
+            row = {
+                "stream_node_id": int(tokens[0]),
+                "conductance": float(tokens[1]),
+                "bed_thickness": float(tokens[2]),
+                "wetted_perimeter": float(tokens[3]),
+            }
+            extra_start = 4
         reader.next_data_line()
-        row = {
-            "reach_id": int(tokens[0]),
-            "conductance": float(tokens[1]),
-            "width": float(tokens[2]),
-            "bed_thickness": float(tokens[3]),
-        }
-        for i, extra in enumerate(tokens[4:], start=5):
+        for i, extra in enumerate(tokens[extra_start:],
+                                  start=len(row) + 1):
             row[f"col_{i}"] = float(extra)
+        row["notes"] = note
         reach_rows.append(row)
 
     reach_params = pd.DataFrame(reach_rows)
@@ -197,9 +238,13 @@ def read_stream_main(path: str | Path) -> StreamMain:
     intrctype, _ = reader.read_keyed_int()
     config["intrctype"] = intrctype
 
-    # ---- Stream evaporation STARFL (optional, may be blank) ----
-    starfl, _ = reader.read_keyed_path(base_dir)
-    config["starfl"] = starfl
+    # ---- Stream evaporation STARFL (optional; older layouts end at
+    # INTRCTYPE with no evaporation section at all) ----
+    if reader.eof:
+        config["starfl"] = None
+    else:
+        starfl, _ = reader.read_keyed_path(base_dir)
+        config["starfl"] = starfl
 
     # ---- Stream evaporation node table (blank when not simulated) ----
     # IR (stream node), ICETST (column in the ET file; 0 = no
@@ -314,11 +359,15 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
     # Row layout: ID IRDV ICDVMAX FDVMAX ICOLRL FRACRL ICOLNL FRACNL
     # [ICOLSL FRACSL] TYPDSTDL DSTDL ICOLDL FRACDL ICFSIRIG ICADJ [NAME]
     # — the ICOLSL/FRACSL diversion-spills pair exists only in older
-    # stream-package formats (16 numeric columns vs 14), so the head and
-    # the 6-column destination tail are read at fixed offsets and the
-    # spill pair by column count.
-    # TYPDSTDL: 0=outside, 2=element, 4=subregion, 6=element group.
+    # stream-package formats (16 numeric columns vs 14). All numeric
+    # fields precede NAME, so rows are parsed positionally from the
+    # left; everything after the last numeric slot is the name (real
+    # decks carry free text after the 20-char NAME field, e.g.
+    # C2VSimFG v2.0). The layout is disambiguated by the count of
+    # leading numeric tokens plus which candidate slot holds a valid
+    # TYPDSTDL (0=outside, 2=element, 4=subregion, 6=element group).
     import re
+    import warnings
     from iwfm_io._tokens import is_comment
     rows = []
     for line in raw_data:
@@ -327,15 +376,29 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
         toks = tokenize_data_line(line)
         if len(toks) < 3:
             continue
-        # The name rides either in a trailing "/ name" comment or as a
-        # bare trailing token
+        # A name may also ride in a trailing "/ name" comment (already
+        # stripped from toks by tokenize_data_line).
         m = re.search(r"\s/(.+)$", line)
-        if m:
-            name = m.group(1).strip().lstrip("/").strip()
-            nums = toks
+        comment_name = m.group(1).strip().lstrip("/").strip() if m else ""
+
+        n_numeric = 0
+        for t in toks:
+            if not _is_number(t):
+                break
+            n_numeric += 1
+        if n_numeric >= 16 and _is_dest_type(toks[10]):
+            n_slots = 16  # spill layout
+        elif n_numeric >= 14 and _is_dest_type(toks[8]):
+            n_slots = 14  # no-spill layout
+        elif n_numeric >= 16:
+            n_slots = 16
         else:
-            name = toks[-1] if not _is_number(toks[-1]) else ""
-            nums = toks[:-1] if name else toks
+            break  # not a spec row — end of the table
+        nums = toks[:n_slots]
+        # NAME is a real positional field (IWFM reads it); a trailing
+        # "/" annotation is kept separately as "notes"
+        name = " ".join(toks[n_slots:])
+        tail = nums[n_slots - 6:]
         try:
             row = {
                 "diversion_id": int(float(nums[0])),
@@ -348,15 +411,16 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
                 "nonrecov_loss_frac": float(nums[7]),
                 "spill_col": None,
                 "spill_frac": None,
-                "dest_type": int(float(nums[-6])),
-                "dest_id": int(float(nums[-5])),
-                "delivery_col": int(float(nums[-4])),
-                "delivery_frac": float(nums[-3]),
-                "irig_frac_col": int(float(nums[-2])),
-                "adjust_col": int(float(nums[-1])),
+                "dest_type": int(float(tail[0])),
+                "dest_id": int(float(tail[1])),
+                "delivery_col": int(float(tail[2])),
+                "delivery_frac": float(tail[3]),
+                "irig_frac_col": int(float(tail[4])),
+                "adjust_col": int(float(tail[5])),
                 "name": name,
+                "notes": comment_name,
             }
-            if len(nums) >= 16:  # older format with the spills pair
+            if n_slots == 16:  # older format with the spills pair
                 row["spill_col"] = int(float(nums[8]))
                 row["spill_frac"] = float(nums[9])
             rows.append(row)
@@ -365,7 +429,15 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
         if len(rows) == n_diversions:
             break
 
-    data = pd.DataFrame(rows) if len(rows) == n_diversions else None
+    if len(rows) == n_diversions:
+        data = pd.DataFrame(rows)
+    else:
+        data = None
+        if n_diversions > 0:
+            warnings.warn(
+                f"read_diver_specs: parsed {len(rows)} of {n_diversions} "
+                f"diversion spec rows; spec table set to None",
+                stacklevel=2)
 
     # Delivery element groups: locate the "/ NGRP" keyed line, then read
     # NGRP groups (ID NELEM IELEM..., wrapping over continuation lines).
@@ -429,6 +501,15 @@ def _is_number(token: str) -> bool:
         return False
 
 
+def _is_dest_type(token: str) -> bool:
+    """True if *token* is a valid TYPDSTDL value (0, 2, 4, or 6)."""
+    try:
+        v = float(token)
+    except ValueError:
+        return False
+    return v == int(v) and int(v) in (0, 2, 4, 6)
+
+
 # ------------------------------------------------------------------
 # Bypass Specs
 # ------------------------------------------------------------------
@@ -479,7 +560,11 @@ def read_bypass_specs(path: str | Path) -> BypassSpecsFile:
         idivc = int(tokens[4])
         divrl = float(tokens[5])
         divnl = float(tokens[6])
-        name = tokens[7] if len(tokens) > 7 else ""
+        body = re.split(r"\s+/", line, maxsplit=1)[0]
+        parts = body.split(None, 7)
+        name = parts[7].rstrip() if len(parts) > 7 else ""
+        m = re.search(r"\s/(.+)$", line)
+        note = m.group(1).strip().lstrip("/").strip() if m else ""
 
         bypass_rows.append({
             "bypass_id": bypass_id,
@@ -490,6 +575,7 @@ def read_bypass_specs(path: str | Path) -> BypassSpecsFile:
             "divrl": divrl,
             "divnl": divnl,
             "name": name,
+            "notes": note,
         })
 
         # Inline rating table when idivc is negative
@@ -508,36 +594,30 @@ def read_bypass_specs(path: str | Path) -> BypassSpecsFile:
     bypass_data = pd.DataFrame(bypass_rows) if bypass_rows else None
 
     # ---- Seepage zone sections ----
-    # One entry per bypass:
-    #   ID  NERELS  IERELS  FERELS   (first element on same line)
-    #              IERELS  FERELS   (continuation lines)
+    # One group per bypass: ID NERELS IERELS FERELS ... — parsed with
+    # the shared element-group parser (tolerates elements starting on
+    # the next line, packed continuation lines, and header annotations).
+    from iwfm_io.readers._element_groups import parse_element_groups
     seepage_zones: list[dict] = []
-    for _ in range(n_bypasses):
-        line = reader.next_data_line()
-        tokens = tokenize_data_line(line)
-        zone_id = int(tokens[0])
-        n_elements = int(tokens[1])
-        elements: list[dict] = []
-
-        if n_elements > 0:
-            # First element is on the same line
-            elements.append({
-                "element_id": int(tokens[2]),
-                "fraction": float(tokens[3]),
-            })
-            # Remaining elements on continuation lines
-            for _ in range(n_elements - 1):
-                cont_line = reader.next_data_line()
-                cont_tokens = tokenize_data_line(cont_line)
-                elements.append({
-                    "element_id": int(cont_tokens[0]),
-                    "fraction": float(cont_tokens[1]),
-                })
-
+    rest = reader.skip_to_end()
+    try:
+        groups, _ = parse_element_groups(rest, n_bypasses,
+                                         with_fractions=True)
+    except ValueError:
+        import warnings
+        warnings.warn(
+            "Bypass seepage-zone table only partially parsed; the "
+            "section will be missing from written output")
+        groups = []
+    for g in groups:
         seepage_zones.append({
-            "bypass_id": zone_id,
-            "n_elements": n_elements,
-            "elements": elements,
+            "bypass_id": g["group_id"],
+            "n_elements": len(g["elements"]),
+            "elements": [
+                {"element_id": e, "fraction": f}
+                for e, f in zip(g["elements"], g.get("fractions") or [])
+            ],
+            "name": g.get("name", ""),
         })
 
     return BypassSpecsFile(

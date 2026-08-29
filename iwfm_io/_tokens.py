@@ -2,10 +2,15 @@
 Line classification and date parsing for IWFM text files.
 
 IWFM conventions:
-- Comment lines start with C, c, *, or / in column 1
+- Comment lines start with C, c, or * in column 1 (IWFM's
+  ``f_cCommentIndicators = 'Cc*'``).  A ``/`` is NOT a comment marker:
+  a line whose first non-blank character is ``/`` is a DATA line whose
+  value is empty — IWFM consumes it as one (blank) entry, e.g.
+  C2VSimFG disables optional outputs with ``/  path  / HTPOUTFL``.
 - Date format: MM/DD/YYYY_HH:MM (hour 24:00 = end of day)
 - Version headers: lines starting with # (e.g., #4.0)
-- Key-value: VALUE / KEYWORD description
+- Key-value: VALUE / KEYWORD description (Fortran list-directed reads
+  stop at the /, which is why trailing comments are transparent)
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ import re
 from datetime import datetime, timedelta
 
 # Characters that mark a comment line when in column 1
-_COMMENT_CHARS = frozenset("Cc*/")
+_COMMENT_CHARS = frozenset("Cc*")
 
 # Pattern for IWFM date strings: MM/DD/YYYY_HH:MM
 _DATE_RE = re.compile(
@@ -25,9 +30,11 @@ _DATE_RE = re.compile(
 def is_comment(line: str) -> bool:
     """Return True if *line* is a comment or blank line in IWFM format.
 
-    IWFM comment characters (C, c, *, /) must appear in **column 1**
-    of the raw line (no leading whitespace).  Lines that start with
-    whitespace are data lines even if a comment character appears later.
+    IWFM comment characters (C, c, *) must appear in **column 1** of
+    the raw line (no leading whitespace).  Lines that start with
+    whitespace are data lines even if a comment character appears
+    later.  A line whose first non-blank character is ``/`` is NOT a
+    comment — it is a data line with an empty value (see module doc).
     """
     if not line or not line.strip():
         return True
@@ -163,7 +170,20 @@ def split_keyed_line(line: str) -> tuple[str, str]:
     Returns ``(value_part, keyword_part)`` with leading/trailing
     whitespace stripped from both.  If there is no separator, the
     keyword part is an empty string.
+
+    A line whose first non-blank character is ``/`` is a disabled /
+    blank entry (IWFM reads it as an empty value): the value is ``""``
+    and the keyword is taken from the remainder — after a further
+    ``/`` separator when one exists (``/  old-path  / HTPOUTFL``),
+    else the remainder itself (``/ DSSFL``).
     """
+    stripped = line.lstrip()
+    if stripped.startswith("/"):
+        rest = stripped[1:]
+        m = _KEYED_SEP_RE.search(rest)
+        if m:
+            return "", rest[m.end():].strip()
+        return "", rest.strip()
     m = _KEYED_SEP_RE.search(line)
     if m:
         sep_start = m.start()
@@ -178,8 +198,12 @@ def tokenize_data_line(line: str) -> list[str]:
     """Split a whitespace-delimited data line into tokens.
 
     Strips any trailing ``<whitespace>/ comment`` portion first,
-    being careful not to split on slashes inside IWFM dates.
+    being careful not to split on slashes inside IWFM dates.  A line
+    whose first non-blank character is ``/`` carries no data tokens
+    (Fortran list-directed reads stop at the slash).
     """
+    if line.lstrip().startswith("/"):
+        return []
     m = _KEYED_SEP_RE.search(line)
     if m:
         line = line[: m.start()]

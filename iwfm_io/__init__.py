@@ -91,7 +91,9 @@ from iwfm_io.readers.timeseries import (
     read_precip,
     read_et,
     read_irigfrac,
+    read_irr_period,
     read_supply_adjust,
+    read_timeseries_file,
 )
 
 # Groundwater readers
@@ -121,7 +123,7 @@ from iwfm_io.readers.stream import (
 )
 
 # Lake readers
-from iwfm_io.readers.lake import read_lake_main
+from iwfm_io.readers.lake import read_lake_main, read_max_lake_elev
 
 # Root zone readers
 from iwfm_io.readers.rootzone import (
@@ -132,6 +134,7 @@ from iwfm_io.readers.rootzone import (
     read_native_veg_main,
     read_land_use_area,
     read_all_land_use_areas,
+    read_surface_flow_dest,
 )
 
 # Misc readers
@@ -173,7 +176,9 @@ from iwfm_io.writers.timeseries import (
     write_precip,
     write_et,
     write_irigfrac,
+    write_irr_period,
     write_supply_adjust,
+    write_timeseries_file,
 )
 
 # Groundwater writers
@@ -190,6 +195,7 @@ from iwfm_io.writers.groundwater import (
     write_elem_pump,
     write_ts_pumping,
     write_tile_drain,
+    write_subsidence,
     write_subsidence as write_subsidence_file,
 )
 
@@ -203,7 +209,7 @@ from iwfm_io.writers.stream import (
 )
 
 # Lake writers
-from iwfm_io.writers.lake import write_lake_main
+from iwfm_io.writers.lake import write_lake_main, write_max_lake_elev
 
 # Root zone writers
 from iwfm_io.writers.rootzone import (
@@ -213,6 +219,7 @@ from iwfm_io.writers.rootzone import (
     write_urban_main,
     write_native_veg_main,
     write_land_use_area,
+    write_surface_flow_dest,
 )
 
 # Misc writers
@@ -348,7 +355,9 @@ __all__ = [
     "read_precip",
     "read_et",
     "read_irigfrac",
+    "read_irr_period",
     "read_supply_adjust",
+    "read_timeseries_file",
     # Groundwater readers
     "read_gw_main",
     "read_bc_main",
@@ -371,6 +380,7 @@ __all__ = [
     "read_diversions",
     # Lake readers
     "read_lake_main",
+    "read_max_lake_elev",
     # Root zone readers
     "read_rootzone_main",
     "read_nonponded_ag_main",
@@ -379,6 +389,7 @@ __all__ = [
     "read_native_veg_main",
     "read_land_use_area",
     "read_all_land_use_areas",
+    "read_surface_flow_dest",
     # Misc readers
     "read_swshed",
     "read_unsatzone",
@@ -408,7 +419,9 @@ __all__ = [
     "write_precip",
     "write_et",
     "write_irigfrac",
+    "write_irr_period",
     "write_supply_adjust",
+    "write_timeseries_file",
     # Groundwater writers
     "write_gw_main",
     "write_bc_main",
@@ -422,6 +435,7 @@ __all__ = [
     "write_elem_pump",
     "write_ts_pumping",
     "write_tile_drain",
+    "write_subsidence",
     "write_subsidence_file",
     # Stream writers
     "write_stream_main",
@@ -431,6 +445,7 @@ __all__ = [
     "write_diversions",
     # Lake writers
     "write_lake_main",
+    "write_max_lake_elev",
     # Root zone writers
     "write_rootzone_main",
     "write_nonponded_ag_main",
@@ -438,6 +453,7 @@ __all__ = [
     "write_urban_main",
     "write_native_veg_main",
     "write_land_use_area",
+    "write_surface_flow_dest",
     # Misc writers
     "write_swshed",
     "write_unsatzone",

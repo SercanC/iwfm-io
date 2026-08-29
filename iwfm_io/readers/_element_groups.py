@@ -22,12 +22,14 @@ def element_groups_to_df(groups):
     """Flatten parsed element groups into a long-format DataFrame.
 
     Columns: ``group_id``, ``element_id`` and, when the groups carry
-    fractions (recharge-zone layout), ``fraction``.  Returns an empty
-    DataFrame when *groups* is empty.
+    fractions (recharge-zone layout), ``fraction``; a ``name`` column
+    is added when any group carries one (repeated on each of the
+    group's rows).  Returns an empty DataFrame when *groups* is empty.
     """
     import pandas as pd
 
     has_fractions = any("fractions" in g for g in groups)
+    has_names = any(g.get("name") for g in groups)
     records = []
     for g in groups:
         fractions = g.get("fractions") or []
@@ -35,9 +37,12 @@ def element_groups_to_df(groups):
             row = {"group_id": g["group_id"], "element_id": elem}
             if has_fractions:
                 row["fraction"] = fractions[i] if i < len(fractions) else None
+            if has_names:
+                row["name"] = g.get("name", "")
             records.append(row)
     columns = ["group_id", "element_id"] + (
-        ["fraction"] if has_fractions else [])
+        ["fraction"] if has_fractions else []) + (
+        ["name"] if has_names else [])
     return pd.DataFrame(records, columns=columns)
 
 
@@ -58,40 +63,51 @@ def parse_element_groups(lines, n_groups, with_fractions=False):
     Returns
     -------
     (groups, n_lines_consumed) : (list[dict], int)
-        Each group dict has ``group_id``, ``elements`` (list[int]) and,
-        when *with_fractions*, ``fractions`` (list[float]).
-        ``n_lines_consumed`` is how many of *lines* were used (so the
-        caller can continue parsing what follows).
+        Each group dict has ``group_id``, ``elements`` (list[int]),
+        ``name`` (the annotation on the group's header line — an
+        inline ``/`` comment or a trailing non-numeric tail; empty
+        string when absent) and, when *with_fractions*, ``fractions``
+        (list[float]).  ``n_lines_consumed`` is how many of *lines*
+        were used (so the caller can continue parsing what follows).
     """
     groups = []
     tokens: list[str] = []
     lines_used = 0
+    last_note = ""
     it = iter(lines)
 
     def _next_line_tokens() -> list[str]:
-        """Numeric tokens of the next non-comment line (may be empty)."""
-        nonlocal lines_used
+        """Numeric tokens of the next non-comment line (may be empty).
+
+        Also captures the line's annotation into ``last_note``: the
+        text after the first ``/`` — including ones glued to a number
+        with no whitespace ("31745/ Carrier Canal") — and/or a
+        non-numeric tail with the slash missing entirely
+        ("37 118 29567 NKWSD - CLASS 1").
+        """
+        nonlocal lines_used, last_note
         while True:
             line = next(it)  # StopIteration -> ValueError below
             lines_used += 1
             if is_comment(line):
                 continue
-            # Group tables are purely numeric, so anything from the first
-            # "/" on is an inline comment — including ones glued to a
-            # number with no whitespace ("31745/ Carrier Canal"), which
-            # tokenize_data_line's whitespace-slash rule would miss. Some
-            # files also carry names with the slash missing entirely
-            # ("37 118 29567 NKWSD - CLASS 1"), so numbers stop at the
+            # Group tables are purely numeric, so anything from the
+            # first "/" on is an inline comment; numbers stop at the
             # first non-numeric token.
-            line = line.split("/", 1)[0]
+            data_part, _, note = line.partition("/")
+            note = note.strip()
+            raw = data_part.split()
             toks: list[str] = []
-            for tok in tokenize_data_line(line):
+            for i, tok in enumerate(raw):
                 try:
                     float(tok)
                 except ValueError:
+                    tail = " ".join(raw[i:])
+                    note = f"{tail} {note}".strip() if note else tail
                     break
                 toks.append(tok)
             if toks:
+                last_note = note
                 return toks
 
     def _need(n):
@@ -106,6 +122,8 @@ def parse_element_groups(lines, n_groups, with_fractions=False):
             # e.g. a zero-element recharge zone "4  0  0  0.0" carries
             # a dummy pair that must not bleed into the next group.
             tokens = _next_line_tokens()
+            # The group's name/annotation rides on its header line
+            name = last_note
             _need(2)
             group_id = int(float(tokens.pop(0)))
             n_elem = int(float(tokens.pop(0)))
@@ -117,7 +135,8 @@ def parse_element_groups(lines, n_groups, with_fractions=False):
                 elements.append(int(float(tokens.pop(0))))
                 if with_fractions:
                     fractions.append(float(tokens.pop(0)))
-            group = {"group_id": group_id, "elements": elements}
+            group = {"group_id": group_id, "elements": elements,
+                     "name": name}
             if with_fractions:
                 group["fractions"] = fractions
             groups.append(group)

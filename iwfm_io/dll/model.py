@@ -1,5 +1,6 @@
 """IWFM Model wrapper."""
 
+import os
 from ctypes import c_int, c_double, c_char, byref
 import numpy as np
 import pandas as pd
@@ -39,16 +40,36 @@ class IWFMModel:
     dll_path : str, optional
         Explicit path to ``IWFM_C_x64.dll``.  Takes precedence over
         *dll_version*.
+    run_dir : str, optional
+        Working directory for the model open.  The DLL resolves
+        deck-internal relative file references against the referencing
+        file's folder and then the process CWD; decks organized into
+        component subfolders (e.g. C2VSimFG) write those references
+        relative to the Simulation folder — the folder the simulation
+        exe is launched from.  The open is therefore anchored to the
+        simulation main's folder (or the preprocessor main's when no
+        simulation file is given) by default, restoring the previous
+        CWD afterwards.  Pass *run_dir* to override for exotic layouts.
     """
 
     def __init__(self, preprocessor_file, simulation_file="",
                  wsa_file="", is_routed_streams=True,
-                 is_for_inquiry=False, dll_version=None, dll_path=None):
+                 is_for_inquiry=False, dll_version=None, dll_path=None,
+                 run_dir=None):
         self._dll = load_dll(version=dll_version, dll_path=dll_path)
         self._model_id = None
         self._open = False
         self._cache = {}
         self._is_for_inquiry = bool(is_for_inquiry)
+
+        # Absolute main-file paths stay valid across the chdir below.
+        preprocessor_file = os.path.abspath(preprocessor_file)
+        if simulation_file:
+            simulation_file = os.path.abspath(simulation_file)
+        if wsa_file:
+            wsa_file = os.path.abspath(wsa_file)
+        if run_dir is None:
+            run_dir = os.path.dirname(simulation_file or preprocessor_file)
 
         pp_len, c_pp = str_to_c(preprocessor_file)
         sim_len, c_sim = str_to_c(simulation_file)
@@ -57,24 +78,29 @@ class IWFMModel:
         model_id = c_int(0)
         iStat = c_int(0)
 
-        if wsa_file:
-            wsa_len, c_wsa = str_to_c(wsa_file)
-            self._dll.IW_Model_WSA_New(
-                pp_len, c_pp, sim_len, c_sim, wsa_len, c_wsa,
-                c_routed, c_inquiry, byref(model_id), byref(iStat),
-            )
-        elif getattr(self._dll, "_iwfm_multi_model", True):
-            self._dll.IW_Model_New(
-                pp_len, c_pp, sim_len, c_sim,
-                c_routed, c_inquiry, byref(model_id), byref(iStat),
-            )
-        else:
-            # 2015-line DLLs: IW_Model_New has no model-id out-parameter.
-            self._dll.IW_Model_New(
-                pp_len, c_pp, sim_len, c_sim,
-                c_routed, c_inquiry, byref(iStat),
-            )
-        _check_status(iStat, self._dll)
+        prev_cwd = os.getcwd()
+        os.chdir(run_dir)
+        try:
+            if wsa_file:
+                wsa_len, c_wsa = str_to_c(wsa_file)
+                self._dll.IW_Model_WSA_New(
+                    pp_len, c_pp, sim_len, c_sim, wsa_len, c_wsa,
+                    c_routed, c_inquiry, byref(model_id), byref(iStat),
+                )
+            elif getattr(self._dll, "_iwfm_multi_model", True):
+                self._dll.IW_Model_New(
+                    pp_len, c_pp, sim_len, c_sim,
+                    c_routed, c_inquiry, byref(model_id), byref(iStat),
+                )
+            else:
+                # 2015-line DLLs: IW_Model_New has no model-id out-parameter.
+                self._dll.IW_Model_New(
+                    pp_len, c_pp, sim_len, c_sim,
+                    c_routed, c_inquiry, byref(iStat),
+                )
+            _check_status(iStat, self._dll)
+        finally:
+            os.chdir(prev_cwd)
         self._model_id = model_id.value
         self._open = True
 

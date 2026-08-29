@@ -50,6 +50,14 @@ def resolve_child_path(value: str, base_dir: str | Path) -> str:
     return str(candidates[0])
 
 
+class IWFMParseError(ValueError, StopIteration):
+    """Unexpected end of data or malformed content in an IWFM file.
+
+    Subclasses both ValueError (so callers get a normal, descriptive
+    error) and StopIteration (so pre-existing handlers keep working).
+    """
+
+
 class IWFMFileReader:
     """Sequential reader for IWFM text files.
 
@@ -87,7 +95,8 @@ class IWFMFileReader:
     def next_line(self) -> str:
         """Return the next raw line (comment or data) and advance."""
         if self.eof:
-            raise StopIteration("End of file reached")
+            raise IWFMParseError(
+            f"{self.path}: end of file reached while reading data")
         line = self._lines[self._pos]
         self._pos += 1
         return line
@@ -105,7 +114,10 @@ class IWFMFileReader:
                 self._comment_buffer.append(line)
                 continue
             return line
-        raise StopIteration("End of file reached without finding data line")
+        raise IWFMParseError(
+            f"{self.path}: end of file reached while a data line was "
+            "still expected — the file may be truncated or a section "
+            "is missing")
 
     def peek_data_line(self) -> str | None:
         """Peek at the next non-comment line without consuming it."""
@@ -303,8 +315,13 @@ class IWFMFileReader:
         ``COL_ID  /A/B/C//E/F/``
         """
         pathnames: list[tuple[int, str]] = []
-        for _ in range(spec.n_columns):
-            line = self.next_data_line()
+        for i in range(spec.n_columns):
+            try:
+                line = self.next_data_line()
+            except StopIteration:
+                raise IWFMParseError(
+                    f"{self.path}: DSS pathname block has only {i} of "
+                    f"{spec.n_columns} expected rows") from None
             tokens = line.split(None, 1)
             col_id = int(tokens[0])
             pathname = tokens[1].strip() if len(tokens) > 1 else ""

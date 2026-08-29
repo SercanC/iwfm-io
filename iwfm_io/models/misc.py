@@ -74,6 +74,11 @@ class UnsatZoneFile:
         element_id, layer, thickness, porosity, pore_size_index, k,
         rhc (1=Campbell, 2=van Genuchten-Mualem).  File-native values —
         apply the config factors for model units.
+    parametric_grids : list[dict]
+        NGROUP>0 only.  One dict per group: node_range (str, the
+        element-range line), nodes (list[int]), ndp, nep, elements
+        (DataFrame or None), params (DataFrame: node_id, x, y, layer,
+        thickness, porosity, pore_size_index, k, rhc).
     initial_moisture : pd.DataFrame or None
         Columns: element_id, moisture_layer_1..moisture_layer_N.
         element_id 0 means the values apply to all elements.
@@ -87,4 +92,5 @@ class UnsatZoneFile:
     config: dict = field(default_factory=dict)
     ngroup: int | None = None
     element_params: Any = None  # DataFrame
+    parametric_grids: list = field(default_factory=list)
     initial_moisture: Any = None  # DataFrame

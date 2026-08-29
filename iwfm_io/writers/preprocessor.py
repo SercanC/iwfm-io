@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from iwfm_io._writer import IWFMFileWriter
+from iwfm_io.writers._param_blocks import check_count, fmt_num
 from iwfm_io.models.preprocessor import (
     ElementFile,
     LakeGeomFile,
@@ -33,14 +34,14 @@ def write_nodes(node_file: NodeFile, path: str | Path) -> None:
     w.write_header(node_file.header)
 
     df = node_file.data
-    n_nodes = len(df)
-    w.write_keyed_value(n_nodes, f"{node_file.factor.keyword or 'ND'}")
+    check_count(node_file.n_nodes, len(df), "NodeXY: ND")
+    w.write_keyed_value(node_file.n_nodes, "ND")
     w.write_keyed_value(node_file.factor.value, node_file.factor.keyword or "FACT")
 
     # Write node table
     for _, row in df.iterrows():
         w.write_data_line(
-            [int(row["node_id"]), f"{row['x']:.1f}", f"{row['y']:.1f}"],
+            [int(row["node_id"]), fmt_num(row["x"]), fmt_num(row["y"])],
             widths=[7, 16, 16],
         )
 
@@ -59,10 +60,11 @@ def write_elements(elem_file: ElementFile, path: str | Path) -> None:
     w.write_header(elem_file.header)
 
     df = elem_file.data
-    n_elements = len(df)
-    n_regions = len(elem_file.subregions)
-    w.write_keyed_value(n_elements, "NE")
-    w.write_keyed_value(n_regions, "NREGN")
+    check_count(elem_file.n_elements, len(df), "Element: NE")
+    check_count(elem_file.n_subregions, len(elem_file.subregions),
+                "Element: NREGN")
+    w.write_keyed_value(elem_file.n_elements, "NE")
+    w.write_keyed_value(elem_file.n_subregions, "NREGN")
 
     # Subregion names
     for _, row in elem_file.subregions.iterrows():
@@ -100,12 +102,20 @@ def write_strata(strata_file: StratigraphyFile, path: str | Path) -> None:
     w.write_keyed_value(strata_file.factor.value, strata_file.factor.keyword or "FACT")
 
     df = strata_file.data
+    if strata_file.n_nodes:
+        check_count(strata_file.n_nodes, len(df),
+                    "Stratigraphy: node rows")
+    for i in range(1, strata_file.n_layers + 1):
+        if f"aquitard_{i}" not in df.columns or f"aquifer_{i}" not in df.columns:
+            raise ValueError(
+                f"Stratigraphy: NL={strata_file.n_layers} but layer {i} "
+                "columns are missing from the table")
     for _, row in df.iterrows():
-        tokens = [int(row["node_id"]), f"{row['elevation']:.1f}"]
+        tokens = [int(row["node_id"]), fmt_num(row["elevation"])]
         for i in range(1, strata_file.n_layers + 1):
-            tokens.append(f"{row[f'aquitard_{i}']:.1f}")
-            tokens.append(f"{row[f'aquifer_{i}']:.1f}")
-        widths = [8, 10] + [10] * (2 * strata_file.n_layers)
+            tokens.append(fmt_num(row[f"aquitard_{i}"]))
+            tokens.append(fmt_num(row[f"aquifer_{i}"]))
+        widths = [8, 12] + [12] * (2 * strata_file.n_layers)
         w.write_data_line(tokens, widths)
 
     w.flush()
@@ -124,18 +134,20 @@ def write_stream_geom(stream_file: StreamGeomFile, path: str | Path) -> None:
 
     reaches = stream_file.reaches
     nodes = stream_file.nodes
-    n_reaches = len(reaches)
-    w.write_keyed_value(n_reaches, "NRH")
+    check_count(stream_file.n_reaches, len(reaches), "Stream geometry: NRH")
+    w.write_keyed_value(stream_file.n_reaches, "NRH")
     w.write_keyed_value(stream_file.n_rating_points, "NRTB")
 
     # Reaches and their nodes
     for _, reach in reaches.iterrows():
         reach_id = int(reach["reach_id"])
+        reach_nodes = nodes[nodes["reach_id"] == reach_id]
+        check_count(reach["n_nodes"], len(reach_nodes),
+                    f"Stream geometry: reach {reach_id} NRD")
         w.write_data_line(
             [reach_id, int(reach["n_nodes"]), int(reach["outflow_dest"]), reach["name"]],
             widths=[6, 10, 10, 12],
         )
-        reach_nodes = nodes[nodes["reach_id"] == reach_id]
         for _, sn in reach_nodes.iterrows():
             w.write_data_line(
                 [int(sn["stream_node_id"]), int(sn["gw_node_id"])],
@@ -148,31 +160,43 @@ def write_stream_geom(stream_file: StreamGeomFile, path: str | Path) -> None:
     w.write_keyed_value(rf.get("factq", 1.0), "FACTQ")
     w.write_keyed_value(rf.get("tunit", "1min"), "TUNIT")
 
-    # Rating tables
+    # Rating tables: NRTB rows per stream node, validated
     rt = stream_file.rating_tables
     for sn_id in rt["stream_node_id"].unique():
         sn_rows = rt[rt["stream_node_id"] == sn_id]
+        check_count(stream_file.n_rating_points, len(sn_rows),
+                    f"Stream geometry: rating table rows for node {sn_id}"
+                    " (NRTB)")
         first = True
         for _, row in sn_rows.iterrows():
             if first:
                 w.write_data_line(
                     [
                         int(row["stream_node_id"]),
-                        f"{row['bottom_elev']:.1f}",
-                        f"{row['stage']:.1f}",
-                        f"{row['flow']:.2f}",
+                        fmt_num(row["bottom_elev"]),
+                        fmt_num(row["stage"]),
+                        fmt_num(row["flow"]),
                     ],
-                    widths=[6, 12, 12, 12],
+                    widths=[6, 12, 12, 14],
                 )
                 first = False
             else:
                 w.write_data_line(
-                    ["", "", f"{row['stage']:.1f}", f"{row['flow']:.2f}"],
-                    widths=[6, 12, 12, 12],
+                    ["", "", fmt_num(row["stage"]), fmt_num(row["flow"])],
+                    widths=[6, 12, 12, 14],
                 )
 
-    # Partial interaction
+    # Partial stream-aquifer interaction (IDSTR FPINT rows)
+    n_pint = (0 if stream_file.partial_interaction is None
+              else len(stream_file.partial_interaction))
+    check_count(stream_file.n_partial_interaction, n_pint,
+                "Stream geometry: NSTRPINT")
     w.write_keyed_value(stream_file.n_partial_interaction, "NSTRPINT")
+    if stream_file.partial_interaction is not None:
+        for _, row in stream_file.partial_interaction.iterrows():
+            w.write_data_line(
+                [int(row["stream_node_id"]), fmt_num(row["fraction"])],
+                widths=[8, 12])
 
     w.flush()
 
@@ -189,10 +213,13 @@ def write_lake_geom(lake_file: LakeGeomFile, path: str | Path) -> None:
     w.write_header(lake_file.header)
 
     df = lake_file.data
-    w.write_keyed_value(len(df), "NLAKE")
+    check_count(lake_file.n_lakes, len(df), "Lake geometry: NLAKE")
+    w.write_keyed_value(lake_file.n_lakes, "NLAKE")
 
     for _, row in df.iterrows():
         elements = row["elements"]
+        check_count(row["n_elements"], len(elements),
+                    f"Lake geometry: lake {int(row['lake_id'])} NELAKE")
         # First line: lake_id, dest_type, dest_id, n_elements, first_element
         w.write_data_line(
             [
@@ -228,8 +255,12 @@ def write_preprocessor_main(
     w = IWFMFileWriter(path)
     w.write_header(pp.header)
 
-    for title in pp.titles:
+    # IWFM reads exactly 3 title lines positionally — pad to 3 so the
+    # file list is never shifted (a "." line is a valid title).
+    titles = (list(pp.titles) + [".", ".", "."])[:3]
+    for title in titles:
         w.write_raw(f"    {title}")
+    w.write_comment("C  end of titles")
 
     path_keys = ["binary_output", "element", "node", "strata", "stream", "lake"]
     labels = [
@@ -242,6 +273,7 @@ def write_preprocessor_main(
     ]
     for key, label in zip(path_keys, labels):
         w.write_keyed_path(pp.file_paths.get(key), label, base_dir=base_dir)
+    w.write_comment("C  end of file list")
 
     cfg = pp.config
     w.write_keyed_value(cfg.get("kout", 1), "KOUT")

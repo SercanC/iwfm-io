@@ -51,10 +51,18 @@ def read_simulation_main(
     header = reader.read_header()
     base_dir = Path(path).parent
 
-    # 3 title lines
+    # Title lines: up to 3 non-comment data lines before the file list.
+    # A file-list entry is keyed "/ N: DESCRIPTION", so stop early when
+    # one appears (decks may carry fewer than 3 titles).
     titles = []
     for _ in range(3):
-        line = reader.next_data_line()
+        line = reader.peek_data_line()
+        if line is None:
+            break
+        _, kw = split_keyed_line(line)
+        if kw and _FILE_NUM_RE.match(kw):
+            break
+        reader.next_data_line()
         titles.append(line.strip())
 
     # File list: the entry count varies by IWFM version (12 in 2015-era
@@ -106,6 +114,9 @@ def read_simulation_main(
     restart = _int("RESTART")
     time_unit = scalars.get("UNITT", "")
     sim_end = scalars.get("EDT", "")
+    # DELTAT exists only in the "date and time NOT tracked" layout
+    # (BDT/EDT given as plain numbers instead of dates).
+    time_step = _float("DELTAT") if "DELTAT" in scalars else None
 
     output = {
         "istrt": _int("ISTRT"),
@@ -126,6 +137,17 @@ def read_simulation_main(
 
     supply_adjust_flag = _int("KOPTDV")
 
+    known = {"BDT", "RESTART", "UNITT", "EDT", "DELTAT", "ISTRT", "KDEB",
+             "CACHE", "MSOLVE", "RELAX", "MXITER", "MXITERSP", "STOPC",
+             "STOPCVL", "STOPCSP", "KOPTDV"}
+    unknown = sorted(set(scalars) - known)
+    if unknown:
+        import warnings
+        warnings.warn(
+            "Simulation main: unrecognized keyed value(s) "
+            f"{unknown} were read but are not modeled and will be "
+            "missing from written output")
+
     result = SimulationMain(
         header=header,
         titles=titles,
@@ -133,6 +155,7 @@ def read_simulation_main(
         sim_begin=sim_begin,
         sim_end=sim_end,
         time_unit=time_unit,
+        time_step=time_step,
         restart=restart,
         solver=solver,
         output=output,

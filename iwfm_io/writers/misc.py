@@ -10,7 +10,12 @@ from pathlib import Path
 
 from iwfm_io._writer import IWFMFileWriter
 from iwfm_io.models.misc import SWShedFile, UnsatZoneFile
-from iwfm_io.writers._param_blocks import fmt_num, write_table_rows
+from iwfm_io.writers._param_blocks import (
+    check_count,
+    fmt_num,
+    write_node_layer_table,
+    write_table_rows,
+)
 
 
 def write_swshed(sw: SWShedFile, path: str | Path) -> None:
@@ -30,7 +35,20 @@ def write_swshed(sw: SWShedFile, path: str | Path) -> None:
     w.write_keyed_path(sw.file_paths.get("budget"), "SWBUDFL", base_dir=base_dir)
     w.write_keyed_path(sw.file_paths.get("final"), "FNSWFL", base_dir=base_dir)
 
-    # Number of watersheds and conversion factors
+    # Number of watersheds and conversion factors — NSW sizes all
+    # four tables, and each watershed's NWB sizes its node rows
+    for name, df in (("watershed spec", sw.watershed_data),
+                     ("root zone parameter", sw.rootzone_params),
+                     ("aquifer parameter", sw.aquifer_params),
+                     ("initial condition", sw.initial_conditions)):
+        if df is not None:
+            check_count(sw.n_watersheds, len(df),
+                        f"SWShed: NSW vs {name} rows")
+    if sw.watershed_data is not None and sw.watershed_nodes is not None:
+        sizes = sw.watershed_nodes.groupby("watershed_id").size()
+        for _, ws in sw.watershed_data.iterrows():
+            check_count(ws["n_gw_nodes"], sizes.get(int(ws["id"]), 0),
+                        f"SWShed: watershed {int(ws['id'])} NWB")
     w.write_keyed_value(sw.n_watersheds, "NSW")
     cfg = sw.config
     w.write_keyed_value(fmt_num(cfg.get("facta", 1.0)), "FACTA")
@@ -122,6 +140,19 @@ def write_unsatzone(uz: UnsatZoneFile, path: str | Path) -> None:
     w.write_keyed_path(uz.file_paths.get("zbudget"), "UZZBUDFL", base_dir=base_dir)
     w.write_keyed_path(uz.file_paths.get("final"), "UZFNFL", base_dir=base_dir)
 
+    if uz.element_params is not None and len(uz.element_params) > 0:
+        check_count(uz.n_unsat_layers,
+                    int(uz.element_params["layer"].max()),
+                    "UnsatZone: NUNSAT vs element parameter layers")
+    if uz.initial_moisture is not None:
+        n_moist = sum(1 for c in uz.initial_moisture.columns
+                      if c.startswith("moisture_layer_"))
+        check_count(uz.n_unsat_layers, n_moist,
+                    "UnsatZone: NUNSAT vs initial moisture columns")
+    if uz.ngroup:
+        check_count(uz.ngroup, len(uz.parametric_grids),
+                    "UnsatZone: NGROUP vs parametric grid groups")
+
     cfg = uz.config
     w.write_comment("C  Unsaturated Zone Parameters")
     w.write_keyed_value(uz.ngroup if uz.ngroup is not None else 0, "NGROUP")
@@ -130,6 +161,26 @@ def write_unsatzone(uz: UnsatZoneFile, path: str | Path) -> None:
          fmt_num(cfg.get("fk", 1.0))],
         widths=[12, 12, 12])
     w.write_keyed_value(cfg.get("tunitz", "1DAY"), "TUNITZ")
+
+    # Option 1 (NGROUP>0): parametric grid groups
+    param_cols = ["thickness", "porosity", "pore_size_index", "k", "rhc"]
+    for grid in uz.parametric_grids:
+        w.write_raw(f"   {grid['node_range']}")
+        # IWFM reads the element-range list with READCH, which keeps
+        # consuming data lines until a comment terminates the list —
+        # this comment is load-bearing, not decoration.
+        w.write_comment("C  end of element list")
+        w.write_keyed_value(grid["ndp"], "NDP")
+        w.write_keyed_value(grid["nep"], "NEP")
+        elements = grid.get("elements")
+        if elements is not None and len(elements) > 0:
+            node_cols = [c for c in elements.columns if c != "element_id"]
+            write_table_rows(w, elements, ["element_id"] + node_cols,
+                             widths=[10] + [10] * len(node_cols))
+        params = grid.get("params")
+        if params is not None and len(params) > 0:
+            write_node_layer_table(w, params, param_cols,
+                                   leading_names=["node_id", "x", "y"])
 
     # Per-element parameter rows: IE + (PD PN PI PK PRHC) per layer,
     # all layers on one line (long-format DataFrame is pivoted back).

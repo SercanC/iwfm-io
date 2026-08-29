@@ -17,12 +17,16 @@ class NodeFile:
     Attributes
     ----------
     header : FileHeader
+    n_nodes : int
+        ND — the declared node count.  The writer emits this value and
+        raises if it disagrees with ``len(data)``.
     factor : ConversionFactor
     data : GeoDataFrame
         Columns: node_id (int), x (float), y (float), geometry (Point).
     """
 
     header: FileHeader = field(default_factory=FileHeader)
+    n_nodes: int = 0
     factor: ConversionFactor = field(default_factory=ConversionFactor)
     data: Any = None  # GeoDataFrame at runtime
 
@@ -34,6 +38,12 @@ class ElementFile:
     Attributes
     ----------
     header : FileHeader
+    n_elements : int
+        NE — declared element count (validated against ``len(data)``
+        on write).
+    n_subregions : int
+        NREGN — declared subregion count (validated against
+        ``len(subregions)`` on write).
     subregions : pd.DataFrame
         Columns: subregion_id (int), name (str).
     data : GeoDataFrame
@@ -41,6 +51,8 @@ class ElementFile:
     """
 
     header: FileHeader = field(default_factory=FileHeader)
+    n_elements: int = 0
+    n_subregions: int = 0
     subregions: Any = None  # DataFrame
     data: Any = None  # GeoDataFrame
 
@@ -53,6 +65,10 @@ class StratigraphyFile:
     ----------
     header : FileHeader
     n_layers : int
+    n_nodes : int
+        Row count of the table (the file itself has no count — IWFM
+        sizes it by ND from the node file).  Validated against
+        ``len(data)`` on write.
     factor : ConversionFactor
     data : pd.DataFrame
         Columns: node_id, elevation, aquitard_1, aquifer_1, ..., aquitard_N, aquifer_N.
@@ -60,6 +76,7 @@ class StratigraphyFile:
 
     header: FileHeader = field(default_factory=FileHeader)
     n_layers: int = 0
+    n_nodes: int = 0
     factor: ConversionFactor = field(default_factory=ConversionFactor)
     data: Any = None  # DataFrame
 
@@ -71,9 +88,14 @@ class StreamGeomFile:
     Attributes
     ----------
     header : FileHeader
-    version : str or None
+        The version line (e.g. ``#4.0``) is kept in ``header.version``.
+    n_reaches : int
+        NRH — declared reach count (validated against ``len(reaches)``
+        on write; each reach's ``n_nodes`` is validated against its
+        node rows).
     n_rating_points : int
-        Number of rating table points per stream node (NRTB).
+        Number of rating table points per stream node (NRTB; every
+        stream node's rating rows are validated against it on write).
     reaches : pd.DataFrame
         Columns: reach_id, n_nodes, outflow_dest, name.
     nodes : GeoDataFrame
@@ -83,15 +105,23 @@ class StreamGeomFile:
     rating_factors : dict
         Keys: factlt, factq, tunit.
     n_partial_interaction : int
+        NSTRPINT — number of stream nodes with partial stream-aquifer
+        interaction.
+    partial_interaction : pd.DataFrame or None
+        One row per partial-interaction node: stream_node_id (IDSTR),
+        fraction (FPINT — fraction of the wetted perimeter interacting
+        with the aquifer).  None when NSTRPINT is 0.
     """
 
     header: FileHeader = field(default_factory=FileHeader)
+    n_reaches: int = 0
     n_rating_points: int = 0
     reaches: Any = None
     nodes: Any = None  # GeoDataFrame
     rating_tables: Any = None  # DataFrame
     rating_factors: dict = field(default_factory=dict)
     n_partial_interaction: int = 0
+    partial_interaction: Any = None  # DataFrame
 
 
 @dataclass
@@ -101,11 +131,17 @@ class LakeGeomFile:
     Attributes
     ----------
     header : FileHeader
+    n_lakes : int
+        NLAKE — declared lake count (validated against ``len(data)``
+        on write; each lake's ``n_elements`` is validated against its
+        element list).
     data : pd.DataFrame
-        Columns: lake_id, dest_type, dest_id, elements (list[int]).
+        Columns: lake_id, dest_type, dest_id, n_elements,
+        elements (list[int]).
     """
 
     header: FileHeader = field(default_factory=FileHeader)
+    n_lakes: int = 0
     data: Any = None  # DataFrame
 
 

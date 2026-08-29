@@ -134,7 +134,10 @@ class TestGroundwater:
         assert ws.n_groups == 44
         df = ws.element_groups_df
         assert len(df) == 3871
-        assert list(df.columns) == ["group_id", "element_id"]
+        # delivery groups carry annotation names in C2VSimFG (captured
+        # from the group header lines)
+        assert list(df.columns) == ["group_id", "element_id", "name"]
+        assert (df["name"] != "").any()
 
     def test_constrained_head_bc(self):
         from iwfm_io.readers.groundwater import read_constrained_head_bc
@@ -298,9 +301,16 @@ class TestStreams:
             C2VSIMFG / "Simulation" / "Streams" / "C2VSimFG_Streams.dat")
         assert len(st.hydrograph_specs) == 63
         assert len(st.node_budget_nodes) == 4634
-        # Bed rows have a trailing "/Reach ..." comment and a 5th column
+        # v4.2 bed layout: IR WETPR IGW CSTRM DSTRM (the old reader
+        # misread this with the v4.0 column order)
         assert len(st.reach_params) == 4634
-        assert "col_5" in st.reach_params.columns
+        assert "gw_node_id" in st.reach_params.columns
+        assert "wetted_perimeter" in st.reach_params.columns
+        # gw_node_id is a real node id, conductance a small rate
+        assert st.reach_params["gw_node_id"].max() <= 30179
+        assert st.reach_params["conductance"].max() < 100.0
+        # bed rows carry "/Reach ..." annotations, now kept as notes
+        assert (st.reach_params["notes"] != "").any()
         assert st.config["intrctype"] == 1
         # Stream evaporation table: one row per stream node with
         # lookup columns into the ET file and STARFL

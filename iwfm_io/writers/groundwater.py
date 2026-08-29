@@ -27,11 +27,30 @@ from iwfm_io.models.groundwater import (
     WellSpecFile,
 )
 from iwfm_io.writers._param_blocks import (
+    check_count,
     fmt_num,
     write_element_groups,
     write_param_block,
     write_table_rows,
 )
+
+
+def _nrows(df) -> int:
+    return 0 if df is None else len(df)
+
+
+def _note(row) -> str:
+    """The row's notes annotation, or "" when absent."""
+    v = row.get("notes")
+    return v if isinstance(v, str) else ""
+
+
+def _cell(value) -> str:
+    """A table cell: blank for missing values, ``fmt_num`` otherwise."""
+    import pandas as pd
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    return fmt_num(value)
 
 
 # ------------------------------------------------------------------
@@ -85,6 +104,7 @@ def write_gw_main(
     w.write_keyed_value(cfg.get("kdeb", 0), "KDEB")
 
     # Hydrograph output block
+    check_count(gw.n_hydrographs, _nrows(gw.hydrographs), "GW main: NOUTH")
     w.write_keyed_value(gw.n_hydrographs, "NOUTH")
     w.write_keyed_value(gw.hydrograph_factxy, "FACTXY")
     w.write_keyed_path(gw.hydrograph_out_file, "GWHYDOUTFL", base_dir=base_dir)
@@ -93,34 +113,38 @@ def write_gw_main(
         for _, row in gw.hydrographs.iterrows():
             w.write_data_line(
                 [
-                    row["id"],
-                    row["hydtyp"],
-                    row["layer"],
-                    row["x"] if row["x"] is not None else "",
-                    row["y"] if row["y"] is not None else "",
-                    row["node"] if row["node"] is not None else "",
+                    _cell(row["id"]),
+                    _cell(row["hydtyp"]),
+                    _cell(row["layer"]),
+                    _cell(row["x"]),
+                    _cell(row["y"]),
+                    _cell(row["node"]),
                     row["name"] if row["name"] is not None else "",
                 ],
                 widths=[6, 8, 10, 14, 14, 14, 12],
+                note=_note(row),
             )
 
     # Face flow output block. FCHYDOUTFL is omitted when there are no
     # face flow hydrographs (matches IWFM 2024.x files with NOUTF=0).
+    check_count(gw.n_face_flows, _nrows(gw.face_flows), "GW main: NOUTF")
     w.write_keyed_value(gw.n_face_flows, "NOUTF")
-    if gw.n_face_flows > 0 or gw.face_flow_out_file is not None:
-        w.write_keyed_path(gw.face_flow_out_file, "FCHYDOUTFL", base_dir=base_dir)
+    # IWFM reads FCHYDOUTFL unconditionally (C2VSimFG carries a blank
+    # line even with NOUTF=0), so always emit it
+    w.write_keyed_path(gw.face_flow_out_file, "FCHYDOUTFL", base_dir=base_dir)
 
     if gw.face_flows is not None and len(gw.face_flows) > 0:
         for _, row in gw.face_flows.iterrows():
             w.write_data_line(
                 [
-                    row["id"],
-                    row["layer"],
-                    row["node_a"],
-                    row["node_b"],
+                    _cell(row["id"]),
+                    _cell(row["layer"]),
+                    _cell(row["node_a"]),
+                    _cell(row["node_b"]),
                     row["name"] if row["name"] is not None else "",
                 ],
                 widths=[6, 8, 12, 12, 12],
+                note=_note(row),
             )
 
     # Aquifer parameter section, regenerated from the parsed data
@@ -142,6 +166,7 @@ def write_gw_main(
 
     # Anomaly in hydraulic conductivity
     w.write_comment("C  Anomaly in Hydraulic Conductivity")
+    check_count(gw.anomaly_nebk, _nrows(gw.kh_anomalies), "GW main: NEBK")
     w.write_keyed_value(gw.anomaly_nebk, "NEBK")
     w.write_keyed_value(fmt_num(gw.anomaly_factor), "FACT")
     w.write_keyed_value(gw.anomaly_time_unit or "1day", "TUNITH")
@@ -202,6 +227,8 @@ def write_bc_main(
     w.write_keyed_path(fp.get("con_ghbc"), "CONGHBCFL", base_dir=base_dir)
     w.write_keyed_path(fp.get("ts_bc"), "TSBCFL", base_dir=base_dir)
 
+    check_count(bc.n_bc_hydrographs, _nrows(bc.bc_hydrographs),
+                "BC main: NOUTB")
     w.write_keyed_value(bc.n_bc_hydrographs, "NOUTB")
     w.write_keyed_path(bc.bc_hyd_out_file, "BHYDOUTFL", base_dir=base_dir)
 
@@ -209,12 +236,13 @@ def write_bc_main(
         for _, row in bc.bc_hydrographs.iterrows():
             w.write_data_line(
                 [
-                    row["id"],
-                    row["layer"],
-                    row["node"],
+                    _cell(row["id"]),
+                    _cell(row["layer"]),
+                    _cell(row["node"]),
                     row["name"] if row["name"] is not None else "",
                 ],
                 widths=[6, 8, 12, 12],
+                note=_note(row),
             )
 
     w.flush()
@@ -235,6 +263,7 @@ def write_spec_head_bc(sf: SpecifiedHeadFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(sf.header)
 
+    check_count(sf.n_nodes, _nrows(sf.data), "Specified head BC: NHB")
     w.write_keyed_value(sf.n_nodes, "NHB")
     w.write_keyed_value(sf.factor, "FACT")
 
@@ -244,8 +273,8 @@ def write_spec_head_bc(sf: SpecifiedHeadFile, path: str | Path) -> None:
                 [
                     int(row["node_id"]),
                     int(row["layer"]),
-                    int(row["ibctyp"]),
-                    f"{float(row['head']):.1f}",
+                    int(row["itscol"]),
+                    fmt_num(float(row["head"])),
                 ],
                 widths=[10, 8, 8, 12],
             )
@@ -271,6 +300,7 @@ def write_spec_flow_bc(sf: SpecifiedFlowBCFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(sf.header)
 
+    check_count(sf.n_nodes, _nrows(sf.data), "Specified flow BC: NQB")
     w.write_keyed_value(sf.n_nodes, "NQB")
     w.write_keyed_value(sf.factor, "FACT")
     w.write_keyed_value(sf.time_unit, "TUNIT")
@@ -309,6 +339,7 @@ def write_general_head_bc(gh: GeneralHeadBCFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(gh.header)
 
+    check_count(gh.n_nodes, _nrows(gh.data), "General head BC: NGB")
     w.write_keyed_value(gh.n_nodes, "NGB")
     w.write_keyed_value(gh.facth, "FACTH")
     w.write_keyed_value(gh.factc, "FACTC")
@@ -353,6 +384,8 @@ def write_constrained_head_bc(
     w = IWFMFileWriter(path)
     w.write_header(ch.header)
 
+    check_count(ch.n_nodes, _nrows(ch.data),
+                "Constrained head BC: NGB")
     w.write_keyed_value(ch.n_nodes, "NGB")
     w.write_keyed_value(ch.facth, "FACTH")
     w.write_keyed_value(ch.factvl, "FACTVL")
@@ -463,25 +496,48 @@ def write_elem_pump(ep: ElemPumpFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(ep.header)
 
+    check_count(ep.n_sinks, _nrows(ep.data), "Element pumping: NSINK")
     w.write_keyed_value(ep.n_sinks, "NSINK")
 
-    col_order = [
-        "id", "icolsk", "fracsk", "ioptsk",
-        "fracskl_1", "fracskl_2",
-        "typdstsk", "dstsk", "icfirigsk", "icadjsk", "icskmax", "fskmax",
-    ]
-    widths = [5, 6, 9, 9, 12, 12, 12, 8, 12, 10, 10, 8]
-
     if ep.data is not None:
+        # Per-layer fraction columns are dynamic (one per aquifer layer)
+        frac_cols = sorted(
+            (c for c in ep.data.columns if c.startswith("fracskl_")),
+            key=lambda c: int(c.rsplit("_", 1)[1]))
+        col_order = (
+            ["id", "icolsk", "fracsk", "ioptsk"] + frac_cols
+            + ["typdstsk", "dstsk", "icfirigsk", "icadjsk", "icskmax",
+               "fskmax"]
+        )
+        widths = ([5, 6, 9, 9] + [12] * len(frac_cols)
+                  + [12, 8, 12, 10, 10, 8])
+        import pandas as pd
         for _, row in ep.data.iterrows():
-            tokens = []
-            for col in col_order:
-                val = row.get(col)
-                if val is None or (isinstance(val, float) and str(val) == "nan"):
-                    break
-                tokens.append(val)
-            w.write_data_line(tokens, widths[: len(tokens)])
+            vals = [row.get(col) for col in col_order]
 
+            def _isna(v):
+                return v is None or (not isinstance(v, str) and pd.isna(v))
+
+            n_valid = len(vals)
+            while n_valid and _isna(vals[n_valid - 1]):
+                n_valid -= 1
+            tokens = []
+            for col, val in zip(col_order[:n_valid], vals[:n_valid]):
+                if _isna(val):
+                    raise ValueError(
+                        f"NaN in elem-pump column {col!r} — only "
+                        "TRAILING values may be omitted; a gap in the "
+                        "middle would shift IWFM's read")
+                tokens.append(fmt_num(val))
+            line = "".join(str(t).rjust(wd)
+                           for t, wd in zip(tokens, widths))
+            name = row.get("name") or ""
+            if isinstance(name, str) and name:
+                line += f"    /{name}"
+            w.write_raw(line)
+
+    check_count(ep.n_groups, len(ep.element_groups),
+                "Element pumping: NGRP")
     w.write_keyed_value(ep.n_groups, "NGRP")
     write_element_groups(w, ep.element_groups)
 
@@ -503,6 +559,7 @@ def write_well_spec(ws: WellSpecFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(ws.header)
 
+    check_count(ws.n_wells, _nrows(ws.data), "Well specs: NWELL")
     w.write_keyed_value(ws.n_wells, "NWELL")
     w.write_keyed_value(fmt_num(ws.factors.get("factxy", 1.0)), "FACTXY")
     w.write_keyed_value(fmt_num(ws.factors.get("factrw", 1.0)), "FACTRW")
@@ -528,9 +585,18 @@ def write_well_spec(ws: WellSpecFile, path: str | Path) -> None:
     if ws.pump_config is not None:
         cols = ["id", "icolwl", "fracwl", "ioptwl", "typdstwl", "dstwl",
                 "icfirigwl", "icadjwl", "icwlmax", "fwlmax"]
-        write_table_rows(w, ws.pump_config, cols,
-                         widths=[8, 8, 8, 8, 8, 10, 10, 8, 8, 8])
+        widths = [8, 8, 8, 8, 8, 10, 10, 8, 8, 8]
+        for _, row in ws.pump_config.iterrows():
+            cells = [fmt_num(row[c]) for c in cols]
+            if "" in cells:
+                bad = cols[cells.index("")]
+                raise ValueError(
+                    f"NaN in well pump-config column {bad!r} for well "
+                    f"{row.get('id')} — a blank cell would shift IWFM's "
+                    "read")
+            w.write_data_line(cells, widths, note=_note(row))
 
+    check_count(ws.n_groups, len(ws.element_groups), "Well specs: NGRP")
     w.write_keyed_value(ws.n_groups, "NGRP")
     write_element_groups(w, ws.element_groups)
 
@@ -580,6 +646,7 @@ def write_tile_drain(td: TileDrainFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(td.header)
 
+    check_count(td.n_tile_drains, _nrows(td.data), "Tile drains: NTD")
     w.write_keyed_value(td.n_tile_drains, "NTD")
     w.write_keyed_value(td.facth, "FACTH")
     w.write_keyed_value(td.factcdc, "FACTCDC")
@@ -591,14 +658,16 @@ def write_tile_drain(td: TileDrainFile, path: str | Path) -> None:
                 [
                     int(row["id"]),
                     int(row["node"]),
-                    f"{float(row['elev']):.1f}",
-                    f"{float(row['conductance']):.1f}",
+                    fmt_num(float(row["elev"])),
+                    fmt_num(float(row["conductance"])),
                     int(row["dest_type"]),
                     int(row["dest"]),
                 ],
                 widths=[6, 8, 12, 12, 10, 8],
             )
 
+    check_count(td.n_sub_irrig, _nrows(td.sub_irrig_data),
+                "Tile drains: NSI")
     w.write_keyed_value(td.n_sub_irrig, "NSI")
     w.write_keyed_value(td.facthsi, "FACTHSI")
     w.write_keyed_value(td.factcdcsi, "FACTCDCSI")
@@ -610,14 +679,16 @@ def write_tile_drain(td: TileDrainFile, path: str | Path) -> None:
                 [
                     int(row["id"]),
                     int(row["node"]),
-                    f"{float(row['elev']):.1f}",
-                    f"{float(row['conductance']):.1f}",
+                    fmt_num(float(row["elev"])),
+                    fmt_num(float(row["conductance"])),
                 ],
                 widths=[6, 8, 12, 12],
             )
 
     # Hydrograph print control section
     w.write_comment("C  Hydrograph Print Control")
+    check_count(td.n_hydrographs, _nrows(td.hydrographs),
+                "Tile drains: NOUTTD")
     w.write_keyed_value(td.n_hydrographs, "NOUTTD")
     w.write_keyed_value(fmt_num(td.hyd_factvlou), "FACTVLOU")
     w.write_keyed_value(td.hyd_unitvlou, "UNITVLOU")
@@ -627,6 +698,7 @@ def write_tile_drain(td: TileDrainFile, path: str | Path) -> None:
             w.write_data_line(
                 [int(row["id"]), int(row["idtyp"]), row["name"]],
                 widths=[8, 8, 16],
+                note=_note(row),
             )
 
     w.flush()
@@ -661,6 +733,8 @@ def write_subsidence(
     w.write_keyed_value(cfg.get("factltou", 1.0), "FACTLTOU")
     w.write_keyed_value(cfg.get("unitltou", "ft."), "UNITLTOU")
 
+    check_count(sub.n_hydrographs, _nrows(sub.hydrographs),
+                "Subsidence: NOUTS")
     w.write_keyed_value(sub.n_hydrographs, "NOUTS")
     w.write_keyed_value(sub.hydrograph_factxy, "FACTXY")
     w.write_keyed_path(sub.hydrograph_out_file, "SUBHYDOUTFL", base_dir=base_dir)
@@ -669,15 +743,16 @@ def write_subsidence(
         for _, row in sub.hydrographs.iterrows():
             w.write_data_line(
                 [
-                    row["id"],
-                    row["subtyp"],
-                    row["layer"],
-                    row["x"] if row["x"] is not None else "",
-                    row["y"] if row["y"] is not None else "",
-                    row["node"] if row["node"] is not None else "",
+                    _cell(row["id"]),
+                    _cell(row["subtyp"]),
+                    _cell(row["layer"]),
+                    _cell(row["x"]),
+                    _cell(row["y"]),
+                    _cell(row["node"]),
                     row["name"] if row["name"] is not None else "",
                 ],
                 widths=[6, 8, 10, 14, 14, 14, 12],
+                note=_note(row),
             )
 
     # Subsidence parameter section, regenerated from the parsed data
@@ -690,6 +765,7 @@ def write_subsidence(
         param_names=["sce", "sci", "dc", "dcmin", "hc"],
         node_params=sub.subsidence_params,
         parametric_grids=sub.parametric_grids,
+        time_units=sub.param_time_units or None,
     )
 
     w.flush()

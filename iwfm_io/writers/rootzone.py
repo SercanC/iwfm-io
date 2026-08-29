@@ -24,7 +24,11 @@ from iwfm_io.readers.rootzone import (
     _SOIL_COLS_V412,
     PONDED_CROP_TYPES,
 )
-from iwfm_io.writers._param_blocks import fmt_num, write_table_rows
+from iwfm_io.writers._param_blocks import (
+    check_count,
+    fmt_num,
+    write_table_rows,
+)
 
 
 def write_rootzone_main(
@@ -91,7 +95,11 @@ def write_rootzone_main(
     if df is not None:
         columns = (_SOIL_COLS_V412 if "icdstag" in df.columns
                    else _SOIL_COLS_V411)
-        columns = [c for c in columns if c in df.columns]
+        # the v4.11 reader NaN-pads a legally-absent trailing column —
+        # drop all-NaN columns so no NaN cell reaches the writer (a
+        # sporadic NaN still raises in write_table_rows)
+        columns = [c for c in columns
+                   if c in df.columns and df[c].notna().any()]
         write_table_rows(w, df, columns,
                          widths=[8] + [10] * (len(columns) - 1))
 
@@ -119,9 +127,14 @@ def _write_element_table(w: IWFMFileWriter, df, label: str) -> None:
 
 
 def _write_keyed_codes(w: IWFMFileWriter, codes: list[str],
-                       keyword: str) -> None:
+                       keyword: str,
+                       names: dict[str, str] | None = None) -> None:
     for i, code in enumerate(codes, start=1):
-        w.write_keyed_value(code, f"{keyword}[{i}]", width=24)
+        kw = f"{keyword}[{i}]"
+        name = (names or {}).get(code, "")
+        if name:
+            kw = f"{kw}  {name}"
+        w.write_keyed_value(code, kw, width=24)
 
 
 # ------------------------------------------------------------------
@@ -147,13 +160,22 @@ def write_nonponded_ag_main(
     w.write_header(np_ag.header)
     fp = np_ag.file_paths
 
+    check_count(np_ag.n_crops, len(np_ag.crop_codes),
+                "Non-ponded ag main: NCROP vs crop codes")
+    if np_ag.root_depths is not None:
+        check_count(np_ag.n_crops, len(np_ag.root_depths),
+                    "Non-ponded ag main: NCROP vs root depth rows")
+    check_count(np_ag.n_budget_crops, len(np_ag.budget_crop_codes),
+                "Non-ponded ag main: NBCROP vs budget crop codes")
     w.write_keyed_value(np_ag.n_crops, "NCROP")
     w.write_keyed_value(np_ag.demand_from_moisture, "FLDMD")
-    _write_keyed_codes(w, np_ag.crop_codes, "CCODE")
+    _write_keyed_codes(w, np_ag.crop_codes, "CCODE",
+                       names=np_ag.crop_names)
     w.write_keyed_path(fp.get("land_use_area"), "LUFLNP", base_dir=base_dir)
 
     w.write_keyed_value(np_ag.n_budget_crops, "NBCROP")
-    _write_keyed_codes(w, np_ag.budget_crop_codes, "BCCODE")
+    _write_keyed_codes(w, np_ag.budget_crop_codes, "BCCODE",
+                       names=np_ag.crop_names)
     w.write_keyed_path(fp.get("crop_lwu_budget"), "CLWUBUDFL",
                        base_dir=base_dir)
     w.write_keyed_path(fp.get("crop_rz_budget"), "CRZBUDFL",
@@ -363,7 +385,9 @@ def write_land_use_area(lu: LandUseAreaFile, path: str | Path) -> None:
         vals = df[value_cols].to_numpy(float)
         lines = np.char.add(date_field, elem_field)
         for j in range(vals.shape[1]):
-            lines = np.char.add(lines, np.char.mod("%15.6g", vals[:, j]))
+            # %.10g keeps full practical precision (areas are model
+            # inputs; %.6g measurably truncated large absolute values)
+            lines = np.char.add(lines, np.char.mod("%16.10g", vals[:, j]))
         w.lines.extend(lines.tolist())
 
     w.flush()
@@ -398,4 +422,39 @@ def write_native_veg_main(
     _write_element_table(w, nv.element_params,
                          "Native/riparian element parameters")
     _write_element_table(w, nv.initial_conditions, "Initial conditions")
+    w.flush()
+
+
+def write_surface_flow_dest(sfd, path: str | Path) -> None:
+    """Write a surface flow destination file (DESTFL).
+
+    Mirrors :func:`iwfm_io.read_surface_flow_dest`: 3-param spec, then
+    ``DATE  (T,D) .. (T,D)`` rows.
+
+    Parameters
+    ----------
+    sfd : SurfaceFlowDestFile
+    path : str or Path
+    """
+    w = IWFMFileWriter(path)
+    w.write_header(sfd.header)
+
+    if sfd.data is not None:
+        n_pairs = sum(1 for c in sfd.data.columns
+                      if c.startswith("type_"))
+        check_count(sfd.n_columns, n_pairs,
+                    "Surface flow dest: NDSTN vs (type,dest) columns")
+    w.write_keyed_value(sfd.n_columns, "NDSTN")
+    w.write_keyed_value(sfd.n_steps_update, "NSPDSTN")
+    w.write_keyed_value(sfd.repeat_freq, "NFQDSTN")
+    w.write_comment("C  end of specification")
+
+    if sfd.data is not None:
+        for _, row in sfd.data.iterrows():
+            parts = [f"   {row['date']}"]
+            for i in range(1, sfd.n_columns + 1):
+                parts.append(
+                    f"  ({int(row[f'type_{i}'])},{int(row[f'dest_{i}'])})")
+            w.write_raw("".join(parts))
+
     w.flush()

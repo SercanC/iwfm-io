@@ -91,8 +91,9 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 | `read_simulation(path)` | `Simulation_MAIN.IN` | `SimulationMain` with `.sim_begin`, `.sim_end`, `.time_step` |
 | `read_precip(path)` | `Precip.dat` | Result with `.data` DataFrame, `.spec` |
 | `read_et(path)` | `ET.dat` | Result with `.data` DataFrame, `.spec` |
-| `read_irigfrac(path)` | `IrigFrac.dat` | Irrigation fractions |
-| `read_supply_adjust(path)` | `SupplyAdjust.dat` | Supply adjustment specs |
+| `read_irigfrac(path)` | `IrigFrac.dat` | Irrigation fractions (incl. DSS mode) |
+| `read_supply_adjust(path)` | `SupplyAdjust.dat` | Supply adjustment specs (incl. DSS mode) |
+| `read_timeseries_file(path, has_factor=None)` | Any standard IWFM time-series data file (3/4/5-param spec auto-detected from keywords) | `TimeSeriesDataFile` — covers the root-zone leaf files: RootDepthFrac, MinMoist, PondDepth, RiceOps, Population, PerCapWaterUse, UrbanWaterUseSpecs, ReturnFlowFrac, ReuseFrac |
 
 ### Groundwater Readers
 
@@ -126,14 +127,17 @@ model.describe()   # JSON-serializable summary: grid, streams, lakes,
 
 | Function | Input file |
 |----------|-----------|
-| `read_lake_main(path)` | `Lake_MAIN.dat` |
+| `read_lake_main(path)` | `Lake_MAIN.dat` — file refs, bed factors, per-lake parameter table (any number of lakes), initial lake elevations |
+| `read_max_lake_elev(path)` | `MaxLakeElev.dat` — maximum lake elevation time series (columns indexed by `lake_params.max_elev_col`) |
 | `read_rootzone_main(path)` | `RootZone_MAIN.dat` — incl. per-element soil parameter table |
-| `read_nonponded_ag_main(path)` | Non-ponded crops main (AGNPFL) — crop codes, root depths, CN and pointer tables, initial moisture |
+| `read_nonponded_ag_main(path)` | Non-ponded crops main (AGNPFL) — crop codes + `.crop_names` (code → inline description, e.g. `01 → Almonds`), root depths, CN and pointer tables, initial moisture |
 | `read_ponded_ag_main(path)` | Ponded crops main (PFL) — rice/refuge parameters and pointer tables |
 | `read_urban_main(path)` | Urban main (URBFL) — per-element urban water use parameters |
 | `read_native_veg_main(path)` | Native/riparian vegetation main (NVRVFL) |
 | `read_land_use_area(path, columns=None)` | Land use area file (LUFLNP/LUFLP/LUFLU/LUFLNVRV — all four share one format) → long DataFrame `date, element_id, area_1..n`; pass `columns=` to name the area columns with crop codes. Vectorized: C2VSimFG's 1 GB non-ponded file (3.25M rows × 20 crops) reads in ~2 min |
 | `read_all_land_use_areas(rootzone_main, element_areas=None)` | All four land use area files combined into one DataFrame (`date, element_id`, crop-code columns + `urban`/`native`/`riparian`), each file's FACT applied so every column is an **area in model plane units**. Fraction-based files (FACT=0.0) are converted with `element_areas=` — pass the parsed `PreprocessorMain` (areas computed from the grid), a Series, or a dict; omit it and the fractions are kept as-is (a warning fires only if that mixes fractions with area columns) |
+| `read_irr_period(path)` | Irrigation period file (IPFL, e.g. `IrigPeriod.dat`) — 0/1 irrigation-season flags per column; the ICIP pointer table (`NonPondedAgFile.irig_period_columns`) maps (element, crop) to a flag column |
+| `read_surface_flow_dest(path)` | Surface flow destination file (DESTFL, v4.12+, e.g. `SurfaceFlowDest.dat`) — `(type, dest)` tuple columns indexed by the soil table's `icdst*` pointers |
 | `read_swshed(path)` | `SWShed.dat` — watershed definitions, root zone/aquifer parameters, initial conditions |
 | `read_unsatzone(path)` | `UnsatZone.dat` — per-element parameters and initial moisture |
 
@@ -175,7 +179,7 @@ write_gw_main(gw, "GW_MAIN_new.dat", base_dir=sim_dir)
 
 Component-main writers (`write_gw_main`, `write_subsidence_file`, `write_stream_main`, `write_rootzone_main`, `write_bc_main`, and the four root-zone sub-main writers) accept `base_dir` — pass the simulation working directory (the folder of the simulation main file) so referenced paths are written relative to it; IWFM does not accept absolute paths.
 
-Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_supply_adjust`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_spec_flow_bc`, `write_general_head_bc`, `write_constrained_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_well_spec`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_nonponded_ag_main`, `write_ponded_ag_main`, `write_urban_main`, `write_native_veg_main`, `write_land_use_area`, `write_swshed`, `write_unsatzone`.
+Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_irr_period`, `write_supply_adjust`, `write_timeseries_file`, `write_max_lake_elev`, `write_surface_flow_dest`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_spec_flow_bc`, `write_general_head_bc`, `write_constrained_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_well_spec`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_nonponded_ag_main`, `write_ponded_ag_main`, `write_urban_main`, `write_native_veg_main`, `write_land_use_area`, `write_swshed`, `write_unsatzone`.
 
 **Every reader now has a mirror writer** — the reader/writer pairs cover the complete input tree, and the exe round-trip test regenerates all of them (root-zone sub-mains and BC files included) and reproduces baseline heads exactly.
 

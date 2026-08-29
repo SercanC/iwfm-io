@@ -4,12 +4,12 @@ Readers for IWFM root zone component files.
 The root zone is the most complex IWFM component with many sub-files.
 ``read_rootzone_main`` parses the main file completely: convergence
 parameters, sub-file references, conversion factors, and the per-element
-soil parameter table.  Raw lines of the tail are also kept for lossless
-round-trip writing.
+soil parameter table.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -22,6 +22,7 @@ from iwfm_io.models.rootzone import (
     NonPondedAgFile,
     PondedAgFile,
     RootZoneMain,
+    SurfaceFlowDestFile,
     UrbanFile,
 )
 
@@ -230,13 +231,26 @@ def _read_element_table(
     return df
 
 
-def _read_keyed_codes(reader: IWFMFileReader, n: int) -> list[str]:
-    """Read *n* keyed code lines (e.g. ``TO  / CCODE[1]``)."""
-    codes = []
+# Some decks repeat the variable tag inside the inline comment
+# ("CO  / CCODE[ 2]  Cotton") — strip it to get the bare description.
+_CODE_TAG_RE = re.compile(r"^B?CCODE\s*\[\s*\d+\s*\]\s*", re.IGNORECASE)
+
+
+def _read_keyed_codes(
+    reader: IWFMFileReader, n: int,
+) -> tuple[list[str], list[str]]:
+    """Read *n* keyed code lines (e.g. ``TO  / CCODE[1]  Tomato``).
+
+    Returns ``(codes, descriptions)``; a description is the inline
+    ``/``-comment with any leading ``CCODE[n]``/``BCCODE[n]`` tag
+    stripped (empty string when the deck carries none).
+    """
+    codes, names = [], []
     for _ in range(n):
-        value, _ = reader.read_keyed_value()
+        value, keyword = reader.read_keyed_value()
         codes.append(value)
-    return codes
+        names.append(_CODE_TAG_RE.sub("", keyword).strip())
+    return codes, names
 
 
 # ------------------------------------------------------------------
@@ -264,11 +278,15 @@ def read_nonponded_ag_main(path: str | Path) -> NonPondedAgFile:
 
     n_crops, _ = reader.read_keyed_int()
     demand_from_moisture, _ = reader.read_keyed_int()
-    crop_codes = _read_keyed_codes(reader, n_crops)
+    crop_codes, crop_descs = _read_keyed_codes(reader, n_crops)
+    crop_names = dict(zip(crop_codes, crop_descs))
     land_use_area, _ = reader.read_keyed_value()
 
     n_budget_crops, _ = reader.read_keyed_int()
-    budget_crop_codes = _read_keyed_codes(reader, n_budget_crops)
+    budget_crop_codes, budget_descs = _read_keyed_codes(
+        reader, n_budget_crops)
+    crop_names.update({c: d for c, d in zip(budget_crop_codes,
+                                            budget_descs) if d})
     crop_lwu_budget, _ = reader.read_keyed_value()
     crop_rz_budget, _ = reader.read_keyed_value()
 
@@ -315,6 +333,7 @@ def read_nonponded_ag_main(path: str | Path) -> NonPondedAgFile:
         n_crops=n_crops,
         demand_from_moisture=demand_from_moisture,
         crop_codes=crop_codes,
+        crop_names=crop_names,
         file_paths={
             "land_use_area": _resolve(land_use_area),
             "root_depth_fracs": _resolve(root_depth_fracs),
@@ -368,7 +387,7 @@ def read_ponded_ag_main(path: str | Path) -> PondedAgFile:
     land_use_area, _ = reader.read_keyed_value()
 
     n_budget_crops, _ = reader.read_keyed_int()
-    budget_crop_codes = _read_keyed_codes(reader, n_budget_crops)
+    budget_crop_codes, _ = _read_keyed_codes(reader, n_budget_crops)
     crop_lwu_budget, _ = reader.read_keyed_value()
     crop_rz_budget, _ = reader.read_keyed_value()
 
@@ -798,4 +817,71 @@ def read_native_veg_main(path: str | Path) -> NativeVegFile:
         root_depth_riparian=root_depth_riparian,
         element_params=element_params,
         initial_conditions=initial_conditions,
+    )
+
+
+# ------------------------------------------------------------------
+# Surface flow destinations (DESTFL, v4.12+)
+# ------------------------------------------------------------------
+
+#: Matches one "(T,D)" destination tuple, tolerating interior spaces.
+_DEST_TUPLE_RE = re.compile(r"\(\s*(\d+)\s*,\s*(\d+)\s*\)")
+
+
+def read_surface_flow_dest(path: str | Path) -> SurfaceFlowDestFile:
+    """Read a surface flow destination file (e.g. ``SurfaceFlowDest.dat``).
+
+    3-param spec (NDSTN, NSPDSTN, NFQDSTN — no FACT, no DSSFL), then
+    rows of ``DATE  (T,D) .. (T,D)`` — one type/destination tuple per
+    column.  The v4.12 root-zone soil table's ``icdst*`` pointers index
+    these columns; types are 0 = outside, 1 = stream node, 3 = lake,
+    5 = groundwater.
+
+    Parameters
+    ----------
+    path : str or Path
+
+    Returns
+    -------
+    SurfaceFlowDestFile
+    """
+    reader = IWFMFileReader(path)
+    header = reader.read_header()
+
+    n_columns, _ = reader.read_keyed_int()
+    n_steps_update, _ = reader.read_keyed_int()
+    repeat_freq, _ = reader.read_keyed_int()
+
+    rows: list[dict] = []
+    while True:
+        line = reader.peek_data_line()
+        if line is None:
+            break
+        toks = tokenize_data_line(line)
+        if not toks or "/" not in toks[0] or "_" not in toks[0]:
+            break
+        reader.next_data_line()
+        row: dict = {"date": toks[0]}
+        body = re.split(r"\s+/", line, maxsplit=1)[0]
+        pairs = _DEST_TUPLE_RE.findall(body)
+        if len(pairs) < n_columns:
+            raise ValueError(
+                f"SurfaceFlowDest row {toks[0]} has {len(pairs)} of "
+                f"{n_columns} expected (type,dest) tuples")
+        for i, (typ, dest) in enumerate(pairs[:n_columns], start=1):
+            row[f"type_{i}"] = int(typ)
+            row[f"dest_{i}"] = int(dest)
+        rows.append(row)
+
+    columns = ["date"]
+    for i in range(1, n_columns + 1):
+        columns += [f"type_{i}", f"dest_{i}"]
+    data = pd.DataFrame(rows, columns=columns) if rows else None
+
+    return SurfaceFlowDestFile(
+        header=header,
+        n_columns=n_columns,
+        n_steps_update=n_steps_update,
+        repeat_freq=repeat_freq,
+        data=data,
     )

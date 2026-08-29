@@ -13,6 +13,30 @@ import pandas as pd
 from iwfm_io._writer import IWFMFileWriter
 
 
+def check_count(declared: int, actual: int, what: str) -> None:
+    """Raise if a declared dimension disagrees with the table it sizes.
+
+    IWFM reads tables BY their declared count, so writers emit the
+    stored count and refuse to write an inconsistent file — a mismatch
+    means either the count or the table was edited without the other.
+    """
+    if int(declared) != int(actual):
+        raise ValueError(
+            f"{what}: the file declares {declared} but the parsed data "
+            f"has {actual} rows/entries — update the count field or the "
+            "table so they agree")
+
+
+def check_counts_per_group(sizes: dict, declared: dict, what: str) -> None:
+    """Per-group variant of :func:`check_count` (e.g. rows per node)."""
+    for key, actual in sizes.items():
+        want = declared.get(key)
+        if want is not None and int(want) != int(actual):
+            raise ValueError(
+                f"{what} for id {key}: declared {want}, table has "
+                f"{actual} — update the count or the table")
+
+
 def fmt_num(value) -> str:
     """Format a number the way IWFM list-directed reads expect.
 
@@ -36,11 +60,22 @@ def write_table_rows(
     columns: list[str],
     widths: list[int] | None = None,
 ) -> None:
-    """Write DataFrame *columns* as whitespace-delimited data rows."""
+    """Write DataFrame *columns* as whitespace-delimited data rows.
+
+    Raises on NaN cells: ``fmt_num`` would render them as empty tokens,
+    silently shifting every later column in IWFM's list-directed read.
+    """
     if widths is None:
         widths = [12] * len(columns)
-    for _, row in df.iterrows():
-        w.write_data_line([fmt_num(row[c]) for c in columns], widths)
+    for idx, row in df.iterrows():
+        cells = [fmt_num(row[c]) for c in columns]
+        if "" in cells:
+            bad = columns[cells.index("")]
+            raise ValueError(
+                f"NaN in column {bad!r} at row {idx} — a missing value "
+                "would write a short data row that IWFM mis-reads; fill "
+                "or drop the value first")
+        w.write_data_line(cells, widths)
 
 
 def write_node_layer_table(
@@ -117,6 +152,14 @@ def write_param_block(
             f"NGROUP={ngroup} but only {len(parametric_grids)} parsed "
             "parametric grid groups are available to write")
     for grid in parametric_grids[:ngroup]:
+        elements = grid.get("elements")
+        params = grid.get("params")
+        check_count(grid["nep"],
+                    0 if elements is None else len(elements),
+                    "parametric grid: NEP")
+        if params is not None and len(params) > 0:
+            check_count(grid["ndp"], params["node_id"].nunique(),
+                        "parametric grid: NDP")
         w.write_raw(f"   {grid['node_range']}")
         # IWFM reads the node list with READCH, which keeps consuming
         # data lines until a comment line terminates the list — this
@@ -124,13 +167,11 @@ def write_param_block(
         w.write_comment("C  end of node list")
         w.write_keyed_value(grid["ndp"], "NDP")
         w.write_keyed_value(grid["nep"], "NEP")
-        elements = grid.get("elements")
         if elements is not None and len(elements) > 0:
             node_cols = [c for c in elements.columns if c != "element_id"]
             write_table_rows(
                 w, elements, ["element_id"] + node_cols,
                 widths=[10] + [10] * len(node_cols))
-        params = grid.get("params")
         if params is not None and len(params) > 0:
             write_node_layer_table(
                 w, params, param_names,
@@ -146,7 +187,9 @@ def write_element_groups(
 
     Mirrors :func:`iwfm_io.readers._element_groups.parse_element_groups`:
     the first element (and its fraction, for recharge zones) shares the
-    group's header line; remaining elements follow one per line.
+    group's header line; remaining elements follow one per line.  A
+    group's ``name`` is re-emitted as a ``/ name`` annotation on its
+    header line.
     """
     for group in groups:
         elements = group["elements"]
@@ -168,7 +211,7 @@ def write_element_groups(
             if with_fractions:
                 header.append("0.0")
                 widths.append(10)
-        w.write_data_line(header, widths)
+        w.write_data_line(header, widths, note=group.get("name") or "")
         for i, elem in enumerate(elements[1:], start=1):
             cont: list = [elem]
             cwidths = [28]

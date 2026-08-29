@@ -11,7 +11,11 @@ import pandas as pd
 from iwfm_io._parser import IWFMFileReader
 from iwfm_io._tokens import tokenize_data_line
 from iwfm_io.models.misc import SWShedFile, UnsatZoneFile
-from iwfm_io.readers._param_blocks import LineCursor
+from iwfm_io.readers._param_blocks import (
+    LineCursor,
+    expand_node_range,
+    parse_node_layer_table,
+)
 
 
 def read_swshed(path: str | Path) -> SWShedFile:
@@ -101,6 +105,10 @@ def read_swshed(path: str | Path) -> SWShedFile:
         rz_rows = []
         for _ in range(n_watersheds):
             toks = tokenize_data_line(cursor.next())
+            if len(toks) < len(rz_cols):
+                raise ValueError(
+                    f"SWShed root-zone parameter row has {len(toks)} of "
+                    f"{len(rz_cols)} expected values")
             rz_rows.append({c: float(t) for c, t in zip(rz_cols, toks)})
         rootzone_params = pd.DataFrame(rz_rows, columns=rz_cols)
         for c in ("id", "irns", "icets", "rhc", "cn"):
@@ -116,6 +124,10 @@ def read_swshed(path: str | Path) -> SWShedFile:
         aq_rows = []
         for _ in range(n_watersheds):
             toks = tokenize_data_line(cursor.next())
+            if len(toks) < len(aq_cols):
+                raise ValueError(
+                    f"SWShed aquifer parameter row has {len(toks)} of "
+                    f"{len(aq_cols)} expected values")
             aq_rows.append({c: float(t) for c, t in zip(aq_cols, toks)})
         aquifer_params = pd.DataFrame(aq_rows, columns=aq_cols)
         aquifer_params["id"] = aquifer_params["id"].astype(int)
@@ -127,6 +139,10 @@ def read_swshed(path: str | Path) -> SWShedFile:
         ic_rows = []
         for _ in range(n_watersheds):
             toks = tokenize_data_line(cursor.next())
+            if len(toks) < len(ic_cols):
+                raise ValueError(
+                    f"SWShed initial condition row has {len(toks)} of "
+                    f"{len(ic_cols)} expected values")
             ic_rows.append({c: float(t) for c, t in zip(ic_cols, toks)})
         initial_conditions = pd.DataFrame(ic_rows, columns=ic_cols)
         initial_conditions["id"] = initial_conditions["id"].astype(int)
@@ -154,8 +170,8 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
 
     Parses the per-element unsaturated zone parameter table (NGROUP=0
     layout: one row per element with all unsaturated layers on the same
-    line) and the initial moisture conditions.  Parametric-grid layouts
-    (NGROUP>0) are kept raw.
+    line) or the parametric-grid groups (NGROUP>0 layout, stored in
+    ``parametric_grids``), plus the initial moisture conditions.
 
     Parameters
     ----------
@@ -190,6 +206,7 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
     config: dict = {}
     ngroup = None
     element_params = None
+    parametric_grids: list = []
     initial_moisture = None
     param_names = ["thickness", "porosity", "pore_size_index", "k", "rhc"]
     try:
@@ -201,7 +218,48 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
             config[name] = float(val)
         if cursor.peek_keyword() == "TUNITZ":
             config["tunitz"] = cursor.read_keyed_value()[0]
+        else:
+            nxt = cursor.peek()
+            toks = tokenize_data_line(nxt) if nxt is not None else []
+            if len(toks) == 1:
+                try:
+                    float(toks[0])
+                except ValueError:
+                    config["tunitz"] = cursor.read_keyed_value()[0]
 
+        if ngroup > 0:
+            # Option 1: parametric grid groups — element-range line,
+            # NDP/NEP keyed ints, NEP parametric elements, then the
+            # parametric node table (ID PX PY + params per layer).
+            for _ in range(ngroup):
+                line = cursor.peek()
+                if line is None:
+                    break
+                elem_range = "".join(tokenize_data_line(line))
+                cursor.next()
+                ndp = int(cursor.read_keyed_value()[0])
+                nep = int(cursor.read_keyed_value()[0])
+                element_rows = []
+                for _ in range(nep):
+                    toks = tokenize_data_line(cursor.next())
+                    row = {"element_id": int(float(toks[0]))}
+                    for i, v in enumerate(toks[1:5], start=1):
+                        row[f"node_{i}"] = int(float(v))
+                    element_rows.append(row)
+                elements = (pd.DataFrame(element_rows)
+                            if element_rows else None)
+                params = parse_node_layer_table(
+                    cursor, param_names,
+                    n_leading=3, leading_names=["node_id", "x", "y"],
+                    max_blocks=ndp, max_layers=n_unsat_layers)
+                parametric_grids.append({
+                    "node_range": elem_range,
+                    "nodes": expand_node_range(elem_range),
+                    "ndp": ndp,
+                    "nep": nep,
+                    "elements": elements,
+                    "params": params,
+                })
         if ngroup == 0:
             # One row per element: IE + (PD PN PI PK PRHC) per layer.
             n_row_tokens = 1 + 5 * n_unsat_layers
@@ -257,5 +315,6 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
         config=config,
         ngroup=ngroup,
         element_params=element_params,
+        parametric_grids=parametric_grids,
         initial_moisture=initial_moisture,
     )
