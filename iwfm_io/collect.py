@@ -43,6 +43,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -623,7 +624,21 @@ def _period_labels(times, period: str):
     raise ValueError(f"period must be 'WY', 'CY', or 'MON', got {period!r}")
 
 
-def aggregate_budget(df: pd.DataFrame, period: str = "WY") -> pd.DataFrame:
+def _effective_col_types(columns, data_types):
+    """column -> IWFM data-type code, falling back to the name heuristic."""
+    from iwfm_io._budget_agg import VLB, VLE, VR
+
+    heur_code = {"sum": VR, "first": VLB, "last": VLE}
+    eff = {}
+    for col in columns:
+        t = data_types.get(col)
+        eff[col] = int(t) if t is not None else \
+            heur_code[budget_component_agg(col)]
+    return eff
+
+
+def aggregate_budget(df: pd.DataFrame, period: str = "WY",
+                     data_types: Optional[dict] = None) -> pd.DataFrame:
     """Aggregate IWFM budget output over water years, calendar years,
     or months — with the right rule per component.
 
@@ -634,6 +649,17 @@ def aggregate_budget(df: pd.DataFrame, period: str = "WY") -> pd.DataFrame:
     ``24:00`` convention via :func:`iwfm_io.water_year` /
     :func:`iwfm_io.iwfm_day`, so a ``09/30_24:00`` stamp lands in the
     water year ending that day.
+
+    Pass the ``data_types`` mapping that :func:`read_budget_hdf` returns
+    to get the DLL's exact per-type rules instead of the name heuristic:
+    volumetric rates (types 1/9/10/11) sum, beginning storage (2) keeps
+    the first value, ending storage (3), area (4) and length (5) keep the
+    last — so a monthly Area column no longer sums to ~12x its real value
+    — and the LWU trio (Potential CUAW 6 / Ag. Supply Requirement 7 /
+    Ag. Shortage 8) uses the DLL's carry-over accumulation (signed
+    shortage, previous *raw* shortage carried within each period; see
+    :mod:`iwfm_io._budget_agg`).  Columns missing from ``data_types``
+    fall back to the name heuristic.
 
     Parameters
     ----------
@@ -646,6 +672,9 @@ def aggregate_budget(df: pd.DataFrame, period: str = "WY") -> pd.DataFrame:
     period : str
         ``"WY"`` water years (labeled by ending year), ``"CY"``
         calendar years, or ``"MON"`` months.
+    data_types : dict, optional
+        component/column name -> IWFM data-type code (1-11), as returned
+        by :func:`read_budget_hdf` under ``'data_types'``.
 
     Returns
     -------
@@ -663,6 +692,43 @@ def aggregate_budget(df: pd.DataFrame, period: str = "WY") -> pd.DataFrame:
     if long_form:
         keys = [c for c in ("run", "budget_type", "location")
                 if c in df.columns]
+
+        if data_types is not None:
+            # Type-aware path: pivot each key group to a wide frame so the
+            # LWU carry-over can see its companion columns, aggregate,
+            # then melt back to long form.
+            from iwfm_io._budget_agg import aggregate_frame
+
+            src = df.sort_values("datetime")
+            groups = src.groupby(keys, observed=True) if keys \
+                else [((), src)]
+            pieces = []
+            for key_vals, sub in groups:
+                if not isinstance(key_vals, tuple):
+                    key_vals = (key_vals,)
+                wide = sub.pivot_table(
+                    index="datetime", columns="component", values="value",
+                    aggfunc="first", observed=True)
+                # Restore first-appearance component order (pivot_table
+                # sorts alphabetically, which would break LWU adjacency)
+                order = list(dict.fromkeys(sub["component"]))
+                wide = wide[[c for c in order if c in wide.columns]]
+                labels = _period_labels(wide.index, period)
+                agg = aggregate_frame(
+                    wide, _effective_col_types(wide.columns, data_types),
+                    np.asarray(labels))
+                agg.index.name = label_name
+                long_out = agg.reset_index().melt(
+                    id_vars=label_name, var_name="component",
+                    value_name="value")
+                for k, v in zip(keys, key_vals):
+                    long_out[k] = v
+                pieces.append(long_out[keys + [label_name, "component",
+                                               "value"]])
+            result = pd.concat(pieces, ignore_index=True)
+            return result.sort_values(
+                keys + [label_name, "component"]).reset_index(drop=True)
+
         out = df.sort_values("datetime").copy()
         out[label_name] = _period_labels(out["datetime"], period).values
         how = out["component"].map(budget_component_agg)
@@ -685,6 +751,16 @@ def aggregate_budget(df: pd.DataFrame, period: str = "WY") -> pd.DataFrame:
             "value columns")
     df = df.sort_index()
     labels = _period_labels(df.index, period)
+
+    if data_types is not None:
+        from iwfm_io._budget_agg import aggregate_frame
+
+        out = aggregate_frame(
+            df, _effective_col_types(df.columns, data_types),
+            np.asarray(labels))
+        out.index.name = label_name
+        return out
+
     agg = {col: budget_component_agg(col) for col in df.columns}
     out = df.groupby(pd.Index(labels, name=label_name)).agg(agg)
     return out

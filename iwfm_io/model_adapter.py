@@ -505,6 +505,13 @@ class IOModelAdapter:
             ``.bud`` budget discovered by ``open_model``.
         location : int or str
             1-based location index or location name.
+        interval : str, optional
+            ``"1MON"`` / ``"1YEAR"`` aggregate with the DLL's exact
+            semantics (windows anchored to the data begin — ``"1YEAR"``
+            is the water year for October-start models — type-aware
+            rules, LWU carry-over, trailing partial window dropped);
+            ``"1CALYEAR"`` aggregates over calendar years.  ``None``
+            serves the native output interval.
         day_index : bool
             Re-index by :func:`iwfm_io.iwfm_day` (the day each ``24:00``
             stamp belongs to) so ``resample("YE-SEP")``/``.dt.year``

@@ -192,6 +192,290 @@ class TestDayIndex:
         assert (a.index == b.index).all()
 
 
+# ---------------------------------------------------------------------------
+# DLL-faithful aggregation engine (iwfm_io._budget_agg) — issues #33/#34
+# ---------------------------------------------------------------------------
+
+def _dll_lwu_reference(labels, req, short, pump, div, other, potcuaw):
+    """Straight transcription of the Fortran accumulation loop
+    (Class_Budget.f90 ReadData_SelectedColumns_FromHDFFile) as a slow
+    reference: per window, prev shortage = previous step's RAW shortage,
+    reset to 0 at each window start."""
+    out_req, out_short, out_pot = {}, {}, {}
+    prev_short = 0.0
+    n_in_window = {}
+    for t, lab in enumerate(labels):
+        if lab not in out_req:
+            out_req[lab] = out_short[lab] = out_pot[lab] = 0.0
+            n_in_window[lab] = sum(1 for x in labels if x == lab)
+            prev_short = 0.0
+        if n_in_window[lab] == 1:
+            out_req[lab] = req[t]
+            out_short[lab] = short[t]
+            out_pot[lab] = potcuaw[t]
+        else:
+            if prev_short <= 0.0:
+                mod = req[t]
+            elif req[t] > prev_short:
+                mod = req[t] - prev_short
+            else:
+                mod = req[t]
+            out_req[lab] += mod
+            out_short[lab] += mod - pump[t] - div[t] - other[t]
+            if req[t] != 0.0:
+                out_pot[lab] += potcuaw[t] * mod / req[t]
+        prev_short = short[t]
+    keys = list(dict.fromkeys(labels))
+    return (np.array([out_req[k] for k in keys]),
+            np.array([out_short[k] for k in keys]),
+            np.array([out_pot[k] for k in keys]))
+
+
+class TestWindowEndLabels:
+    def test_water_year_anchoring(self):
+        from iwfm_io._budget_agg import window_end_labels
+
+        # Monthly stamps Oct 1990 .. Sep 1992 (24:00 -> next-month-first)
+        idx = pd.date_range("1990-11-01", periods=24, freq="MS")
+        labels, complete = window_end_labels(idx, "1YEAR",
+                                             native_unit="1MON")
+        assert complete.all()
+        assert labels[0] == pd.Timestamp("1991-10-01")   # 09/30/1991_24:00
+        assert labels[11] == pd.Timestamp("1991-10-01")
+        assert labels[12] == pd.Timestamp("1992-10-01")
+        assert labels[-1] == pd.Timestamp("1992-10-01")
+
+    def test_trailing_partial_window_dropped(self):
+        from iwfm_io._budget_agg import window_end_labels
+
+        # 30 months: WY1991, WY1992 complete + 6 months of WY1993
+        idx = pd.date_range("1990-11-01", periods=30, freq="MS")
+        labels, complete = window_end_labels(idx, "1YEAR",
+                                             native_unit="1MON")
+        assert complete[:24].all()
+        assert not complete[24:].any()
+
+    def test_monthly_identity_on_monthly_data(self):
+        from iwfm_io._budget_agg import window_end_labels
+
+        idx = pd.date_range("1990-11-01", periods=6, freq="MS")
+        labels, complete = window_end_labels(idx, "1MON",
+                                             native_unit="1MON")
+        assert complete.all()
+        assert list(labels) == list(idx)
+
+    def test_daily_owning_month(self):
+        from iwfm_io._budget_agg import window_end_labels
+
+        # Daily stamps for Oct 1990 (10/01_24:00 -> Oct 2 .. Nov 1)
+        idx = pd.date_range("1990-10-02", periods=31, freq="D")
+        labels, complete = window_end_labels(idx, "1MON",
+                                             delta_minutes=1440)
+        # every October day belongs to the window stamped 10/31_24:00
+        assert (labels == pd.Timestamp("1990-11-01")).all()
+        assert complete.all()
+
+    def test_calendar_year_keeps_partials(self):
+        from iwfm_io._budget_agg import window_end_labels
+
+        idx = pd.date_range("1990-11-01", periods=24, freq="MS")
+        labels, complete = window_end_labels(idx, "1CALYEAR",
+                                             native_unit="1MON")
+        assert complete.all()
+        # Oct-Dec 1990 -> label Jan 1 1991 (12/31/1990_24:00)
+        assert labels[0] == pd.Timestamp("1991-01-01")
+        assert labels[2] == pd.Timestamp("1991-01-01")
+        assert labels[3] == pd.Timestamp("1992-01-01")
+
+    def test_bad_interval(self):
+        from iwfm_io._budget_agg import window_end_labels
+
+        with pytest.raises(ValueError, match="Unsupported interval"):
+            window_end_labels(pd.DatetimeIndex([]), "1WEEK")
+
+
+class TestLwuCarryOver:
+    def _frame(self, seed=0, n=48):
+        rng = np.random.default_rng(seed)
+        req = rng.uniform(0, 100, n)
+        req[5] = 0.0  # exercise the PotCUAW zero-req skip
+        pump = rng.uniform(0, 40, n)
+        div = rng.uniform(0, 40, n)
+        other = rng.uniform(0, 5, n)
+        # native shortage as the model writes it (signed, can go negative)
+        short = req - pump - div - other
+        pot = rng.uniform(0, 80, n)
+        idx = pd.date_range("2000-11-01", periods=n, freq="MS")
+        df = pd.DataFrame({
+            "Ag. Area": rng.uniform(500, 600, n),
+            "Potential CUAW": pot,
+            "Ag. Supply Requirement (+)": req,
+            "Ag. Pumping (-)": pump,
+            "Ag. Deliveries (-)": div,
+            "Ag. Other Inflow (-)": other,
+            "Ag. Shortage (=)": short,
+        }, index=idx)
+        types = {"Ag. Area": 4, "Potential CUAW": 6,
+                 "Ag. Supply Requirement (+)": 7, "Ag. Pumping (-)": 9,
+                 "Ag. Deliveries (-)": 10, "Ag. Other Inflow (-)": 11,
+                 "Ag. Shortage (=)": 8}
+        return df, types
+
+    def test_matches_fortran_reference(self):
+        from iwfm_io._budget_agg import aggregate_frame, window_end_labels
+
+        df, types = self._frame()
+        labels, complete = window_end_labels(df.index, "1YEAR",
+                                             native_unit="1MON")
+        out = aggregate_frame(df, types, labels, complete)
+
+        ref_req, ref_short, ref_pot = _dll_lwu_reference(
+            list(np.asarray(labels)),
+            df["Ag. Supply Requirement (+)"].to_numpy(),
+            df["Ag. Shortage (=)"].to_numpy(),
+            df["Ag. Pumping (-)"].to_numpy(),
+            df["Ag. Deliveries (-)"].to_numpy(),
+            df["Ag. Other Inflow (-)"].to_numpy(),
+            df["Potential CUAW"].to_numpy(),
+        )
+        np.testing.assert_allclose(
+            out["Ag. Supply Requirement (+)"].to_numpy(), ref_req)
+        np.testing.assert_allclose(
+            out["Ag. Shortage (=)"].to_numpy(), ref_short)
+        np.testing.assert_allclose(out["Potential CUAW"].to_numpy(), ref_pot)
+        # sums and last-value columns
+        np.testing.assert_allclose(
+            out["Ag. Pumping (-)"].to_numpy(),
+            df["Ag. Pumping (-)"].groupby(np.asarray(labels)).sum().values)
+        assert out["Ag. Area"].iloc[0] == df["Ag. Area"].iloc[11]
+
+    def test_shortage_stays_signed(self):
+        """Shortage aggregates signed — supply-adjustment overshoot makes
+        monthly shortages negative and they must not be clipped."""
+        from iwfm_io._budget_agg import aggregate_frame, window_end_labels
+
+        idx = pd.date_range("2000-11-01", periods=12, freq="MS")
+        req = np.full(12, 10.0)
+        pump = np.full(12, 12.0)   # oversupplied -> negative shortage
+        div = np.zeros(12)
+        short = req - pump
+        df = pd.DataFrame({"req": req, "pump": pump, "div": div,
+                           "short": short}, index=idx)
+        types = {"req": 7, "pump": 9, "div": 10, "short": 8}
+        labels, complete = window_end_labels(df.index, "1YEAR",
+                                             native_unit="1MON")
+        out = aggregate_frame(df, types, labels, complete)
+        # prev shortage always <= 0 -> no clipping; plain sums
+        assert out["short"].iloc[0] == pytest.approx(-24.0)
+        assert out["req"].iloc[0] == pytest.approx(120.0)
+
+    def test_carry_over_reduces_requirement(self):
+        """A positive previous shortage reduces the next step's modified
+        requirement (the DLL clipping rule)."""
+        from iwfm_io._budget_agg import aggregate_frame, window_end_labels
+
+        idx = pd.date_range("2000-11-01", periods=12, freq="MS")
+        req = np.r_[10.0, 10.0, np.zeros(10)]
+        pump = np.r_[4.0, 10.0, np.zeros(10)]
+        div = np.zeros(12)
+        short = req - pump  # [6, 0, 0, ...]
+        df = pd.DataFrame({"req": req, "pump": pump, "div": div,
+                           "short": short}, index=idx)
+        types = {"req": 7, "pump": 9, "div": 10, "short": 8}
+        labels, complete = window_end_labels(df.index, "1YEAR",
+                                             native_unit="1MON")
+        out = aggregate_frame(df, types, labels, complete)
+        # t=0: mod=10; t=1: prev raw short 6 > 0, req 10 > 6 -> mod=4
+        assert out["req"].iloc[0] == pytest.approx(14.0)
+        # shortage: (10-4) + (4-10) = 0
+        assert out["short"].iloc[0] == pytest.approx(0.0)
+
+    def test_single_step_windows_take_raw_values(self):
+        from iwfm_io._budget_agg import aggregate_frame, window_end_labels
+
+        df, types = self._frame(n=12)
+        labels, complete = window_end_labels(df.index, "1MON",
+                                             native_unit="1MON")
+        out = aggregate_frame(df, types, labels, complete)
+        # 1MON on monthly data is the identity — including PotCUAW at the
+        # zero-req step (the Fortran single-step branch takes raw values)
+        np.testing.assert_allclose(out.to_numpy(), df.to_numpy())
+
+
+class TestAggregateBudgetDataTypes:
+    def _frame(self):
+        idx = pd.date_range("2000-11-01", periods=24, freq="MS")
+        n = len(idx)
+        rng = np.random.default_rng(1)
+        req = rng.uniform(0, 100, n)
+        pump = rng.uniform(0, 60, n)
+        div = rng.uniform(0, 60, n)
+        short = req - pump - div
+        df = pd.DataFrame({
+            "Ag. Area": np.full(n, 555.0),
+            "Ag. Supply Requirement (+)": req,
+            "Ag. Pumping (-)": pump,
+            "Ag. Deliveries (-)": div,
+            "Ag. Shortage (=)": short,
+        }, index=idx)
+        types = {"Ag. Area": 4, "Ag. Supply Requirement (+)": 7,
+                 "Ag. Pumping (-)": 9, "Ag. Deliveries (-)": 10,
+                 "Ag. Shortage (=)": 8}
+        return df, types
+
+    def test_area_last_not_sum(self):
+        from iwfm_io import aggregate_budget
+
+        df, types = self._frame()
+        naive = aggregate_budget(df, period="WY")
+        typed = aggregate_budget(df, period="WY", data_types=types)
+        # name heuristic sums Area to ~12x; the type rule takes the last
+        assert naive.loc[2001, "Ag. Area"] == pytest.approx(12 * 555.0)
+        assert typed.loc[2001, "Ag. Area"] == pytest.approx(555.0)
+
+    def test_lwu_carry_over_matches_engine(self):
+        from iwfm_io import aggregate_budget
+        from iwfm_io._budget_agg import aggregate_frame
+        from iwfm_io._tokens import water_year
+
+        df, types = self._frame()
+        typed = aggregate_budget(df, period="WY", data_types=types)
+        ref = aggregate_frame(df, types,
+                              np.asarray(water_year(df.index)))
+        np.testing.assert_allclose(typed.to_numpy(), ref.to_numpy())
+        assert typed.index.name == "water_year"
+
+    def test_missing_types_fall_back_to_heuristic(self):
+        from iwfm_io import aggregate_budget
+
+        df, _ = self._frame()
+        df["Beginning Storage (+)"] = 100.0 + np.arange(len(df))
+        # only Area typed; storage column falls back to first-of-period
+        out = aggregate_budget(df, period="WY",
+                               data_types={"Ag. Area": 4})
+        assert out.loc[2001, "Ag. Area"] == pytest.approx(555.0)
+        assert out.loc[2001, "Beginning Storage (+)"] == pytest.approx(100.0)
+
+    def test_long_form_with_types(self):
+        from iwfm_io import aggregate_budget
+
+        df, types = self._frame()
+        long_df = (df.reset_index(names="datetime")
+                   .melt(id_vars="datetime", var_name="component",
+                         value_name="value"))
+        long_df["run"] = "baseline"
+        long_df["location"] = "R1"
+
+        out = aggregate_budget(long_df, period="WY", data_types=types)
+        assert set(out.columns) == {"run", "location", "water_year",
+                                    "component", "value"}
+        piv = out.pivot_table(index="water_year", columns="component",
+                              values="value")
+        ref = aggregate_budget(df, period="WY", data_types=types)
+        for col in ref.columns:
+            assert piv[col].values == pytest.approx(ref[col].values)
+
+
 @pytest.mark.skipif(not SAMPLE_MODEL.is_dir(),
                     reason="sample model not available")
 class TestSampleModel:

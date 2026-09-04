@@ -245,15 +245,21 @@ class TestReadZBudgetTypeAware:
         assert len(r1_mon) < len(r1_raw)
         assert len(r1_mon) >= 119
 
-        # For type-1 data, monthly sum should match manual resample sum
+        # For type-1 data, each monthly value should equal the sum of the
+        # native values in its window (label = window end stamp; windows
+        # are anchored to the data begin per DLL semantics)
         if len(r1_raw.columns) > 0:
             col = r1_raw.columns[0]
-            naive_monthly = r1_raw[[col]].resample("ME").sum()
-            np.testing.assert_allclose(
-                r1_mon[col].values, naive_monthly[col].values,
-                rtol=1e-10,
-                err_msg="Type-1 columns should sum identically to naive resample"
-            )
+            prev = None
+            for label in r1_mon.index[:3]:
+                mask = r1_raw.index <= label
+                if prev is not None:
+                    mask &= r1_raw.index > prev
+                np.testing.assert_allclose(
+                    r1_mon.loc[label, col],
+                    r1_raw.loc[mask, col].sum(), rtol=1e-10,
+                    err_msg="Type-1 columns should sum over their window")
+                prev = label
 
     def test_read_lwu_zbudget_monthly(self):
         """Verify LWU ZBudget monthly aggregation uses type-aware resampling."""
@@ -277,18 +283,16 @@ class TestReadZBudgetTypeAware:
         r1_raw = raw["data"]["Region1"]
         r1_mon = monthly["data"]["Region1"]
 
+        clean_names = raw["metadata"]["data_names_clean"]
         for idx in area_indices:
-            col = data_names[idx]
-            if col not in r1_raw.columns or col not in r1_mon.columns:
-                continue
-            # Last value of first month in raw should equal first month in monthly
-            first_month_end = r1_mon.index[0]
-            month_mask = (r1_raw.index.year == first_month_end.year) & \
-                         (r1_raw.index.month == first_month_end.month)
-            if month_mask.any():
-                last_daily = r1_raw.loc[month_mask, col].iloc[-1]
-                assert r1_mon[col].iloc[0] == pytest.approx(last_daily, rel=1e-6), \
-                    f"Area column '{col}' should use last-of-period, not sum"
+            col = clean_names[idx]
+            assert col in r1_raw.columns and col in r1_mon.columns
+            # Last value of the first window should equal the first
+            # monthly value (window = stamps up to the first label)
+            window_mask = r1_raw.index <= r1_mon.index[0]
+            last_daily = r1_raw.loc[window_mask, col].iloc[-1]
+            assert r1_mon[col].iloc[0] == pytest.approx(last_daily, rel=1e-6), \
+                f"Area column '{col}' should use last-of-period, not sum"
 
     def test_read_lwu_zbudget_raw_monthly(self):
         """Verify LWU ZBudget raw mode monthly uses type-aware resampling."""
@@ -321,18 +325,61 @@ class TestReadZBudgetTypeAware:
         # Area (type 4 = last): monthly should have fewer rows
         assert len(mon_df) < len(raw_df)
 
-        # Monthly value should be the last daily value, not the sum
+        # Monthly value should be the last daily value of the window
+        # (stamps up to the first label), not the sum
         if len(raw_df.columns) > 0:
             col = raw_df.columns[0]
-            first_month_end = mon_df.index[0]
-            month_mask = (raw_df.index.year == first_month_end.year) & \
-                         (raw_df.index.month == first_month_end.month)
-            if month_mask.any():
-                last_daily = raw_df.loc[month_mask, col].iloc[-1]
-                naive_sum = raw_df.loc[month_mask, col].sum()
-                # last != sum (unless all values in the month are identical)
-                assert mon_df[col].iloc[0] == pytest.approx(last_daily, rel=1e-6), \
-                    "Area column should use last-of-period in raw mode too"
+            window_mask = raw_df.index <= mon_df.index[0]
+            last_daily = raw_df.loc[window_mask, col].iloc[-1]
+            assert mon_df[col].iloc[0] == pytest.approx(last_daily, rel=1e-6), \
+                "Area column should use last-of-period in raw mode too"
+
+
+class TestZoneColumnSet:
+    """Issue #33: zone frames must carry the DLL's full column set with
+    clean display names."""
+
+    def test_all_datasets_present_with_clean_names(self):
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
+
+        path = RESULTS_DIR / "LWU_ZBud.hdf"
+        zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
+        if not path.exists() or not zdef_path.exists():
+            pytest.skip("Required files not found")
+
+        result = read_zbudget_hdf(path, zone_def=zdef_path)
+        meta = result["metadata"]
+        clean = meta["data_names_clean"]
+
+        # metadata carries both raw and clean names, same length/order
+        assert len(clean) == len(meta["data_names"])
+        assert all("@" not in c for c in clean)
+        # e.g. 'Non-ponded Ag. Area@        (2)@' -> 'Non-ponded Ag. Area'
+        raw_area = [n for n in meta["data_names"] if "Area@" in n]
+        if raw_area:
+            assert clean[meta["data_names"].index(raw_area[0])] == \
+                raw_area[0].split("@")[0].strip()
+
+        for zname in result["zones"]["zone_names"]:
+            df = result["data"][zname]
+            # Every dataset appears as a column (zero columns included),
+            # in data_names order, named by the clean display name
+            assert list(df.columns[:len(clean)]) == clean
+
+    def test_inactive_datasets_kept_as_zero_columns(self):
+        """A dataset with no active elements must appear as an all-zero
+        column, not vanish (absent is ambiguous with 'no such dataset')."""
+        from iwfm_io.readers.hdf5 import read_zbudget_hdf
+
+        path = RESULTS_DIR / "LWU_ZBud.hdf"
+        zdef_path = ZBUDGET_DIR / "ZoneDef_SRs.dat"
+        if not path.exists() or not zdef_path.exists():
+            pytest.skip("Required files not found")
+
+        result = read_zbudget_hdf(path, zone_def=zdef_path)
+        df = result["data"][result["zones"]["zone_names"][0]]
+        clean = result["metadata"]["data_names_clean"]
+        assert len([c for c in df.columns if c in clean]) == len(clean)
 
 
 class TestZoneBalance:

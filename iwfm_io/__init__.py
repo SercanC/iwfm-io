@@ -198,6 +198,8 @@ from iwfm_io.writers.groundwater import (
     write_tile_drain,
     write_subsidence,
     write_subsidence as write_subsidence_file,
+    write_gw_initial_conditions,
+    initial_heads_from_head_all,
 )
 
 # Stream writers
@@ -426,6 +428,8 @@ __all__ = [
     "write_timeseries_file",
     # Groundwater writers
     "write_gw_main",
+    "write_gw_initial_conditions",
+    "initial_heads_from_head_all",
     "write_bc_main",
     "write_spec_head_bc",
     "write_spec_flow_bc",

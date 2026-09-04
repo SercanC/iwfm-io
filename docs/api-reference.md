@@ -187,11 +187,11 @@ Pointer-table columns whose names start with `ic`/`irn`/`itscol` are 1-based col
 
 | Function | Description |
 |----------|-------------|
-| `read_budget_hdf(path)` | Budget HDF5 → dict with `locations` (native DLL order), `data` dict of DataFrames, `data_types`, and `interval` (the file's native output interval, e.g. `'1DAY'`) |
+| `read_budget_hdf(path, interval=None)` | Budget HDF5 → dict with `locations` (native DLL order), `data` dict of DataFrames, `data_types`, and `interval` (the file's native output interval, e.g. `'1DAY'`). `interval="1MON"`/`"1YEAR"` aggregates with the DLL's exact semantics — windows anchored to the data begin (`"1YEAR"` = the water year for Oct-start models, stamped `09/30_24:00`), type-aware rules incl. the LWU carry-over, trailing partial window dropped; `"1CALYEAR"` gives calendar years |
 | `read_head_hdf(path, n_nodes, n_layers)` | GWHeadAll.hdf → DataFrame |
 | `read_hydrograph_hdf(path)` | Hydrograph HDF5 → DataFrame |
 | `read_zone_def(path)` | Zone definition file → zone mapping |
-| `read_zbudget_hdf(path)` | Zone budget HDF5 → dict |
+| `read_zbudget_hdf(path, zone_def=None, interval=None)` | Zone budget HDF5 → dict. Zone mode returns the DLL's full column set (all-zero datasets included) with clean display names (`@...@` unit annotations stripped); `interval=` aggregates like `read_budget_hdf`, with the LWU carry-over applied per element before zone summation (DLL-faithful) |
 
 ### Text Output Readers
 
@@ -222,6 +222,28 @@ Component-main writers (`write_gw_main`, `write_subsidence_file`, `write_stream_
 Full list: `write_preprocessor`, `write_nodes`, `write_elements`, `write_strata`, `write_stream_geom`, `write_lake_geom`, `write_simulation`, `write_precip`, `write_et`, `write_irigfrac`, `write_irr_period`, `write_supply_adjust`, `write_timeseries_file`, `write_max_lake_elev`, `write_surface_flow_dest`, `write_gw_main`, `write_bc_main`, `write_spec_head_bc`, `write_spec_flow_bc`, `write_general_head_bc`, `write_constrained_head_bc`, `write_boundary_ts`, `write_pump_main`, `write_well_spec`, `write_elem_pump`, `write_ts_pumping`, `write_tile_drain`, `write_subsidence_file`, `write_stream_main`, `write_stream_inflow`, `write_diver_specs`, `write_bypass_specs`, `write_diversions`, `write_lake_main`, `write_rootzone_main`, `write_nonponded_ag_main`, `write_ponded_ag_main`, `write_urban_main`, `write_native_veg_main`, `write_land_use_area`, `write_swshed`, `write_unsatzone`.
 
 **Every reader now has a mirror writer** — the reader/writer pairs cover the complete input tree, and the exe round-trip test regenerates all of them (root-zone sub-mains and BC files included) and reproduces baseline heads exactly.
+
+#### GW initial-conditions (restart) file
+
+The optional file the GW main file names as its INITIAL CONDITIONS FILE (comment banner, `FACTHP` line, then one row per node with a head per layer — the same layout as IWFM's `FinalGWHeads.out`). Used to carry a spin-up run's end-of-period heads into the next run.
+
+```python
+from iwfm_io import (read_head_all_out, initial_heads_from_head_all,
+                     write_gw_initial_conditions, read_final_state_out)
+
+ha = read_head_all_out("init/Results/GWHeadAll.out")
+ic = initial_heads_from_head_all(ha)            # last timestep (or date=...)
+write_gw_initial_conditions("main/Restart/Initial.dat", ic, facthp=1.0,
+                            header=["heads at end of init run"])
+read_final_state_out("main/Restart/Initial.dat")  # reads it back
+```
+
+| Function | Description |
+|----------|-------------|
+| `initial_heads_from_head_all(head_all, date=None)` | One `GWHeadAll.out` timestep → `node_id, head_layer_1 … head_layer_NL`. `date` is a verbatim `MM/DD/YYYY_HH:MM` string or a datetime (`24:00` = next-day midnight). Raises on a missing/ambiguous date, generic `col_N` columns, or a truncated (NaN) record. |
+| `write_gw_initial_conditions(path, heads, facthp=1.0, header=None)` | Write the file. Accepts the `initial_heads` frame from `read_gw_main`, the frame above, or `read_final_state_out`'s `ID, HP[1], …` frame. Layer and node counts come from the data; NaN, duplicate or non-integer node ids raise. Values are written as given (`facthp` is not applied). |
+
+`read_final_state_out` also accepts hand-written restart files that have no dashed separators and a bare factor line with no `/ FACTHP` keyword, which IWFM itself reads.
 
 ### Validation
 
@@ -318,7 +340,7 @@ All four accept `max_workers=N` to read the runs' HDF5 files concurrently (worth
 | `collect_zbudgets(runs_dict, zone_def, zone)` | Combine zone budgets from multiple runs |
 | `collect_hydrographs(runs_dict)` | Combine hydrograph outputs |
 | `collect_gwheads(runs_dict, n_nodes, n_layers)` | Combine head outputs |
-| `aggregate_budget(df, period="WY")` | Component-aware budget aggregation to water years / calendar years / months: flow components sum, `Beginning Storage` takes the period's first value, `Ending Storage` and `Cumulative …` the last; period membership honors the `24:00` convention. Accepts a wide `budget_df()` frame or the long `collect_budgets` frame |
+| `aggregate_budget(df, period="WY", data_types=None)` | Component-aware budget aggregation to water years / calendar years / months: flow components sum, `Beginning Storage` takes the period's first value, `Ending Storage` and `Cumulative …` the last; period membership honors the `24:00` convention. Accepts a wide `budget_df()` frame or the long `collect_budgets` frame. Pass the `data_types` dict from `read_budget_hdf` for the DLL's exact per-type rules (Area = last value, LWU trio = signed carry-over accumulation); columns without a type fall back to the name heuristic |
 | `budget_component_agg(name)` | The rule (`"sum"`/`"first"`/`"last"`) `aggregate_budget` applies to a component name |
 
 ### GIS Exports (`iwfm_io/gis.py` — core, requires the `[geo]` extra)

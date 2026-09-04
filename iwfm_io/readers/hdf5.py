@@ -240,279 +240,36 @@ def _extract_column_headers(
 
 
 # ---------------------------------------------------------------------------
-# Data-type constants (from Fortran Budget_Parameters.f90)
+# Data-type constants and DLL-faithful aggregation engine
 # ---------------------------------------------------------------------------
+# The temporal-aggregation engine lives in iwfm_io._budget_agg (shared with
+# iwfm_io.collect.aggregate_budget); the type constants are re-exported here
+# for backward compatibility.
 
-VR = 1            # Volumetric rate -> sum
-VLB = 2           # Volume at beginning -> first
-VLE = 3           # Volume at end -> last
-AR = 4            # Area -> last
-LT = 5            # Length -> last
-VR_LWU_POTCUAW = 6    # Potential CUAW (special LWU)
-VR_LWU_AGSUPPLYREQ = 7  # Ag supply requirement (special LWU)
-VR_LWU_AGSHORT = 8      # Ag shortage (special LWU)
-VR_LWU_AGPUMP = 9       # Ag pumping -> sum
-VR_LWU_AGDIV = 10       # Ag deliveries -> sum
-VR_LWU_AGOTHIN = 11     # Ag other inflows -> sum
-
-_SUM_TYPES = {VR, VR_LWU_AGPUMP, VR_LWU_AGDIV, VR_LWU_AGOTHIN}
-_FIRST_TYPES = {VLB}
-_LAST_TYPES = {VLE, AR, LT}
-_LWU_SPECIAL_TYPES = {VR_LWU_POTCUAW, VR_LWU_AGSUPPLYREQ, VR_LWU_AGSHORT}
-
-
-# ---------------------------------------------------------------------------
-# LWU iterative aggregation helpers
-# ---------------------------------------------------------------------------
-
-def _identify_lwu_groups(
-    col_names: List[str],
-    col_types: Dict[str, int],
-) -> List[Dict[str, str]]:
-    """Identify groups of LWU special columns that must be aggregated together.
-
-    Each LWU group is a repeating pattern of columns with types 6 (PotCUAW),
-    7 (AgSupplyReq), 8 (AgShort), 9 (AgPump), 10 (AgDiv).  The group may
-    also contain a type-4 Area column preceding it.
-
-    Returns a list of dicts, each mapping role -> column_name:
-        ``{'pot_cuaw': ..., 'supply_req': ..., 'shortage': ...,
-          'pumping': ..., 'deliveries': ...}``
-    """
-    groups: List[Dict[str, str]] = []
-
-    # Walk columns looking for supply_req (type 7) as the anchor
-    for i, col in enumerate(col_names):
-        if col_types.get(col) != VR_LWU_AGSUPPLYREQ:
-            continue
-
-        group: Dict[str, str] = {"supply_req": col}
-
-        # Look backwards for pot_cuaw (type 6) — usually immediately before
-        for j in range(i - 1, max(i - 3, -1), -1):
-            if col_types.get(col_names[j]) == VR_LWU_POTCUAW:
-                group["pot_cuaw"] = col_names[j]
-                break
-
-        # Look forwards for pumping (9), deliveries (10), shortage (8)
-        for j in range(i + 1, min(i + 5, len(col_names))):
-            t = col_types.get(col_names[j])
-            if t == VR_LWU_AGPUMP and "pumping" not in group:
-                group["pumping"] = col_names[j]
-            elif t == VR_LWU_AGDIV and "deliveries" not in group:
-                group["deliveries"] = col_names[j]
-            elif t == VR_LWU_AGSHORT and "shortage" not in group:
-                group["shortage"] = col_names[j]
-
-        groups.append(group)
-
-    return groups
-
-
-def _lwu_aggregate_group(
-    supply_req: np.ndarray,
-    pumping: np.ndarray,
-    deliveries: np.ndarray,
-    pot_cuaw: Optional[np.ndarray],
-) -> Tuple[float, float, Optional[float]]:
-    """Aggregate one LWU group over a resampling period using carry-over logic.
-
-    Implements the Fortran ``ModifiedAgSupplyReq`` algorithm
-    (Class_Budget.f90:1988-2002):
-
-    For each timestep *t* within the period:
-      - If ``prev_shortage <= 0``: ``modified_req = supply_req[t]``
-      - Elif ``supply_req[t] > prev_shortage``:
-            ``modified_req = supply_req[t] - prev_shortage``
-      - Else: ``modified_req = supply_req[t]``
-      - ``shortage[t] = modified_req - pumping[t] - deliveries[t]``
-      - ``prev_shortage = shortage[t]``
-
-    Parameters
-    ----------
-    supply_req, pumping, deliveries : 1-D arrays
-        Raw values for timesteps within the period.
-    pot_cuaw : 1-D array or None
-        Raw potential CUAW values, if this group has one.
-
-    Returns
-    -------
-    agg_supply_req : float
-        Sum of modified supply requirements.
-    agg_shortage : float
-        Sum of computed shortages.
-    agg_pot_cuaw : float or None
-        Sum of scaled potential CUAW, or None if *pot_cuaw* is None.
-    """
-    n = len(supply_req)
-    prev_shortage = 0.0
-    agg_supply_req = 0.0
-    agg_shortage = 0.0
-    agg_pot_cuaw = 0.0 if pot_cuaw is not None else None
-
-    for t in range(n):
-        raw_req = supply_req[t]
-
-        if prev_shortage <= 0:
-            modified_req = raw_req
-        elif raw_req > prev_shortage:
-            modified_req = raw_req - prev_shortage
-        else:
-            modified_req = raw_req
-
-        short = modified_req - pumping[t] - deliveries[t]
-        agg_supply_req += modified_req
-        agg_shortage += short
-
-        if pot_cuaw is not None and raw_req != 0:
-            scale = modified_req / raw_req
-            agg_pot_cuaw += pot_cuaw[t] * scale
-        elif pot_cuaw is not None:
-            agg_pot_cuaw += pot_cuaw[t]
-
-        prev_shortage = short
-
-    return agg_supply_req, agg_shortage, agg_pot_cuaw
-
-
-def _resample_budget_df(
-    df: pd.DataFrame,
-    rule: str,
-    col_types: Dict[str, int],
-) -> pd.DataFrame:
-    """Resample a budget DataFrame using data-type-aware aggregation.
-
-    Parameters
-    ----------
-    df : DataFrame
-        Budget data with DatetimeIndex.
-    rule : str
-        Pandas resample rule (e.g. ``"ME"`` for month-end, ``"YE"`` for
-        year-end).
-    col_types : dict
-        Mapping of column name -> IWFM data type code (1-11).
-        Columns not in *col_types* default to sum aggregation.
-
-    Returns
-    -------
-    DataFrame
-        Resampled data.
-    """
-    if df.empty:
-        return df.resample(rule).sum()
-
-    # Check whether any LWU special columns exist
-    lwu_cols = {c for c in df.columns if col_types.get(c, VR) in _LWU_SPECIAL_TYPES}
-
-    if not lwu_cols:
-        # Fast path: no LWU special columns — use vectorised operations
-        return _resample_simple(df, rule, col_types)
-
-    # Slow path: need iterative LWU aggregation
-    return _resample_with_lwu(df, rule, col_types)
-
-
-def _resample_simple(
-    df: pd.DataFrame,
-    rule: str,
-    col_types: Dict[str, int],
-) -> pd.DataFrame:
-    """Resample without LWU special columns (vectorised fast path)."""
-    sum_cols = [c for c in df.columns if col_types.get(c, VR) in _SUM_TYPES]
-    first_cols = [c for c in df.columns if col_types.get(c, VR) in _FIRST_TYPES]
-    last_cols = [c for c in df.columns if col_types.get(c, VR) in _LAST_TYPES]
-
-    parts: List[pd.DataFrame] = []
-    if sum_cols:
-        parts.append(df[sum_cols].resample(rule).sum())
-    if first_cols:
-        parts.append(df[first_cols].resample(rule).first())
-    if last_cols:
-        parts.append(df[last_cols].resample(rule).last())
-
-    if not parts:
-        return df.resample(rule).sum()
-
-    merged = pd.concat(parts, axis=1)
-    # Restore original column order
-    return merged[[c for c in df.columns if c in merged.columns]]
-
-
-def _resample_with_lwu(
-    df: pd.DataFrame,
-    rule: str,
-    col_types: Dict[str, int],
-) -> pd.DataFrame:
-    """Resample with LWU special column carry-over logic."""
-    # Identify LWU groups
-    lwu_groups = _identify_lwu_groups(list(df.columns), col_types)
-
-    # Columns handled by LWU groups
-    lwu_handled: set = set()
-    for g in lwu_groups:
-        lwu_handled.update(g.values())
-
-    # Handle non-LWU columns with vectorised resampling
-    non_lwu_cols = [c for c in df.columns if c not in lwu_handled]
-    non_lwu_types = {c: col_types.get(c, VR) for c in non_lwu_cols}
-
-    if non_lwu_cols:
-        non_lwu_result = _resample_simple(df[non_lwu_cols], rule, non_lwu_types)
-    else:
-        non_lwu_result = None
-
-    # Handle LWU groups with iterative aggregation
-    grouper = df.resample(rule)
-    period_indices = list(grouper.indices.values())
-    period_labels = list(grouper.indices.keys())
-
-    lwu_results: Dict[str, List[float]] = {
-        col: [] for col in lwu_handled
-    }
-
-    for period_idx in period_indices:
-        period_df = df.iloc[period_idx]
-
-        for g in lwu_groups:
-            supply_req_col = g["supply_req"]
-            pumping_col = g.get("pumping")
-            deliveries_col = g.get("deliveries")
-            shortage_col = g.get("shortage")
-            pot_cuaw_col = g.get("pot_cuaw")
-
-            raw_supply = period_df[supply_req_col].values
-            raw_pump = period_df[pumping_col].values if pumping_col else np.zeros(len(period_df))
-            raw_deliv = period_df[deliveries_col].values if deliveries_col else np.zeros(len(period_df))
-            raw_cuaw = period_df[pot_cuaw_col].values if pot_cuaw_col else None
-
-            agg_req, agg_short, agg_cuaw = _lwu_aggregate_group(
-                raw_supply, raw_pump, raw_deliv, raw_cuaw
-            )
-
-            lwu_results[supply_req_col].append(agg_req)
-            if shortage_col:
-                lwu_results[shortage_col].append(agg_short)
-            if pot_cuaw_col:
-                lwu_results[pot_cuaw_col].append(
-                    agg_cuaw if agg_cuaw is not None else 0.0
-                )
-            # Pumping and deliveries are sum types but handled via the group
-            if pumping_col:
-                lwu_results[pumping_col].append(float(raw_pump.sum()))
-            if deliveries_col:
-                lwu_results[deliveries_col].append(float(raw_deliv.sum()))
-
-    # Build LWU DataFrame
-    lwu_index = non_lwu_result.index if non_lwu_result is not None else pd.DatetimeIndex(period_labels)
-    lwu_df = pd.DataFrame(lwu_results, index=lwu_index)
-
-    # Merge and restore column order
-    if non_lwu_result is not None:
-        merged = pd.concat([non_lwu_result, lwu_df], axis=1)
-    else:
-        merged = lwu_df
-
-    return merged[[c for c in df.columns if c in merged.columns]]
+from iwfm_io._budget_agg import (  # noqa: F401  (re-exported)
+    AR,
+    LT,
+    SUPPORTED_INTERVALS,
+    VLB,
+    VLE,
+    VR,
+    VR_LWU_AGDIV,
+    VR_LWU_AGOTHIN,
+    VR_LWU_AGPUMP,
+    VR_LWU_AGSHORT,
+    VR_LWU_AGSUPPLYREQ,
+    VR_LWU_POTCUAW,
+    _FIRST_TYPES,
+    _LAST_TYPES,
+    _LWU_SPECIAL_TYPES,
+    _SUM_TYPES,
+    _window_starts,
+    aggregate_frame,
+    identify_lwu_groups,
+    lwu_aggregate_arrays,
+    strip_zbudget_marker,
+    window_end_labels,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -542,11 +299,21 @@ def read_budget_hdf(
     path:
         Path to the HDF5 budget file.
     interval:
-        Optional temporal resampling interval.  ``"1MON"`` for monthly,
-        ``"1YEAR"`` for annual.  ``None`` returns native timestep data.
+        Optional temporal resampling interval.  ``None`` returns native
+        timestep data.  ``"1MON"`` and ``"1YEAR"`` follow the IWFM DLL's
+        semantics exactly: aggregation windows are consecutive calendar
+        months / 12-month blocks anchored to the data begin (for the usual
+        October-start models ``"1YEAR"`` is the water year), each window is
+        stamped at its end using the library's 24:00 convention (e.g. the
+        window ending ``09/30/1988_24:00`` is stamped ``1988-10-01``), and
+        a trailing partial window is dropped — matching
+        ``IWFMBudget.get_values(..., "1YEAR")`` stamps and values.
+        ``"1CALYEAR"`` aggregates over calendar years instead (January
+        anchored; partial first/last years are kept).
         Aggregation is data-type-aware: volumetric rates are summed,
         beginning storage uses first value, ending storage/area/length use
-        last value, and LWU special columns use iterative carry-over logic.
+        last value, and LWU special columns use the DLL's carry-over logic
+        (see :mod:`iwfm_io._budget_agg`).
 
     Returns
     -------
@@ -583,13 +350,13 @@ def read_budget_hdf(
     if not path.exists():
         raise FileNotFoundError(f"HDF5 file not found: {path}")
 
-    resample_rule = None
+    resample_interval = None
     if interval is not None:
-        rule_map = {"1MON": "ME", "1YEAR": "YE"}
-        resample_rule = rule_map.get(interval.upper())
-        if resample_rule is None:
+        resample_interval = interval.upper()
+        if resample_interval not in SUPPORTED_INTERVALS:
             raise ValueError(
-                f"Unsupported interval '{interval}'. Use '1MON' or '1YEAR'."
+                f"Unsupported interval '{interval}'. "
+                f"Use one of {', '.join(SUPPORTED_INTERVALS)}."
             )
 
     result: Dict = {"locations": [], "data": {}, "data_types": {},
@@ -700,10 +467,13 @@ def read_budget_hdf(
             df = pd.DataFrame(data_cols, index=idx, columns=col_names)
             df.index.name = "datetime"
 
-            if resample_rule is not None and col_types:
-                df = _resample_budget_df(df, resample_rule, col_types)
-            elif resample_rule is not None:
-                df = df.resample(resample_rule).sum()
+            if resample_interval is not None:
+                labels, complete = window_end_labels(
+                    idx, resample_interval,
+                    native_unit=result["interval"],
+                    delta_minutes=root_attrs.get("TimeStep%DeltaT_InMinutes"),
+                )
+                df = aggregate_frame(df, col_types, labels, complete)
 
             result["data"][loc_name] = df
 
@@ -1167,6 +937,122 @@ def _compute_face_flow_exchanges(
     return exchanges
 
 
+def _clean_data_names(data_names: List[str]) -> Dict[str, str]:
+    """Map raw zbudget data names to display names (``@...@`` stripped).
+
+    On the (unexpected) event that two raw names clean to the same string,
+    the later one keeps its raw name so columns stay unique.
+    """
+    mapping: Dict[str, str] = {}
+    used: set = set()
+    for dn in data_names:
+        clean = strip_zbudget_marker(dn) or dn
+        if clean in used and clean != dn:
+            clean = dn
+        mapping[dn] = clean
+        used.add(clean)
+    return mapping
+
+
+_LWU_ROLE_BY_TYPE = {
+    VR_LWU_POTCUAW: "pot_cuaw",
+    VR_LWU_AGSUPPLYREQ: "supply_req",
+    VR_LWU_AGSHORT: "shortage",
+}
+
+_LWU_ELEM_CHUNK = 4096  # elements per block in per-element LWU aggregation
+
+
+def _lwu_elementwise(
+    raw_cache: Dict[int, Optional[np.ndarray]],
+    layer_grp: "h5py.Group",
+    data_paths: List[str],
+    edc: np.ndarray,
+    group_idx: Dict[str, int],
+    out_didx: int,
+    out_role: str,
+    row_keep: np.ndarray,
+    starts: np.ndarray,
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """Per-element DLL LWU aggregation for one output dataset in one layer.
+
+    Implements Class_ZBudget.f90 ``AccumulateData`` for data types 6/7/8:
+    the carry-over runs on each element's own series (gathered from the
+    group's related datasets via the per-dataset ``ElemDataColumns`` maps)
+    *before* any spatial summation.
+
+    Parameters
+    ----------
+    raw_cache : dict
+        dataset index -> loaded raw array (populated lazily; shared across
+        the group's output datasets so each file dataset is read once).
+    edc : ndarray, shape (n_data, n_elements)
+        The layer's ElemDataColumns map (1-based columns, 0 = no data).
+    group_idx : dict
+        role -> dataset index for this LWU group.
+    out_didx, out_role :
+        The dataset to produce and its role (``pot_cuaw`` / ``supply_req``
+        / ``shortage``).
+    row_keep : ndarray of bool
+        Native rows to keep (complete aggregation windows).
+    starts : ndarray
+        Window start rows within the kept rows.
+
+    Returns
+    -------
+    (elem_sel, agg) or None
+        0-based indices of elements with data in the output dataset, and
+        the ``(n_windows, len(elem_sel))`` aggregated values.  None when
+        the group's supply-requirement dataset is unavailable.
+    """
+    def _load(didx: int) -> Optional[np.ndarray]:
+        if didx not in raw_cache:
+            ds_name = data_paths[didx]
+            if ds_name in layer_grp and layer_grp[ds_name].shape[1] > 0:
+                raw_cache[didx] = layer_grp[ds_name][()]
+            else:
+                raw_cache[didx] = None
+        return raw_cache[didx]
+
+    req_didx = group_idx.get("supply_req")
+    if req_didx is None or _load(req_didx) is None:
+        return None
+
+    elem_sel = np.flatnonzero(edc[out_didx])
+    if len(elem_sel) == 0:
+        return None
+
+    keep_rows = np.flatnonzero(row_keep)
+
+    def _gather(didx: Optional[int], chunk: np.ndarray) -> Optional[np.ndarray]:
+        if didx is None:
+            return None
+        raw = _load(didx)
+        mat = np.zeros((len(keep_rows), len(chunk)))
+        if raw is not None:
+            cols = edc[didx][chunk]
+            valid = cols >= 1
+            if valid.any():
+                mat[:, valid] = raw[np.ix_(keep_rows, cols[valid] - 1)]
+        return mat
+
+    parts: List[np.ndarray] = []
+    for s in range(0, len(elem_sel), _LWU_ELEM_CHUNK):
+        chunk = elem_sel[s:s + _LWU_ELEM_CHUNK]
+        res = lwu_aggregate_arrays(
+            starts,
+            _gather(req_didx, chunk),
+            _gather(group_idx.get("shortage"), chunk),
+            _gather(group_idx.get("pumping"), chunk),
+            _gather(group_idx.get("deliveries"), chunk),
+            _gather(group_idx.get("other_inflow"), chunk),
+            _gather(out_didx, chunk) if out_role == "pot_cuaw" else None,
+        )
+        parts.append(res[out_role])
+
+    return elem_sel, np.concatenate(parts, axis=1)
+
+
 def read_zbudget_hdf(
     path: Union[str, Path],
     zone_def: Union[ZoneDefinition, str, Path, None] = None,
@@ -1191,11 +1077,19 @@ def read_zbudget_hdf(
         be parsed via :func:`read_zone_def`).  ``None`` returns raw
         element-level data.
     interval:
-        Optional temporal resampling interval.  ``"1MON"`` for monthly,
-        ``"1YEAR"`` for annual.  ``None`` returns native (daily) data.
-        Aggregation is data-type-aware: volumetric rates are summed,
-        area/length use last value, and LWU special columns use iterative
-        carry-over logic matching the Fortran DLL.
+        Optional temporal resampling interval.  ``None`` returns native
+        data.  ``"1MON"`` and ``"1YEAR"`` follow the IWFM DLL's semantics:
+        windows are anchored to the data begin (``"1YEAR"`` is the water
+        year for October-start models), stamped at the window end with the
+        24:00 convention, and a trailing partial window is dropped —
+        matching ``IWFMZBudget.get_values_for_zone``.  ``"1CALYEAR"``
+        aggregates over calendar years (January anchored, partial years
+        kept).  Aggregation is data-type-aware: volumetric rates are
+        summed, area/length use last value, and the LWU carry-over columns
+        (Potential CUAW / Ag. Supply Requirement / Ag. Shortage) are
+        aggregated **per element before zone summation**, exactly as the
+        DLL does (the carry-over clipping does not commute with spatial
+        sums).
 
     Returns
     -------
@@ -1203,17 +1097,23 @@ def read_zbudget_hdf(
 
     ``'metadata'`` : dict
         File metadata including ``n_elements``, ``n_layers``,
-        ``n_timesteps``, ``data_names``, ``data_types``,
-        ``element_areas``, ``begin_date``, ``delta_minutes``.
+        ``n_timesteps``, ``data_names`` (raw, with the ``@...@`` unit
+        annotations), ``data_names_clean`` (display names, annotations
+        stripped), ``data_types``, ``element_areas``, ``begin_date``,
+        ``delta_minutes``.
 
     ``'zones'`` : dict (only when *zone_def* is provided)
         ``zone_ids`` and ``zone_names`` lists.
 
     ``'data'`` : dict
         When *zone_def* is provided: maps zone name -> DataFrame with
-        DatetimeIndex and one column per data type name.
+        DatetimeIndex and one column per dataset, in ``data_names`` order
+        — every dataset appears (all-zero when it has no active elements,
+        as the DLL reports), named by its clean display name (the raw
+        ``@...@`` unit annotation is stripped) — followed by the
+        per-neighbor subsurface inflow/outflow columns.
         When *zone_def* is ``None``: maps ``"Layer_N"`` -> dict mapping
-        data type name -> DataFrame(DatetimeIndex, columns=element_ids).
+        raw data name -> DataFrame(DatetimeIndex, columns=element_ids).
 
     ``'face_flows'`` : dict (only when *zone_def* is provided)
         Maps ``(zone_a, zone_b)`` tuples -> DataFrame with column
@@ -1232,13 +1132,13 @@ def read_zbudget_hdf(
     if zone_def is not None and not isinstance(zone_def, ZoneDefinition):
         zone_def = read_zone_def(zone_def)
 
-    resample_rule = None
+    resample_interval = None
     if interval is not None:
-        rule_map = {"1MON": "ME", "1YEAR": "YE"}
-        resample_rule = rule_map.get(interval.upper())
-        if resample_rule is None:
+        resample_interval = interval.upper()
+        if resample_interval not in SUPPORTED_INTERVALS:
             raise ValueError(
-                f"Unsupported interval '{interval}'. Use '1MON' or '1YEAR'."
+                f"Unsupported interval '{interval}'. "
+                f"Use one of {', '.join(SUPPORTED_INTERVALS)}."
             )
 
     result: Dict = {"metadata": {}, "data": {}}
@@ -1280,17 +1180,45 @@ def read_zbudget_hdf(
         begin_raw = attrs.get("TimeStep%BeginDateAndTime", b"01/01/1900_00:00")
         begin_str = _decode_bytes(begin_raw)
         delta_minutes = int(attrs.get("TimeStep%DeltaT_InMinutes", 1440))
+        native_unit = _decode_bytes(attrs.get("TimeStep%Unit", b""))
+
+        clean_names = _clean_data_names(data_names)
 
         result["metadata"] = {
             "n_elements": n_elements,
             "n_layers": n_layers,
             "n_timesteps": n_timesteps,
             "data_names": data_names,
+            "data_names_clean": [clean_names[dn] for dn in data_names],
             "data_types": data_types,
             "element_areas": element_areas,
             "begin_date": begin_str,
             "delta_minutes": delta_minutes,
         }
+
+        # Precompute aggregation windows and LWU dataset groups
+        name_types = {dn: int(t) for dn, t in zip(data_names, data_types)}
+        agg_labels = agg_complete = agg_starts = agg_ulabels = None
+        special_group_for: Dict[int, Dict[str, int]] = {}
+        if resample_interval is not None:
+            agg_labels, agg_complete = window_end_labels(
+                date_index, resample_interval,
+                native_unit=native_unit, delta_minutes=delta_minutes,
+            )
+            _masked = np.asarray(agg_labels)[agg_complete]
+            agg_starts = _window_starts(_masked)
+            agg_ulabels = pd.DatetimeIndex(
+                _masked[agg_starts], name="datetime")
+
+            # Map each LWU special dataset (types 6/7/8) to its group of
+            # related dataset indices, for per-element aggregation.
+            if any(t in _LWU_SPECIAL_TYPES for t in name_types.values()):
+                name_pos = {dn: i for i, dn in enumerate(data_names)}
+                for g in identify_lwu_groups(data_names, name_types):
+                    gidx = {role: name_pos[dn] for role, dn in g.items()}
+                    for role in ("pot_cuaw", "supply_req", "shortage"):
+                        if role in gidx:
+                            special_group_for[gidx[role]] = gidx
 
         if zone_def is None:
             # --- Raw mode: element-level data per layer ---
@@ -1302,6 +1230,7 @@ def read_zbudget_hdf(
                 layer_data: Dict[str, pd.DataFrame] = {}
 
                 edc = elem_data_cols.get(layer)
+                raw_cache: Dict[int, Optional[np.ndarray]] = {}
 
                 for dtype_idx, dname in enumerate(data_names):
                     ds_name = data_paths[dtype_idx]
@@ -1311,7 +1240,37 @@ def read_zbudget_hdf(
                     if ds.shape[1] == 0:
                         continue  # empty dataset
 
-                    raw = ds[()]
+                    dtype_code = name_types.get(dname, VR)
+
+                    # LWU special datasets (types 6/7/8): the DLL carry-over
+                    # runs on each element's own series, pulling the related
+                    # supply-req/shortage/pumping/delivery series from the
+                    # group's other datasets.
+                    if (resample_interval is not None
+                            and dtype_code in _LWU_SPECIAL_TYPES
+                            and edc is not None
+                            and dtype_idx in special_group_for
+                            and ds.shape[0] == n_timesteps):
+                        res = _lwu_elementwise(
+                            raw_cache, layer_grp, data_paths, edc,
+                            special_group_for[dtype_idx], dtype_idx,
+                            _LWU_ROLE_BY_TYPE[dtype_code],
+                            agg_complete, agg_starts,
+                        )
+                        if res is not None:
+                            elem_sel, agg = res
+                            df = pd.DataFrame(
+                                agg, index=agg_ulabels,
+                                columns=[int(eid)
+                                         for eid in element_ids[elem_sel]],
+                            )
+                            df.index.name = "datetime"
+                            layer_data[dname] = df
+                            continue
+
+                    raw = raw_cache.get(dtype_idx)
+                    if raw is None:
+                        raw = ds[()]
                     n_rows = raw.shape[0]
                     idx = date_index[:n_rows] if n_rows != n_timesteps else date_index
 
@@ -1334,12 +1293,20 @@ def read_zbudget_hdf(
                         )
 
                     df.index.name = "datetime"
-                    if resample_rule is not None:
+                    if resample_interval is not None:
                         # All columns in this DataFrame share the same data
                         # type (one dtype per element-level dataset).
-                        dtype_code = data_types[dtype_idx] if dtype_idx < len(data_types) else VR
+                        if n_rows != n_timesteps:
+                            labels, complete = window_end_labels(
+                                idx, resample_interval,
+                                native_unit=native_unit,
+                                delta_minutes=delta_minutes,
+                            )
+                        else:
+                            labels, complete = agg_labels, agg_complete
                         per_col_types = {c: dtype_code for c in df.columns}
-                        df = _resample_budget_df(df, resample_rule, per_col_types)
+                        df = aggregate_frame(df, per_col_types, labels,
+                                             complete)
                     layer_data[dname] = df
 
                 result["data"][layer_key] = layer_data
@@ -1355,13 +1322,12 @@ def read_zbudget_hdf(
             }
 
             # Initialize per-zone data: {zone_name: {data_name: 1-D array}}
+            # Every dataset gets a column — an all-zero one when it has no
+            # active elements, matching the DLL's full column set.
             zone_data: Dict[str, Dict[str, np.ndarray]] = {
                 zone_def.zones[zid]: {dn: np.zeros(n_timesteps) for dn in data_names}
                 for zid in zone_ids
             }
-
-            # Also track which data names actually have data
-            active_data_names: set = set()
 
             for layer in range(1, n_layers + 1):
                 layer_key = f"Layer_{layer}"
@@ -1392,17 +1358,54 @@ def read_zbudget_hdf(
                     for zid, values in aggregated.items():
                         zname = zone_def.zones[zid]
                         zone_data[zname][dname] += values
-                        if np.any(values != 0):
-                            active_data_names.add(dname)
 
-            # Build DataFrames per zone (only include data names with data)
-            ordered_active = [dn for dn in data_names if dn in active_data_names]
+            # Column-name (display) -> data-type-code for zone DataFrames
+            zone_col_types: Dict[str, int] = {
+                clean_names[dn]: name_types.get(dn, VR) for dn in data_names
+            }
 
-            # Build column-name -> data-type-code mapping for zone DataFrames
-            zone_col_types: Dict[str, int] = {}
-            for di, dn in enumerate(data_names):
-                if dn in active_data_names and di < len(data_types):
-                    zone_col_types[dn] = data_types[di]
+            # --- Per-element LWU carry-over (types 6/7/8) ---
+            # The DLL aggregates these on each element's own series before
+            # summing to zones (the clipping does not commute with spatial
+            # sums), so the naively-resampled zone columns are replaced
+            # below with per-element aggregates summed to zones.
+            corrected: Dict[str, Dict[str, np.ndarray]] = {
+                zname: {} for zname in zone_names
+            }
+            if resample_interval is not None and special_group_for:
+                for layer in range(1, n_layers + 1):
+                    layer_key = f"Layer_{layer}"
+                    if layer_key not in f:
+                        continue
+                    layer_grp = f[layer_key]
+                    edc = elem_data_cols.get(layer)
+                    if edc is None:
+                        continue
+                    zone_map = _build_element_zone_map(
+                        zone_def, n_elements, layer)
+                    raw_cache: Dict[int, Optional[np.ndarray]] = {}
+
+                    for out_didx, gidx in special_group_for.items():
+                        dname = data_names[out_didx]
+                        res = _lwu_elementwise(
+                            raw_cache, layer_grp, data_paths, edc, gidx,
+                            out_didx, _LWU_ROLE_BY_TYPE[name_types[dname]],
+                            agg_complete, agg_starts,
+                        )
+                        if res is None:
+                            continue
+                        elem_sel, agg = res  # agg: (n_windows, n_elems)
+                        elem_zones = zone_map[elem_sel]
+                        for zid in zone_ids:
+                            in_zone = elem_zones == zid
+                            if not in_zone.any():
+                                continue
+                            zname = zone_def.zones[zid]
+                            summed = agg[:, in_zone].sum(axis=1)
+                            if dname in corrected[zname]:
+                                corrected[zname][dname] += summed
+                            else:
+                                corrected[zname][dname] = summed
 
             # --- Compute face flow exchanges (raw arrays, summed across layers) ---
             face_elements = attrs_grp["SystemData%FaceElements"][()]
@@ -1433,7 +1436,8 @@ def read_zbudget_hdf(
             for zname_idx, zname in enumerate(zone_names):
                 zid = zone_ids[zname_idx]
 
-                data_dict = {dn: zone_data[zname][dn] for dn in ordered_active}
+                data_dict = {clean_names[dn]: zone_data[zname][dn]
+                             for dn in data_names}
 
                 # Add per-neighbor subsurface inflow/outflow columns
                 for (za, zb), exch_values in sorted(raw_exchanges.items()):
@@ -1461,17 +1465,31 @@ def read_zbudget_hdf(
 
                 df = pd.DataFrame(data_dict, index=date_index)
                 df.index.name = "datetime"
-                if resample_rule is not None:
-                    df = _resample_budget_df(df, resample_rule, zone_col_types)
+                if resample_interval is not None:
+                    # LWU special columns get a placeholder rule here; the
+                    # DLL-faithful per-element aggregates computed above
+                    # overwrite them right after.
+                    placeholder_types = {
+                        c: (VR if t in _LWU_SPECIAL_TYPES else t)
+                        for c, t in zone_col_types.items()
+                    }
+                    df = aggregate_frame(df, placeholder_types,
+                                         agg_labels, agg_complete)
+                    for dn, arr in corrected[zname].items():
+                        df[clean_names[dn]] = arr
                 result["data"][zname] = df
 
             # --- Also build face_flows dict (net per zone pair) ---
             face_flows_result: Dict[Tuple[int, int], pd.DataFrame] = {}
             for key, values in raw_exchanges.items():
-                ff_df = pd.DataFrame({"flow": values}, index=date_index)
+                if resample_interval is not None:
+                    kept = values[np.asarray(agg_complete)]
+                    summed = np.add.reduceat(kept, agg_starts) \
+                        if len(kept) else kept
+                    ff_df = pd.DataFrame({"flow": summed}, index=agg_ulabels)
+                else:
+                    ff_df = pd.DataFrame({"flow": values}, index=date_index)
                 ff_df.index.name = "datetime"
-                if resample_rule is not None:
-                    ff_df = ff_df.resample(resample_rule).sum()
                 face_flows_result[key] = ff_df
 
             result["face_flows"] = face_flows_result

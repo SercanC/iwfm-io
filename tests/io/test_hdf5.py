@@ -144,31 +144,30 @@ class TestBudgetHDF:
 
         # Monthly should have fewer rows than daily
         assert len(mon_df) < len(raw_df)
-        # Approximately 120 months for 10 years of daily data
-        assert len(mon_df) >= 119
+        # Exactly 120 months for 10 years of daily data
+        assert len(mon_df) == 120
+
+        # Window membership follows the DLL: a window's label is its end
+        # stamp (24:00 convention -> next-period-begin midnight), so the
+        # first window covers stamps (raw start, first label].
+        first_label = mon_df.index[0]
+        window_mask = raw_df.index <= first_label
 
         # Beginning Storage (type 2 = first): monthly value should equal
-        # the first daily value of that month, NOT the sum.
+        # the first daily value of that window, NOT the sum.
         beg_col = [c for c in raw_df.columns if "Beginning" in c]
         if beg_col:
             col = beg_col[0]
-            # Check first month: monthly value == first daily value
-            first_month_end = mon_df.index[0]
-            month_mask = (raw_df.index.year == first_month_end.year) & \
-                         (raw_df.index.month == first_month_end.month)
-            first_daily = raw_df.loc[month_mask, col].iloc[0]
+            first_daily = raw_df.loc[window_mask, col].iloc[0]
             assert mon_df[col].iloc[0] == pytest.approx(first_daily), \
                 "Beginning Storage should use first-of-period, not sum"
 
         # Ending Storage (type 3 = last): monthly value should equal
-        # the last daily value of that month.
+        # the last daily value of that window.
         end_col = [c for c in raw_df.columns if "Ending" in c]
         if end_col:
             col = end_col[0]
-            first_month_end = mon_df.index[0]
-            month_mask = (raw_df.index.year == first_month_end.year) & \
-                         (raw_df.index.month == first_month_end.month)
-            last_daily = raw_df.loc[month_mask, col].iloc[-1]
+            last_daily = raw_df.loc[window_mask, col].iloc[-1]
             assert mon_df[col].iloc[0] == pytest.approx(last_daily), \
                 "Ending Storage should use last-of-period, not sum"
 
@@ -178,10 +177,7 @@ class TestBudgetHDF:
                    if raw["data_types"].get(c) == 1]
         if vr_cols:
             col = vr_cols[0]
-            first_month_end = mon_df.index[0]
-            month_mask = (raw_df.index.year == first_month_end.year) & \
-                         (raw_df.index.month == first_month_end.month)
-            daily_sum = raw_df.loc[month_mask, col].sum()
+            daily_sum = raw_df.loc[window_mask, col].sum()
             assert mon_df[col].iloc[0] == pytest.approx(daily_sum), \
                 "Volumetric rate should be summed"
 
@@ -195,8 +191,26 @@ class TestBudgetHDF:
         yearly = read_budget_hdf(path, interval="1YEAR")
         first_loc = yearly["locations"][0]
         yr_df = yearly["data"][first_loc]
-        # 10 years of daily data (1990-2000) -> 11 calendar years
-        assert len(yr_df) == 11
+        # 10 water years of daily data (Oct 1990 - Sep 2000): windows are
+        # anchored to the simulation start (DLL semantics), stamped at the
+        # water-year end (09/30_24:00 -> Oct 1 midnight).
+        assert len(yr_df) == 10
+        assert yr_df.index[0].month == 10 and yr_df.index[0].day == 1
+
+    def test_read_gw_budget_calendar_years(self):
+        from iwfm_io.readers.hdf5 import read_budget_hdf
+
+        path = RESULTS_DIR / "GW.hdf"
+        if not path.exists():
+            pytest.skip(f"{path} not found")
+
+        cal = read_budget_hdf(path, interval="1CALYEAR")
+        first_loc = cal["locations"][0]
+        cal_df = cal["data"][first_loc]
+        # Oct 1990 - Sep 2000 daily -> 11 calendar years (1990 and 2000
+        # partial; the calendar variant keeps partial years)
+        assert len(cal_df) == 11
+        assert all(ts.month == 1 and ts.day == 1 for ts in cal_df.index)
 
     def test_read_lwu_budget_monthly(self):
         from iwfm_io.readers.hdf5 import read_budget_hdf

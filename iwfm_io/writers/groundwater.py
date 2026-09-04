@@ -201,6 +201,220 @@ def write_gw_main(
 
 
 # ------------------------------------------------------------------
+# GW initial-conditions (restart) file
+# ------------------------------------------------------------------
+
+_DASH = "C" + "-" * 79
+
+
+def _normalize_heads_frame(heads) -> "tuple[list[int], pd.DataFrame]":
+    """Coerce a heads table to ``node_id`` + ``head_layer_1..NL``.
+
+    Accepts the ``initial_heads`` shape from :func:`read_gw_main`
+    (``node_id, head_layer_*``) and the shape
+    :func:`~iwfm_io.readers.text_output.read_final_state_out` returns
+    for ``FinalGWHeads.out`` (``ID, HP[1], HP[2], …``): the first
+    column is the node id, every remaining column is one layer, in
+    order.
+    """
+    import pandas as pd
+
+    if heads is None or len(heads) == 0:
+        raise ValueError("initial heads table is empty")
+    df = pd.DataFrame(heads)
+    cols = list(df.columns)
+    if "node_id" in cols:
+        id_col = "node_id"
+        layer_cols = [c for c in cols if str(c).startswith("head_layer_")]
+    else:
+        id_col = cols[0]
+        layer_cols = cols[1:]
+    if not layer_cols:
+        raise ValueError(
+            "initial heads table needs at least one layer column "
+            "(head_layer_1 …) besides the node id")
+
+    out = pd.DataFrame({"node_id": df[id_col].astype(float)})
+    if not (out["node_id"] % 1 == 0).all():
+        raise ValueError("node ids must be integers")
+    out["node_id"] = out["node_id"].astype(int)
+    if out["node_id"].duplicated().any():
+        dup = out.loc[out["node_id"].duplicated(), "node_id"].iloc[0]
+        raise ValueError(f"duplicate node id {dup} in initial heads table")
+    for i, c in enumerate(layer_cols, start=1):
+        out[f"head_layer_{i}"] = pd.to_numeric(df[c], errors="coerce")
+    if out.isna().any().any():
+        bad = out.columns[out.isna().any()][0]
+        raise ValueError(
+            f"NaN in initial heads column {bad!r} — a missing head would "
+            "write a short data row that IWFM mis-reads")
+    return list(out["node_id"]), out
+
+
+def write_gw_initial_conditions(
+    path: str | Path,
+    heads,
+    facthp: float = 1.0,
+    header: "list[str] | None" = None,
+) -> None:
+    """Write an IWFM groundwater initial-conditions (restart) file.
+
+    The optional file the GW main file points to with its INITIAL
+    CONDITIONS FILE entry; it overrides the ``FACTHP`` / initial-head
+    block inside the GW main file. Layout matches IWFM's own
+    ``FinalGWHeads.out`` so :func:`~iwfm_io.readers.text_output.read_final_state_out`
+    reads the written file back::
+
+        C*** banner ***
+        C---
+             1.0                           / FACTHP
+        C---
+        C      ID           HP[1]             HP[2]
+        C---
+               1        290.000000        291.172170
+
+    Parameters
+    ----------
+    path : str or Path
+    heads : pandas.DataFrame
+        ``node_id`` + ``head_layer_1 … head_layer_NL`` (the
+        ``initial_heads`` shape from :func:`read_gw_main`, or the
+        frame :func:`initial_heads_from_head_all` builds), or the
+        ``ID, HP[1], …`` frame :func:`read_final_state_out` returns.
+        Layer count comes from the columns; node count from the rows.
+    facthp : float, default 1.0
+        Conversion factor written on the ``FACTHP`` line. Head values
+        are written as given, never rescaled.
+    header : list of str, optional
+        Comment lines for the banner (a leading ``C`` is added when
+        missing). Default: a one-line generic banner.
+
+    Raises
+    ------
+    ValueError
+        Empty table, no layer columns, non-integer or duplicate node
+        ids, or any NaN head.
+    """
+    node_ids, df = _normalize_heads_frame(heads)
+    layer_cols = [c for c in df.columns if c.startswith("head_layer_")]
+
+    w = IWFMFileWriter(path)
+    w.write_comment("C" + "*" * 79)
+    if header:
+        for line in header:
+            w.write_comment(line)
+    else:
+        w.write_comment("C ***** GROUNDWATER INITIAL CONDITIONS "
+                        f"({len(node_ids)} nodes, {len(layer_cols)} layers)")
+    w.write_comment("C" + "*" * 79)
+    w.write_comment("C")
+    w.write_comment(_DASH)
+    w.write_keyed_value(fmt_num(facthp), "FACTHP", width=8,
+                        comment="Conversion factor for initial heads")
+    w.write_comment(_DASH)
+    hdr = "C      ID" + "".join(f"{f'HP[{i}]':>18}"
+                                for i in range(1, len(layer_cols) + 1))
+    w.write_comment(hdr)
+    w.write_comment(_DASH)
+    write_table_rows(w, df, ["node_id"] + layer_cols,
+                     widths=[8] + [18] * len(layer_cols))
+    w.flush()
+
+
+def initial_heads_from_head_all(head_all, date=None):
+    """Build an initial-heads table from one ``GWHeadAll.out`` timestep.
+
+    Parameters
+    ----------
+    head_all : pandas.DataFrame
+        The frame :func:`~iwfm_io.readers.text_output.read_head_all_out`
+        returns: a ``date`` column plus ``node_<id>_layer_<L>`` columns.
+    date : str, datetime, or pandas.Timestamp, optional
+        Timestep to take. ``None`` (default) takes the last record — the
+        usual spin-up-to-restart case. A string is matched verbatim
+        against the file's ``MM/DD/YYYY_HH:MM`` stamps; a datetime is
+        matched after parsing them (IWFM's ``24:00`` = next-day
+        midnight convention applies).
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``node_id, head_layer_1 … head_layer_NL`` in the file's node
+        order — what :func:`write_gw_initial_conditions` takes.
+
+    Raises
+    ------
+    ValueError
+        Empty input, generic ``col_N`` columns (node ids unknown), a
+        *date* that matches no record or more than one, or a record
+        with missing values (a truncated last timestep).
+    """
+    import re
+
+    import pandas as pd
+
+    from iwfm_io._tokens import parse_iwfm_date
+
+    if head_all is None or len(head_all) == 0:
+        raise ValueError("HeadAll table is empty")
+    if "date" not in head_all.columns:
+        raise ValueError("HeadAll table has no 'date' column")
+
+    pat = re.compile(r"^node_(.+)_layer_(\d+)$")
+    parsed = [(c, pat.match(str(c))) for c in head_all.columns if c != "date"]
+    if not parsed or any(m is None for _, m in parsed):
+        raise ValueError(
+            "HeadAll columns are not named node_<id>_layer_<L> — the file "
+            "header node ids could not be matched, so the heads cannot be "
+            "assigned to nodes")
+
+    if date is None:
+        row = head_all.iloc[-1]
+    else:
+        stamps = head_all["date"].astype(str)
+        if isinstance(date, str):
+            mask = stamps.str.strip() == date.strip()
+        else:
+            target = pd.Timestamp(date).to_pydatetime()
+            mask = stamps.map(lambda s: parse_iwfm_date(s.strip()) == target)
+        n = int(mask.sum())
+        if n == 0:
+            raise ValueError(f"no HeadAll record at {date!r}")
+        if n > 1:
+            raise ValueError(f"{n} HeadAll records match {date!r}")
+        row = head_all.loc[mask].iloc[0]
+
+    node_order: list = []
+    seen = set()
+    layers = set()
+    for c, m in parsed:
+        nid, lay = m.group(1), int(m.group(2))
+        layers.add(lay)
+        if nid not in seen:
+            seen.add(nid)
+            node_order.append(nid)
+    n_layers = max(layers)
+    if layers != set(range(1, n_layers + 1)):
+        raise ValueError(f"HeadAll layer columns are not 1..{n_layers}")
+
+    data = {"node_id": [int(float(n)) for n in node_order]}
+    for lay in range(1, n_layers + 1):
+        vals = []
+        for nid in node_order:
+            col = f"node_{nid}_layer_{lay}"
+            if col not in head_all.columns:
+                raise ValueError(f"HeadAll table is missing column {col!r}")
+            vals.append(row[col])
+        data[f"head_layer_{lay}"] = vals
+    out = pd.DataFrame(data)
+    if out.isna().any().any():
+        raise ValueError(
+            f"HeadAll record {row['date']!r} has missing values — likely a "
+            "truncated last timestep; refusing to write a partial restart")
+    return out
+
+
+# ------------------------------------------------------------------
 # BC Main
 # ------------------------------------------------------------------
 

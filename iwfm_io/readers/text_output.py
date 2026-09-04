@@ -261,6 +261,7 @@ def read_final_state_out(path: Union[str, Path]) -> pd.DataFrame:
         lines = fh.readlines()
 
     scale_factor = 1.0
+    scale_seen = False
     col_headers: list[str] = []
     data_start = 0
     dash_count = 0
@@ -271,7 +272,7 @@ def read_final_state_out(path: Union[str, Path]) -> pd.DataFrame:
         if not stripped:
             continue
 
-        if stripped.startswith("C") or stripped.startswith("c"):
+        if stripped[0] in "Cc*":
             if "---" in stripped:
                 dash_count += 1
                 # After 3rd dash, data starts
@@ -279,7 +280,7 @@ def read_final_state_out(path: Union[str, Path]) -> pd.DataFrame:
                     # Parse column headers from the comment between dashes 2-3
                     if last_comment_between_dashes:
                         # Strip the C prefix and parse
-                        hdr = last_comment_between_dashes.lstrip("Cc").strip()
+                        hdr = last_comment_between_dashes.lstrip("Cc*").strip()
                         col_headers = hdr.split()
                     data_start = i + 1
                     break
@@ -290,14 +291,25 @@ def read_final_state_out(path: Union[str, Path]) -> pd.DataFrame:
                     last_comment_between_dashes = stripped
             continue
 
-        # Check for scale factor line (e.g., "1.0 / FACTHP")
-        if "/" in stripped and any(kw in stripped.upper() for kw in ["FACT", "SCALE"]):
-            parts = stripped.split("/")
-            try:
-                scale_factor = float(parts[0].strip())
-            except ValueError:
-                pass
-            continue
+        # Scale factor line: "1.0 / FACTHP", or — in hand-written
+        # initial-conditions files — a bare "1.0" with no keyword. IWFM
+        # reads it list-directed, so the first non-comment line holding
+        # a single number is the factor; data rows have >= 2 tokens.
+        if not scale_seen:
+            value_part = stripped.split("/")[0].strip()
+            tokens = value_part.split()
+            if len(tokens) == 1:
+                try:
+                    scale_factor = float(tokens[0])
+                    scale_seen = True
+                    continue
+                except ValueError:
+                    pass
+
+        # First data line reached without a dashed header block
+        # (hand-written restart files): data starts here.
+        data_start = i
+        break
 
     # Parse data
     rows: list[list] = []
