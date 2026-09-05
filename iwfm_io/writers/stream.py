@@ -126,7 +126,11 @@ def write_stream_main(
                               note=note if isinstance(note, str) else "")
             prev_node = node
 
-    # ---- Hydraulic disconnection type ----
+    # ---- Hydraulic disconnection type (None = the source file ended
+    # at the stream-bed table; keep that layout) ----
+    if cfg.get("intrctype", 1) is None:
+        w.flush()
+        return
     w.write_keyed_value(cfg.get("intrctype", 1), "INTRCTYPE")
 
     # ---- Stream evaporation STARFL ----

@@ -126,7 +126,8 @@ class IWFMFileReader:
         try:
             line = self.next_data_line()
             return line
-        except StopIteration:
+        except (StopIteration, IWFMParseError):
+            # only comments/blank lines remain: no data line to peek at
             return None
         finally:
             self._pos = saved_pos

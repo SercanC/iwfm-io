@@ -234,7 +234,21 @@ def read_stream_main(path: str | Path) -> StreamMain:
 
     reach_params = pd.DataFrame(reach_rows)
 
-    # ---- Hydraulic disconnection type ----
+    # ---- Hydraulic disconnection type (optional: some v4.x files,
+    # e.g. C2VSimCG, end right after the stream-bed table; IWFM then
+    # uses its default. Recorded as None so the writer omits it too.) ----
+    if reader.peek_data_line() is None:
+        config["intrctype"] = None
+        config["starfl"] = None
+        return StreamMain(
+            header=header,
+            file_paths=file_paths,
+            config=config,
+            hydrograph_specs=hydrograph_specs,
+            node_budget_nodes=node_budget_nodes,
+            reach_params=reach_params if reach_rows else None,
+            evaporation=None,
+        )
     intrctype, _ = reader.read_keyed_int()
     config["intrctype"] = intrctype
 

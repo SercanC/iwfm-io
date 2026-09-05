@@ -245,6 +245,8 @@ read_final_state_out("main/Restart/Initial.dat")  # reads it back
 
 `read_final_state_out` also accepts hand-written restart files that have no dashed separators and a bare factor line with no `/ FACTHP` keyword, which IWFM itself reads.
 
+`read_stream_main` / `write_stream_main` accept v4.x stream main files that end right after the stream-bed table with no `INTRCTYPE` / evaporation section (the C2VSimCG layout); `config["intrctype"]` is then `None` and the writer keeps that layout. `IWFMFileReader.peek_data_line()` returns `None` when only comments or blank lines remain instead of raising.
+
 ### Validation
 
 | Function | Description |
