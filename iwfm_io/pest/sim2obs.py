@@ -25,7 +25,6 @@ month-end aggregation buckets such values into the month they belong to.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Union
 
 import numpy as np
 import pandas as pd

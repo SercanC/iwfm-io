@@ -6,7 +6,7 @@
 
 | Class | Module | Description |
 |-------|--------|-------------|
-| `IWFMModel` | `iwfm_io.dll.model` | Main model interface. Context manager. Wraps grid, GW, streams, budgets, diversions, wells, lakes, simulation control. `describe()` returns a JSON-serializable model summary. |
+| `IWFMModel` | `iwfm_io.dll.model` | Main model interface. Context manager. Wraps grid, GW, streams, budgets, diversions, wells, lakes, simulation control. `describe()` returns a JSON-serializable model summary. Every call is validated in Python first (dates, intervals, layers, locations, ids, array lengths raise `ValueError`/`TypeError` instead of reaching the Fortran, which STOPs the process on bad input), serialised by a process-wide lock, and re-activates this model in the DLL — several instances can coexist (baseline vs scenario) but Fortran work never overlaps; use processes, not threads, for parallelism. Methods after `close()` raise `IWFMError`. |
 | `IWFMBudget` | `iwfm_io.dll.budget` | Standalone budget HDF5 reader via `IW_Budget_*` functions. |
 | `IWFMZBudget` | `iwfm_io.dll.zbudget` | Standalone zone-budget reader via `IW_ZBudget_*` functions. |
 | `IWFMError` | `iwfm_io.dll._errors` | Exception raised when a DLL call returns a non-zero status code. |
@@ -15,16 +15,16 @@
 
 | Function | Description |
 |----------|-------------|
-| `run_model(model_dir, steps=(...))` | Run the IWFM toolchain (default: preprocessor + simulation; add `"budget"`, `"zbudget"`). Executables resolved from `<model_dir>/Bin` or `IWFM_BIN_DIR`. Raises on failure (`check=False` to inspect instead). |
-| `run_preprocessor / run_simulation / run_budget / run_zbudget(model_dir)` | Run one tool. Returns a `RunResult` (`success`, `elapsed`, `errors`, `returncode`). Failure = nonzero exit **or** FATAL/ERROR lines in console output or the tool's Messages file. |
+| `run_model(model_dir, steps=(...), timeout=None)` | Run the IWFM toolchain (default: preprocessor + simulation; add `"budget"`, `"zbudget"`). Executables resolved from `<model_dir>/Bin` or `IWFM_BIN_DIR`. Raises `RunError` on failure, carrying the `results` of the steps that ran (`check=False` to inspect instead). A `timeout` (seconds per step) kills the executable and reports a failed `RunResult` — IWFM's ZBudget can busy-loop when its print interval exceeds the data span, so set one for unattended runs. |
+| `run_preprocessor / run_simulation / run_budget / run_zbudget(model_dir)` | Run one tool. Returns a `RunResult` (`success`, `elapsed`, `errors`, `returncode`, `timed_out`, `stdout_tail`). Failure = nonzero exit, a timeout, **or** a `* FATAL` banner (with its detail lines) in console output or the tool's Messages file. |
 
 ### Module-Level Functions
 
 | Function | Description |
 |----------|-------------|
-| `load_dll(dll_path=None, version=None, download=True)` | Load the IWFM DLL. Returns a `ctypes.WinDLL` handle. When `version` names a published build that is not installed, it is downloaded automatically (`download=False` disables the fetch for offline machines). |
+| `load_dll(dll_path=None, version=None, download=True)` | Load the IWFM DLL. Returns a `ctypes.WinDLL` handle. When `version` names a published build that is not installed, it is downloaded automatically (`download=False` disables the fetch for offline machines). A library without the IWFM exports (`IW_GetVersion`, `IW_GetLastMessage`, `IW_Model_New`) is refused with `OSError`. |
 | `list_dll_versions()` | Scan `dlls/` and `~/.iwfm/dlls/` for installed DLL versions. |
-| `download_dll(version="2025.0.1747")` | Download an official DLL build (sha256-verified) from the project's GitHub releases into `~/.iwfm/dlls/<version>/`. |
+| `download_dll(version="2025.0.1747")` | Download an official DLL build (sha256-verified, PE-header-checked, written atomically) from the project's GitHub releases into `~/.iwfm/dlls/<version>/`. |
 | `get_version(dll)` | Return the IWFM version string. |
 | `get_kernel_version(dll)` | Return the IWFM kernel version string. |
 | `set_log_file(dll, path)` | Redirect DLL log output to a file. |
@@ -54,7 +54,10 @@
 
 | Function | Description |
 |----------|-------------|
-| `open_model(path)` | Open a model from its root folder (or a main-file path). Discovers the preprocessor/simulation main files and all HDF5 results; returns a ready `IOModelAdapter`. Accepts `preprocessor=`, `simulation=`, `results_dir=` overrides. |
+| `open_model(path, strict=True)` | Open a model from its root folder (or a main-file path). Discovers the preprocessor/simulation main files and all HDF5 results; returns a ready `IOModelAdapter`. Accepts `preprocessor=`, `simulation=`, `results_dir=` overrides. `strict=False` keeps what parsed from a broken deck (with `IWFMReadWarning`s) instead of raising. |
+| `strict_mode(enabled)` | Context manager setting the reader mode for every `read_*` call inside it (default strict: `IWFMParseError` on truncated, short-row, non-numeric or unrecognised input; lenient: warn and return partial objects). Thread/task-safe (`contextvars`). |
+| `IWFMParseError` | `ValueError` subclass raised by the readers; carries `path`, `lineno`, `section` and formats as `file:line [section]: message`. |
+| `IWFMReadWarning` | Warning category used in lenient mode. |
 
 ```python
 from iwfm_io import open_model
@@ -251,10 +254,12 @@ read_final_state_out("main/Restart/Initial.dat")  # reads it back
 
 | Function | Description |
 |----------|-------------|
-| `validate_nodes(nodes_result)` | Check node data integrity |
-| `validate_elements(elements_result, nodes_result)` | Check element connectivity |
-| `validate_stratigraphy(strata_result, nodes_result)` | Check strata consistency |
-| `validate_preprocessor(pp)` | Run all validation checks on a preprocessor result |
+| `validate_nodes(nodes_result)` | Duplicate ids; NaN/inf/non-numeric coordinates |
+| `validate_elements(elements_result, nodes_result)` | Duplicate ids; node references (0 allowed only as `node4`) |
+| `validate_stratigraphy(strata_result, nodes_result)` | Unknown nodes; NaN/inf values; negative thicknesses |
+| `validate_preprocessor(pp)` | All of the above plus declared counts (`ND`, `NE`, `NREGN`, `NRH`, `NLAKE`) against the parsed tables and node-count consistency |
+
+Every function returns a list of messages (empty = clean). Cross-file pointer checks (time-series columns, entity ids, destination codes) live on the adapter: `open_model(...).validate_references()`.
 
 ### IOModelAdapter
 
@@ -283,7 +288,20 @@ adapter.stratigraphy_df() # DataFrame
 adapter.reaches_df()     # DataFrame
 adapter.heads_df(layer=1, begin_date=..., end_date=...)  # DataFrame
 adapter.budget_df("GW", location=1)  # DataFrame
+adapter.available_budgets   # sorted names, HDF and text .bud alike
+adapter.available_zbudgets  # sorted zone-budget names
+adapter.model_root          # folder open_model() discovered (or None)
+adapter.simulation / .preprocessor / .gw_main / .stream_main   # parsed mains
+adapter.heads_file          # the head output served (HDF or text)
+adapter.reload()            # drop every cached table (re-read on next access)
 ```
+
+Tables read lazily from disk (components, time series, budgets, heads,
+stream flows, zone budgets) refresh themselves when their source file
+changes on disk (modification time or size), so an adapter opened before
+a re-run serves the new outputs without being re-opened. `reload()` forces
+it; the grid tables come from the preprocessor deck parsed at open, so
+re-open the model after editing that.
 
 `heads_df` / `budget_df` / `hydrograph_df` (on both `IOModelAdapter` and the DLL `IWFMModel`) accept **`day_index=True`**: the frame comes back indexed by `iwfm_day` — the day each `24:00` stamp belongs to — so calendar idioms like `resample("YE-SEP")`, `.dt.year`, and `.dt.month` label periods correctly. Default `False` keeps the true end-of-period instants (what DSS/CalSim alignment and exact-timestamp joins need). For water-year budget totals prefer `aggregate_budget`, which also handles the storage stocks.
 
@@ -328,7 +346,7 @@ list of `{group_id, elements, [fractions]}`.
 
 | Function | Description |
 |----------|-------------|
-| `create_scenario(base, out_dir, changes=[...])` | Copy a model's inputs (+ `Bin/`) and apply changes; returns the scenario folder ready for `iwfm_io.run_model()`. `link_unchanged=True` hardlinks unchanged inputs instead of copying (copy-on-change; near-zero marginal disk/time for many worker copies of a large model — changed files and run-rewritten types like `.out`/`.bin`/`.bud`/`.dss`/`.hdf` are always real copies; falls back to copying across filesystems) |
+| `create_scenario(base, out_dir, changes=[...])` | Copy a model's inputs (+ `Bin/`) and apply changes; returns the scenario folder ready for `iwfm_io.run_model()`. Refuses an `out_dir` equal to or nested with the base (it could delete the base model) and removes a half-built scenario when a change fails. Baseline outputs under `Budget/`/`ZBudget/` are not copied (`copy_outputs=True` to keep them) so a scenario never serves the base model's results. `link_unchanged=True` hardlinks unchanged inputs instead of copying (copy-on-change; near-zero marginal disk/time for many worker copies of a large model — changed files and the run-rewritten `NEVER_LINK_SUFFIXES` (`.out`/`.bin`/`.bud`/`.log`/`.dss`/`.hdf`/`.h5`) are always real copies; falls back to copying across filesystems) |
 | `set_keyed_value(relpath, keyword, value)` | Change factory: edit a `VALUE / KEYWORD` line (e.g. `EDT` end date) preserving layout |
 | `replace_text(relpath, old, new, count=-1)` | Change factory: literal text replacement in one file |
 
@@ -749,4 +767,4 @@ the same names. `--traceback` shows full stack traces.
 
 ## `iwfm_io.plots` — Visualization Library
 
-See [Plot Gallery](plotting.md) for the full list of 58 functions across 13 modules.
+See [Plot Gallery](plotting.md) for the full list of 66 functions across 15 modules.

@@ -71,6 +71,12 @@ def _open_dss(dss_file, mode: str = "r"):
     return Open(str(dss_file), mode=mode)
 
 
+def _require_dss_file(dss_file) -> None:
+    """heclib silently creates a new empty file for a missing path."""
+    if not Path(dss_file).is_file():
+        raise FileNotFoundError(f"DSS file not found: {dss_file}")
+
+
 def _split_pathname(pathname: str) -> "list[str]":
     """``/A/B/C/D/E/F/`` -> ``[A, B, C, D, E, F]``."""
     parts = str(pathname).split("/")
@@ -96,6 +102,7 @@ def dss_catalog(dss_file, pattern: str = "") -> "pd.DataFrame":
         pathname with the D (date-block) part blanked, the stable
         record identity to read with.
     """
+    _require_dss_file(dss_file)
     with _open_dss(dss_file) as fid:
         paths = fid.search_path(pattern, sort=True) if pattern else \
             fid.search_path(sort=True)
@@ -133,13 +140,17 @@ def read_dss_timeseries(dss_file, paths) -> "pd.DataFrame":
     else:
         paths = [str(p) for p in paths]
     series, units, dtypes = {}, {}, {}
+    _require_dss_file(dss_file)
     with _open_dss(dss_file) as fid:
         for p in paths:
             ts = fid.read_ts(p, trim_missing=True)
             vals = np.asarray(ts.values, dtype=float)
             mask = np.asarray(ts.nodata, dtype=bool)
             vals[mask] = np.nan
-            when = pd.DatetimeIndex([t.datetime() for t in ts.times])
+            # second resolution: IWFM's recurring-year records (year
+            # 4000) are outside pandas' nanosecond range
+            when = pd.DatetimeIndex(np.array(
+                [t.datetime() for t in ts.times], dtype="datetime64[s]"))
             series[p] = pd.Series(vals, index=when)
             units[p] = (ts.data_units or "").strip()
             dtypes[p] = (ts.data_type or "").strip()

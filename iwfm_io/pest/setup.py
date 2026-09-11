@@ -36,8 +36,9 @@ Example::
 from __future__ import annotations
 
 import json
+import sys
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -84,9 +85,13 @@ class PestSetup:
         ``python forward_run.py``).
     """
 
-    def __init__(self, case: str = "case", command: Optional[str] = None):
+    def __init__(self, case: str = "case", command: Optional[str] = None,
+                 python: Optional[str] = None):
         self.case = case
         self.command = command
+        #: interpreter used for the generated run steps (default: the
+        #: one building the template, so agents never depend on PATH)
+        self.python = python or sys.executable
         self.control_data: Dict = {"pestmode": "estimation", "noptmax": 0}
         self.pestpp_options: Dict = {}
         self._bundles: List[ParamBundle] = []
@@ -183,6 +188,13 @@ class PestSetup:
         if len(dup):
             raise ValueError(
                 f"duplicate observation name(s): {sorted(dup.unique())[:3]}")
+        outputs = [o.output_file for o in self._obs]
+        dup_out = {f for f in outputs if outputs.count(f) > 1}
+        if dup_out:
+            raise ValueError(
+                f"observation blocks share output file(s) {sorted(dup_out)} "
+                "— each block needs its own model output file, otherwise "
+                "their instruction files overwrite each other")
         for o in self._obs:
             o.spec.write_ins(dest / o.ins_file)
 
@@ -202,15 +214,30 @@ class PestSetup:
                                          indent=1))
             replace_file_text(dest / "_apply_step.py", _APPLY_STEP,
                               encoding="utf-8")
-            steps.append(("apply parameters", "python _apply_step.py"))
+            steps.append(("apply parameters",
+                          f'"{self.python}" _apply_step.py'))
+            # pristine snapshots: the apply step parameterises these,
+            # never the live (already multiplied) files
+            from iwfm_io.pest.apply import ensure_pristine
+            for a in self._actions:
+                target = dest / a.path
+                if target.is_file():
+                    ensure_pristine(target, warn=False)
         steps.extend(self._steps)
         if steps:
             write_forward_run(dest / "forward_run.py", steps)
-        command = self.command or "python forward_run.py"
+        command = self.command or f'"{self.python}" forward_run.py'
 
         # control file
+        clash = set(self.control_data) & set(self.pestpp_options)
+        if clash:
+            raise ValueError(
+                f"keyword(s) {sorted(clash)} set in both control_data and "
+                "pestpp_options — decide which value applies")
         lines = ["pcf version=2", "* control data keyword"]
         for k, v in {**self.control_data, **self.pestpp_options}.items():
+            if v is None:
+                raise ValueError(f"control keyword {k!r} is None")
             lines.append(f"{k:<30} {v}")
         lines += ["* parameter groups external", pargp_csv,
                   "* parameter data external", par_csv,

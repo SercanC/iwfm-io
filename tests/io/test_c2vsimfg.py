@@ -449,7 +449,7 @@ class TestResultsHDF:
 
         fact = 0.000022957  # FACTVLOU from the GW main (cu.ft -> AC.FT)
         h = hdf_sr1["Percolation"].to_numpy() * fact
-        t = pd.to_numeric(txt_sr1["col_1"], errors="coerce").to_numpy()
+        t = pd.to_numeric(txt_sr1.iloc[:, 1], errors="coerce").to_numpy()   # first data column
         assert len(h) == len(t) == 576
         np.testing.assert_allclose(h, t, rtol=5e-4, atol=0.1)
 

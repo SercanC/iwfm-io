@@ -2,7 +2,6 @@
 
 import pytest
 import numpy as np
-from pathlib import Path
 
 from tests.io.conftest import SAMPLE_MODEL, RESULTS_DIR
 
@@ -275,7 +274,6 @@ class TestReadZBudgetTypeAware:
 
         meta = raw["metadata"]
         data_types = meta["data_types"]
-        data_names = meta["data_names"]
 
         # LWU has type-4 (area) columns — these should use last, not sum
         area_indices = [i for i, t in enumerate(data_types) if t == 4]
@@ -393,7 +391,6 @@ class TestZoneBalance:
             pytest.skip("Required files not found")
 
         result = read_zbudget_hdf(path, zone_def=zdef_path)
-        data_names = result["metadata"]["data_names"]
 
         # ErrorInCols and ErrorOutCols are 1-based indices into data_names
         # Inflow cols (odd indices 1,3,5,...) and outflow cols (even 2,4,6,...)

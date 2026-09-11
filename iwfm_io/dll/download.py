@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import tempfile
 import urllib.request
 import zipfile
@@ -118,8 +119,15 @@ def download_dll(version=DEFAULT_VERSION, dest_dir=None, force=False,
                      if n.lower().endswith("iwfm_c_x64.dll")]
             if not names:
                 raise RuntimeError("Archive does not contain IWFM_C_x64.dll")
-            with zf.open(names[0]) as src, open(dll_path, "wb") as out:
-                out.write(src.read())
+            part = dll_path + ".part"
+            with zf.open(names[0]) as src, open(part, "wb") as out:
+                shutil.copyfileobj(src, out, 1 << 20)
+            try:
+                _check_pe_image(part)
+            except RuntimeError:
+                os.remove(part)
+                raise
+            os.replace(part, dll_path)   # never leave a truncated DLL
     finally:
         try:
             os.remove(tmp_zip)
@@ -143,9 +151,37 @@ def _fetch(url, dest, show_progress):
         print(f"\r  {done / 1e6:6.1f} / {total / 1e6:.1f} MB ({pct:3.0f}%)",
               end="", flush=True)
 
-    urllib.request.urlretrieve(url, dest, reporthook=_hook)
+    req = urllib.request.Request(url, headers={"User-Agent": "iwfm-io"})
+    with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as out:
+        total = int(resp.headers.get("Content-Length") or 0)
+        block = 1 << 20
+        blocks = 0
+        while True:
+            chunk = resp.read(block)
+            if not chunk:
+                break
+            out.write(chunk)
+            blocks += 1
+            _hook(blocks, block, total)
     if show_progress:
         print()
+
+
+def _check_pe_image(path):
+    """The extracted file must be a Windows PE image (``MZ`` header +
+    ``PE\\0\\0`` signature); anything else is not a DLL and is refused."""
+    with open(path, "rb") as fh:
+        head = fh.read(0x40)
+        if len(head) < 0x40 or head[:2] != b"MZ":
+            raise RuntimeError(
+                f"{os.path.basename(path)} is not a Windows DLL (no MZ "
+                "header) -- the archive payload is not an IWFM build")
+        pe_off = int.from_bytes(head[0x3C:0x40], "little")
+        fh.seek(pe_off)
+        if fh.read(4) != b"PE\0\0":
+            raise RuntimeError(
+                f"{os.path.basename(path)} is not a Windows DLL (no PE "
+                "signature) -- the archive payload is not an IWFM build")
 
 
 def _sha256(path):

@@ -37,7 +37,7 @@ from __future__ import annotations
 import io
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
@@ -127,7 +127,29 @@ class ParamSpec:
     def _zone_of_rows(self) -> "pd.Series":
         if self.zone_col is None:
             return pd.Series("", index=self.keys.index)
-        return self.keys[self.zone_col].map(slugify_label)
+        raw = self.keys[self.zone_col]
+        if raw.isna().any():
+            n = int(raw.isna().sum())
+            raise ValueError(
+                f"{self.name}: {n} row(s) have a missing zone in "
+                f"{self.zone_col!r} -- fill it (a NaN would become a "
+                "parameter named '..._nan')")
+        slugs = raw.map(slugify_label)
+        if (slugs == "").any():
+            raise ValueError(
+                f"{self.name}: zone label(s) slugify to an empty name, "
+                f"e.g. {raw[slugs == ''].astype(str).head(3).tolist()}")
+        # two different labels must not collapse onto one parameter
+        pairs = pd.DataFrame({"raw": raw.astype(str), "slug": slugs})
+        n_raw = pairs.drop_duplicates().groupby("slug")["raw"].nunique()
+        clash = n_raw[n_raw > 1]
+        if len(clash):
+            slug = clash.index[0]
+            labels = sorted(pairs.loc[pairs["slug"] == slug, "raw"].unique())
+            raise ValueError(
+                f"{self.name}: zone labels {labels} all slugify to "
+                f"{slug!r} -- rename them so the parameters stay distinct")
+        return slugs
 
     def parameter_names(self) -> "pd.Series":
         """Per-row parameter name (rows of one zone share a name)."""
@@ -231,7 +253,18 @@ def build_parameters(specs: Sequence[ParamSpec],
                     raise ValueError(
                         f"{spec.name}: tie {child!r}->{parent!r} references "
                         f"unknown zone(s)")
+                if c == p:
+                    raise ValueError(
+                        f"{spec.name}: zone {child!r} cannot be tied to itself")
                 tied[c] = p
+            # PEST requires the parent of a tie to be adjustable: a
+            # parent that is itself tied (a chain or a cycle such as
+            # a->b, b->a) leaves every member 'tied' with no free value
+            for c, p in tied.items():
+                if p in tied:
+                    raise ValueError(
+                        f"{spec.name}: tie chain/cycle {c!r}->{p!r}->"
+                        f"{tied[p]!r} -- a tie parent must be adjustable")
 
         for parname in unique:
             is_tied = parname in tied
@@ -252,7 +285,9 @@ def build_parameters(specs: Sequence[ParamSpec],
         header = ",".join(key_cols + ["value"])
         tpl_lines = [f"ptf {_MARKER}", header]
         val_lines = [header]
-        width = max(len(n) for n in unique) + 2
+        # PEST writes the value into the marker field: a field narrower
+        # than ~12 characters truncates the precision of every parameter
+        width = max(max(len(n) for n in unique) + 2, 12)
         for i in spec.keys.index:
             keys = ",".join(str(spec.keys.at[i, c]) for c in key_cols)
             prefix = f"{keys}," if key_cols else ""

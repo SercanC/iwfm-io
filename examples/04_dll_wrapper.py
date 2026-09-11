@@ -112,7 +112,6 @@ def demo_grid():
 
 def demo_heads():
     import iwfm_io
-    import numpy as np
 
     print("\n=== GW head time series ===")
     with iwfm_io.dll.IWFMModel(

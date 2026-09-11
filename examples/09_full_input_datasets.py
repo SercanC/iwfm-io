@@ -257,7 +257,7 @@ def demo_edit_and_write():
         write_gw_main(gw, out, base_dir=SIM_DIR)
 
         gw2 = read_gw_main(out)
-        print(f"  Original layer-1 head at node 1: 280.0")
+        print("  Original layer-1 head at node 1: 280.0")
         print(f"  Modified layer-1 head at node 1: "
               f"{gw2.initial_heads['head_layer_1'].iloc[0]}")
         assert gw2.initial_heads["head_layer_1"].iloc[0] == 285.0

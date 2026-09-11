@@ -330,7 +330,7 @@ with iwfm_io.dll.IWFMModel(..., dll_path="/path/to/IWFM_C_x64.dll") as model:
 
 ## 3. Creating Visualizations
 
-The `iwfm/plots/` library has 58 plotting functions across 13 modules. They work with either `IWFMModel` (DLL) or `IOModelAdapter` (pure Python).
+The `iwfm_io.plots` library has 66 plotting functions across 15 modules. They work with either `IWFMModel` (DLL) or `IOModelAdapter` (pure Python).
 
 ### Set up IOModelAdapter (no DLL)
 
@@ -409,7 +409,7 @@ fig.savefig("sankey.png", dpi=150)
 | `cross_sections` | 2 | Multi-layer panels, animations |
 | `connectivity` | 2 | Diversion networks, bypass diagrams |
 
-Run all 58 plots against the sample model:
+Run the DLL plot test suite (58 cases) against the sample model:
 
 ```bash
 python examples/test_plots.py
@@ -447,3 +447,19 @@ See `examples/06_multi_run_budgets.py` for a full example.
 - Calibrating? `iwfm_io.pest` covers the whole PEST(++) workflow — one call from model folder + observed heads to a runnable pestpp-ies template (`pest_setup_from_model`, or `iwfm-io pest setup/run/analyze` from the command line), the full building-block API (`PestSetup`), IES ensemble post-processing, and calibration statistics; `iwfm_io.dss` reads CalSim/HEC-DSS streamflows. See the [API Reference](api-reference.md#iwfm_iopest--pest-calibration-support) and the [Agents & Scripting Guide](agents.md)
 - Run `examples/01_read_inputs.py` through `10_pest_calibration.py` for hands-on demos
 - Check `CLAUDE.md` in the repo root for architecture details and conventions
+
+
+## Strict and lenient parsing
+
+Since 2.14.0 every reader raises `IWFMParseError` — naming the file, section and line — when a deck is truncated, a row is short, a value is not numeric where a number is expected, or a section cannot be recognised. Tables sized by a declared count (`ND`, `NE`, `NRDV`, ...) always raise on a shortfall. For the previous keep-what-parsed behaviour (warnings via `IWFMReadWarning`, partial objects with `None` tables) opt out per call:
+
+```python
+import iwfm_io
+
+with iwfm_io.strict_mode(False):
+    gw = iwfm_io.read_gw_main("Simulation/GW/GW_MAIN.dat")
+
+model = iwfm_io.open_model("path/to/model", strict=False)
+```
+
+The mode is a `contextvars.ContextVar`, so it is thread- and task-safe and only affects readers created inside the block.

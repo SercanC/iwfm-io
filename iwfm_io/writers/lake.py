@@ -9,7 +9,13 @@ from pathlib import Path
 from iwfm_io._writer import IWFMFileWriter
 from iwfm_io.models.lake import LakeMain
 from iwfm_io.models.timeseries import TimeSeriesFile
-from iwfm_io.writers._param_blocks import check_count, fmt_num
+from iwfm_io.writers._param_blocks import (
+    check_count,
+    fmt_int,
+    fmt_name,
+    fmt_num,
+)
+from iwfm_io.writers._timeseries import write_ts_body
 
 
 def write_lake_main(
@@ -51,13 +57,13 @@ def write_lake_main(
     if lake.lake_params is not None:
         for _, row in lake.lake_params.iterrows():
             tokens = [
-                int(row["lake_id"]),
-                fmt_num(row["conductance"]),
-                fmt_num(row["bed_thickness"]),
-                int(row["max_elev_col"]),
-                int(row["et_col"]),
-                int(row["precip_col"]),
-                str(row.get("name") or ""),
+                fmt_int(row["lake_id"], "lake_id"),
+                fmt_num(row["conductance"], what="lake conductance"),
+                fmt_num(row["bed_thickness"], what="lake bed_thickness"),
+                fmt_int(row["max_elev_col"], "lake max_elev_col"),
+                fmt_int(row["et_col"], "lake et_col"),
+                fmt_int(row["precip_col"], "lake precip_col"),
+                fmt_name(row.get("name"), "lake name"),
             ]
             note = row.get("notes")
             w.write_data_line(tokens, widths=[6, 10, 10, 8, 8, 8, 12],
@@ -68,7 +74,8 @@ def write_lake_main(
     if lake.initial_elevations is not None:
         for _, row in lake.initial_elevations.iterrows():
             w.write_data_line(
-                [int(row["lake_id"]), fmt_num(row["elevation"])],
+                [fmt_int(row["lake_id"], "lake_id"),
+                 fmt_num(row["elevation"], what="lake initial elevation")],
                 widths=[8, 12])
 
     w.flush()
@@ -84,14 +91,12 @@ def write_max_lake_elev(ts: TimeSeriesFile, path: str | Path) -> None:
     """
     w = IWFMFileWriter(path)
     w.write_header(ts.header)
-    w.write_timeseries_spec(
-        ts.spec,
-        keywords=["NCOLHLMX", "FACTHLMX", "NSPHLMX", "NFQHLMX", "DSSFL"],
-    )
-
-    if ts.dss_pathnames:
-        w.write_dss_pathnames(ts.dss_pathnames)
-    elif ts.data is not None:
-        w.write_timeseries_data(ts.data)
+    spec = ts.spec
+    fields = list(zip(
+        [spec.n_columns, spec.factor, spec.n_steps_update,
+         spec.repeat_freq, spec.dss_file],
+        ["NCOLHLMX", "FACTHLMX", "NSPHLMX", "NFQHLMX", "DSSFL"]))
+    write_ts_body(w, fields, ts.data, ts.dss_pathnames,
+                  n_columns=spec.n_columns)
 
     w.flush()

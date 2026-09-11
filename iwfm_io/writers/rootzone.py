@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from iwfm_io._writer import IWFMFileWriter
+from iwfm_io._writer import IWFMFileWriter, format_cell, format_date_cell
 from iwfm_io.models.rootzone import (
     LandUseAreaFile,
     NativeVegFile,
@@ -26,9 +26,19 @@ from iwfm_io.readers.rootzone import (
 )
 from iwfm_io.writers._param_blocks import (
     check_count,
+    fmt_int,
     fmt_num,
     write_table_rows,
 )
+
+#: Canonical value columns of the urban / native-vegetation element
+#: tables (the order IWFM reads them in -- never the DataFrame's).
+_URBAN_PARAM_COLS = ["perv_fraction", "cn", "icpopul", "icwtruse", "fracdm",
+                     "iceturb", "icrtfurb", "icrufurb", "icurbspec"]
+_URBAN_IC_COLS = ["fsoilmp", "soil_moisture"]
+_NATIVE_PARAM_COLS = ["cn_native", "cn_riparian", "icetnv", "icetrv",
+                      "istrmrv"]
+_NATIVE_IC_COLS = ["moisture_native", "moisture_riparian"]
 
 
 def write_rootzone_main(
@@ -110,18 +120,34 @@ def write_rootzone_main(
 # Shared helpers for the sub-component mains
 # ------------------------------------------------------------------
 
-def _write_element_table(w: IWFMFileWriter, df, label: str) -> None:
+def _write_element_table(w: IWFMFileWriter, df, label: str,
+                         columns: list[str]) -> None:
     """Write a per-element table (``IE  v1 .. vn`` rows).
 
-    Mirrors :func:`iwfm_io.readers.rootzone._read_element_table` — the
+    Mirrors :func:`iwfm_io.readers.rootzone._read_element_table` -- the
     reader detects the end of a table by an element id of 0 or an id
     that does not increase, so the rows themselves delimit the table.
     A comment separator is emitted for readability (readers skip it).
+
+    *columns* is the table's canonical value-column order (crop codes,
+    ponded types, the urban/native parameter names): the values are
+    written in that order by name, never in DataFrame column order,
+    and a table with missing or unexpected columns is refused.
     """
     w.write_comment(f"C  {label}")
     if df is None:
         return
-    columns = list(df.columns)
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        raise ValueError(f"{label}: table is missing column(s) {missing}")
+    if "element_id" not in df.columns:
+        raise ValueError(f"{label}: table has no 'element_id' column")
+    extra = [c for c in df.columns if c != "element_id" and c not in columns]
+    if extra:
+        raise ValueError(
+            f"{label}: table has unexpected column(s) {extra} -- IWFM "
+            f"reads exactly {columns}")
+    columns = ["element_id"] + list(columns)
     write_table_rows(w, df, columns,
                      widths=[8] + [12] * (len(columns) - 1))
 
@@ -189,38 +215,42 @@ def write_nonponded_ag_main(
         for _, row in np_ag.root_depths.iterrows():
             number = np_ag.crop_codes.index(row["crop"]) + 1
             w.write_data_line(
-                [number, fmt_num(float(row["root_depth"])),
-                 int(row["icroot"])],
+                [number,
+                 fmt_num(row["root_depth"], what=f"{row['crop']} root_depth"),
+                 fmt_int(row["icroot"], f"{row['crop']} icroot")],
                 widths=[8, 12, 8])
 
-    _write_element_table(w, np_ag.curve_numbers, "Curve numbers")
-    _write_element_table(w, np_ag.et_columns, "ET data columns")
+    crop_cols = list(np_ag.crop_codes)
+    _write_element_table(w, np_ag.curve_numbers, "Curve numbers", crop_cols)
+    _write_element_table(w, np_ag.et_columns, "ET data columns", crop_cols)
     _write_element_table(w, np_ag.supply_req_columns,
-                         "Ag. water supply requirement columns")
+                         "Ag. water supply requirement columns", crop_cols)
     _write_element_table(w, np_ag.irig_period_columns,
-                         "Irrigation period columns")
+                         "Irrigation period columns", crop_cols)
 
     w.write_keyed_path(fp.get("min_soil_moisture"), "MINSMFL",
                        base_dir=base_dir)
     _write_element_table(w, np_ag.min_moisture_columns,
-                         "Minimum soil moisture columns")
+                         "Minimum soil moisture columns", crop_cols)
 
     w.write_keyed_path(fp.get("target_soil_moisture"), "TRGSMFL",
                        base_dir=base_dir)
     if fp.get("target_soil_moisture"):
         _write_element_table(w, np_ag.target_moisture_columns,
-                             "Target soil moisture columns")
+                             "Target soil moisture columns", crop_cols)
 
     _write_element_table(w, np_ag.return_flow_columns,
-                         "Return flow fraction columns")
-    _write_element_table(w, np_ag.reuse_columns, "Reuse fraction columns")
+                         "Return flow fraction columns", crop_cols)
+    _write_element_table(w, np_ag.reuse_columns, "Reuse fraction columns",
+                         crop_cols)
 
     w.write_keyed_path(fp.get("min_perc"), "DPFL", base_dir=base_dir)
     if fp.get("min_perc"):
         _write_element_table(w, np_ag.min_perc_columns,
-                             "Minimum percolation columns")
+                             "Minimum percolation columns", crop_cols)
 
-    _write_element_table(w, np_ag.initial_conditions, "Initial conditions")
+    _write_element_table(w, np_ag.initial_conditions, "Initial conditions",
+                         ["fsoilmp"] + crop_cols)
     w.flush()
 
 
@@ -269,24 +299,28 @@ def write_ponded_ag_main(
         w.write_keyed_value(fmt_num(pa.root_depths.get(crop, 0.0)),
                             _PONDED_ROOT_KEYWORDS[crop], width=24)
 
-    _write_element_table(w, pa.curve_numbers, "Curve numbers")
-    _write_element_table(w, pa.et_columns, "ET data columns")
+    type_cols = list(PONDED_CROP_TYPES)
+    _write_element_table(w, pa.curve_numbers, "Curve numbers", type_cols)
+    _write_element_table(w, pa.et_columns, "ET data columns", type_cols)
     _write_element_table(w, pa.supply_req_columns,
-                         "Ag. water supply requirement columns")
+                         "Ag. water supply requirement columns", type_cols)
     _write_element_table(w, pa.irig_period_columns,
-                         "Irrigation period columns")
+                         "Irrigation period columns", type_cols)
 
     w.write_keyed_path(fp.get("ponding_depth"), "PNDTHFL", base_dir=base_dir)
     w.write_keyed_path(fp.get("rice_refuge_ops"), "FLOWFL", base_dir=base_dir)
 
     _write_element_table(w, pa.ponding_depth_columns,
-                         "Ponding depth columns")
+                         "Ponding depth columns", type_cols)
     _write_element_table(w, pa.app_depth_columns,
-                         "Application depth columns (non-flooded rice)")
+                         "Application depth columns (non-flooded rice)",
+                         ["icdwri_nfl"])
     _write_element_table(w, pa.return_flow_columns,
-                         "Return flow fraction columns")
-    _write_element_table(w, pa.reuse_columns, "Reuse fraction columns")
-    _write_element_table(w, pa.initial_conditions, "Initial conditions")
+                         "Return flow fraction columns", type_cols)
+    _write_element_table(w, pa.reuse_columns, "Reuse fraction columns",
+                         type_cols)
+    _write_element_table(w, pa.initial_conditions, "Initial conditions",
+                         ["fsoilmp"] + type_cols)
     w.flush()
 
 
@@ -320,8 +354,10 @@ def write_urban_main(
     w.write_keyed_path(fp.get("water_use_specs"), "URBSPECFL",
                        base_dir=base_dir)
 
-    _write_element_table(w, ur.element_params, "Urban element parameters")
-    _write_element_table(w, ur.initial_conditions, "Initial conditions")
+    _write_element_table(w, ur.element_params, "Urban element parameters",
+                         _URBAN_PARAM_COLS)
+    _write_element_table(w, ur.initial_conditions, "Initial conditions",
+                         _URBAN_IC_COLS)
     w.flush()
 
 
@@ -362,27 +398,63 @@ def write_land_use_area(lu: LandUseAreaFile, path: str | Path) -> None:
     if lu.dss_file and lu.dss_pathnames is not None:
         for _, row in lu.dss_pathnames.iterrows():
             w.write_data_line(
-                [int(row["element_id"]), int(row["lu_type"]),
-                 str(row["pathname"])],
+                [fmt_int(row["element_id"], "land use element_id"),
+                 fmt_int(row["lu_type"], "land use lu_type"),
+                 format_cell(row["pathname"], what="land use DSS pathname")],
                 widths=[8, 8, 4])
         w.flush()
         return
 
     df = lu.data
     if df is not None and len(df):
+        import pandas as pd
+
+        from iwfm_io._tokens import parse_iwfm_date
+
         value_cols = [c for c in df.columns
                       if c not in ("date", "element_id")]
-        dates = df["date"].astype(str).to_numpy()
+        # Dates: every distinct stamp is validated once (strings must
+        # be IWFM dates, datetimes are formatted), then the rows are
+        # put in block-major order -- one block per timestep, elements
+        # ascending inside it -- which is the only layout IWFM reads.
+        raw_dates = df["date"].to_numpy(dtype=object)
+        stamps: dict = {}
+        for d in pd.unique(raw_dates):
+            stamps[d] = format_date_cell(d, "land use area date")
+        dates = np.array([stamps[d] for d in raw_dates], dtype="U19")
+        order_key = np.array([parse_iwfm_date(s) for s in dates],
+                             dtype="datetime64[m]")
+        ids = df["element_id"].to_numpy()
+        if not np.issubdtype(ids.dtype, np.integer):
+            ids_f = pd.to_numeric(df["element_id"]).to_numpy(dtype=float)
+            if not np.isfinite(ids_f).all() or (ids_f % 1 != 0).any():
+                bad = np.argwhere(~np.isfinite(ids_f) | (ids_f % 1 != 0))[0][0]
+                raise ValueError(
+                    f"land use area: element_id {df['element_id'].iloc[bad]!r}"
+                    f" at row {bad} is not an integer")
+            ids = ids_f.astype(np.int64)
+        try:
+            vals = df[value_cols].to_numpy(dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"land use area: non-numeric area value: {exc}") from None
+        finite = np.isfinite(vals)
+        if not finite.all():
+            r, c = np.argwhere(~finite)[0]
+            raise ValueError(
+                f"land use area: non-finite value {vals[r, c]!r} at row {r} "
+                f"(date {dates[r]}, element {ids[r]}), column "
+                f"{value_cols[c]!r} -- fill or drop it first")
+        order = np.lexsort((ids, order_key))  # stable: by date, then id
+        if not (np.diff(order) == 1).all():
+            dates, ids, vals = dates[order], ids[order], vals[order]
         # A row opens a new timestep block when its date differs from
         # the previous row's; only those rows carry the date.
-        new_block = np.empty(len(df), dtype=bool)
+        new_block = np.empty(len(dates), dtype=bool)
         new_block[0] = True
         new_block[1:] = dates[1:] != dates[:-1]
-        date_field = np.where(
-            new_block, np.char.rjust(dates.astype("U19"), 19), " " * 19)
-        elem_field = np.char.mod("%7d",
-                                 df["element_id"].to_numpy(int))
-        vals = df[value_cols].to_numpy(float)
+        date_field = np.where(new_block, np.char.rjust(dates, 19), " " * 19)
+        elem_field = np.char.mod("%7d", ids)
         lines = np.char.add(date_field, elem_field)
         for j in range(vals.shape[1]):
             # %.10g keeps full practical precision (areas are model
@@ -420,8 +492,10 @@ def write_native_veg_main(
     w.write_keyed_value(fmt_num(nv.root_depth_riparian), "ROOTRV")
 
     _write_element_table(w, nv.element_params,
-                         "Native/riparian element parameters")
-    _write_element_table(w, nv.initial_conditions, "Initial conditions")
+                         "Native/riparian element parameters",
+                         _NATIVE_PARAM_COLS)
+    _write_element_table(w, nv.initial_conditions, "Initial conditions",
+                         _NATIVE_IC_COLS)
     w.flush()
 
 
@@ -450,11 +524,17 @@ def write_surface_flow_dest(sfd, path: str | Path) -> None:
     w.write_comment("C  end of specification")
 
     if sfd.data is not None:
-        for _, row in sfd.data.iterrows():
-            parts = [f"   {row['date']}"]
+        for idx, row in sfd.data.iterrows():
+            date = format_date_cell(row["date"],
+                                    f"surface flow dest row {idx} date")
+            tokens = [date]
+            widths = [len(date) + 3]
             for i in range(1, sfd.n_columns + 1):
-                parts.append(
-                    f"  ({int(row[f'type_{i}'])},{int(row[f'dest_{i}'])})")
-            w.write_raw("".join(parts))
+                t = fmt_int(row[f"type_{i}"], f"type_{i} at row {idx}")
+                d = fmt_int(row[f"dest_{i}"], f"dest_{i} at row {idx}")
+                pair = f"({t},{d})"
+                tokens.append(pair)
+                widths.append(len(pair) + 2)
+            w.write_data_line(tokens, widths)
 
     w.flush()

@@ -32,12 +32,13 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Iterable, Optional, Sequence, Union
+from typing import Optional, Sequence
 
+import numpy as np
 import pandas as pd
 
 from iwfm_io._writer import replace_file_text
-from iwfm_io.scenario import _NEVER_LINK_SUFFIXES
+from iwfm_io.scenario import NEVER_LINK_SUFFIXES
 
 __all__ = ["setup_agents", "write_manager_script", "write_forward_run",
            "parrep_v2", "run_finals"]
@@ -52,12 +53,17 @@ def _replicate_tree(base: Path, dest: Path, link: bool) -> None:
     base, dest = Path(base), Path(dest)
     if dest.exists():
         raise FileExistsError(f"{dest} already exists")
+    base_r, dest_r = base.resolve(), dest.resolve()
+    if dest_r == base_r or base_r in dest_r.parents:
+        raise ValueError(
+            f"destination {dest} lies inside the template {base} — the "
+            "copy would replicate into itself; use a sibling folder")
     link_failed = False
 
     def copy_function(src, dst):
         nonlocal link_failed
         if link and not link_failed \
-                and Path(src).suffix.lower() not in _NEVER_LINK_SUFFIXES:
+                and Path(src).suffix.lower() not in NEVER_LINK_SUFFIXES:
             try:
                 os.link(src, dst)
                 return
@@ -72,10 +78,12 @@ def _replicate_tree(base: Path, dest: Path, link: bool) -> None:
                 if n.lower() == "results"
                 and (Path(dirpath) / n).is_dir()}
 
+    # materialise the Results list before copying: a lazy rglob would
+    # keep discovering the folders being created under dest
+    results_dirs = [p for p in base.rglob("Results") if p.is_dir()]
     shutil.copytree(base, dest, copy_function=copy_function, ignore=ignore)
-    for p in base.rglob("Results"):
-        if p.is_dir():
-            (dest / p.relative_to(base)).mkdir(parents=True, exist_ok=True)
+    for p in results_dirs:
+        (dest / p.relative_to(base)).mkdir(parents=True, exist_ok=True)
 
 
 def setup_agents(template_dir, n: int, dest_root=None,
@@ -111,8 +119,13 @@ def setup_agents(template_dir, n: int, dest_root=None,
         ``start_agent.bat`` (Windows) / ``start_agent.sh``.
     """
     template_dir = Path(template_dir)
+    if int(n) < 1:
+        raise ValueError(f"n must be at least 1, got {n}")
     pst = pst or _find_pst(template_dir)
     dest_root = Path(dest_root) if dest_root else template_dir.parent
+    if template_dir.resolve() in (dest_root.resolve(), *dest_root.resolve().parents):
+        raise ValueError(
+            f"dest_root {dest_root} lies inside the template {template_dir}")
     ext, prefix = ((".bat", "") if os.name == "nt"
                    else (".sh", "#!/bin/sh\n"))
     agents = []
@@ -130,6 +143,13 @@ def setup_agents(template_dir, n: int, dest_root=None,
             if os.name == "nt" else
             f"{prefix}cd \"{dest}\"\n{exe} {pst} /h {host}:{port}\n")
         agents.append(dest)
+    if overwrite:
+        # agent_NN dirs beyond n are stale copies of an earlier setup --
+        # a manager would otherwise still find (and run) them
+        for stale in sorted(dest_root.glob("agent_[0-9][0-9]*")):
+            if stale.is_dir() and stale not in agents:
+                logger.info("removing stale %s", stale)
+                shutil.rmtree(stale)
     logger.info("created %d agent dirs under %s (link=%s)",
                 n, dest_root, link)
     return agents
@@ -244,6 +264,17 @@ def parrep_v2(pst_path, values, noptmax: int = 0) -> None:
             f"use pyemu for classic .pst files")
     values = pd.Series(values)
     values.index = values.index.astype(str).str.lower()
+    if values.index.duplicated().any():
+        dup = values.index[values.index.duplicated()][:3].tolist()
+        raise ValueError(f"values has duplicate parameter names: {dup}")
+    numeric = pd.to_numeric(values, errors="coerce")
+    bad = values.index[~np.isfinite(numeric.to_numpy(dtype=float))]
+    if len(bad):
+        raise ValueError(
+            f"values holds NaN/inf/non-numeric entries for "
+            f"{len(bad)} parameter(s), e.g. {bad[:3].tolist()} -- an empty "
+            "cell in the parameter CSV makes pestpp-ies fail at parse time")
+    values = numeric
 
     par_files = _external_files(text, "parameter data external")
     for rel in par_files:
@@ -258,10 +289,14 @@ def parrep_v2(pst_path, values, noptmax: int = 0) -> None:
             raise KeyError(
                 f"values missing for {len(missing)} adjustable "
                 f"parameter(s), e.g. {missing.head(3).tolist()}")
-        df.loc[have, "parval1"] = values[names[have]].values
+        # fixed/tied parameters keep their control-file value: PEST++
+        # never adjusts them, so a value from an ensemble must not
+        # overwrite them either
+        sel = have & adjustable
+        df.loc[sel, "parval1"] = values[names[sel]].values
         replace_file_text(csv_path, df.to_csv(index=False))
 
-    new_text, n_sub = re.subn(r"(?m)^(\s*noptmax\s+)\S+",
+    new_text, n_sub = re.subn(r"(?im)^(\s*noptmax\s+)\S+",
                               lambda m: f"{m.group(1)}{noptmax}", text)
     if not n_sub:
         raise ValueError(f"no 'noptmax' line found in {pst_path.name}")

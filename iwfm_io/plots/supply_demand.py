@@ -34,7 +34,6 @@ def plot_supply_gap_timeline(dates, requirement, actual,
 
     requirement = np.asarray(requirement, dtype=float)
     actual = np.asarray(actual, dtype=float)
-    shortage = requirement - actual
 
     ax.fill_between(dates, 0, actual, color="steelblue", alpha=0.6,
                     label="Delivered")
@@ -67,7 +66,6 @@ def plot_budget_supply_gap(model, budget_type, location,
     supply_col, demand_col : int
         1-based column indices for actual supply and demand.
     """
-    titles = model.get_budget_column_titles(budget_type, location)
     ts = model.get_budget_timeseries(
         budget_type, location, [supply_col, demand_col],
         begin_date, end_date, interval,
@@ -171,9 +169,3 @@ def plot_subregion_depth_vs_shortage(model, supply_type, factor=1.0,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    # These plots typically require active simulation data
-    # (supply/demand is only available during or after simulation).
-    print("Supply-demand plots require simulation-time data.")
-    print("See function docstrings for usage patterns.")

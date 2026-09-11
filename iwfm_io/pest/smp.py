@@ -35,6 +35,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 from iwfm_io._writer import replace_file_text
@@ -129,10 +130,16 @@ def read_smp(path, date_format: Optional[str] = None,
             f"date_format must be one of {sorted(_DATE_FORMATS)}, "
             f"got {date_format!r}"
         )
+    # IWFM's end-of-day stamp "24:00:00" is the next day's midnight
+    time = df["time"].str.strip()
+    is_2400 = time.str.match(r"^24:00(:00)?$")
+    time = time.where(~is_2400, "00:00:00")
     when = pd.to_datetime(
-        df["date"] + " " + df["time"],
+        df["date"] + " " + time,
         format=_DATE_FORMATS[date_format] + " %H:%M:%S",
     )
+    if is_2400.any():
+        when = when + pd.to_timedelta(is_2400.astype(int), unit="D")
     values = pd.to_numeric(df["value"], errors="coerce")
     n_bad = int(values.isna().sum() - df["value"].isna().sum())
     if n_bad:
@@ -168,9 +175,11 @@ def write_smp(df, path, date_format: str = "dd/mm/yyyy",
 
     Notes
     -----
-    Rows with NaN values are dropped (with a logged warning) — SMP has no
-    missing-value marker. The file is written atomically (temp + rename),
-    preserving the ``create_scenario`` hardlink invariant.
+    SMP has no missing-value marker: records with a NaN value are dropped
+    (logged), while an infinite value or a missing datetime raises
+    ``ValueError``. The file is
+    written atomically (temp + rename), preserving the
+    ``create_scenario`` hardlink invariant.
     """
     if date_format not in _DATE_FORMATS:
         raise ValueError(
@@ -199,10 +208,25 @@ def write_smp(df, path, date_format: str = "dd/mm/yyyy",
                 f"{out.loc[long_names, 'site'].drop_duplicates().head(3).tolist()}; "
                 f"pass max_site_len=None to allow"
             )
-    n_nan = int(out["value"].isna().sum())
-    if n_nan:
-        logger.warning("%s: dropping %d NaN value row(s)", path, n_nan)
-        out = out.dropna(subset=["value"])
+    vals = out["value"].to_numpy(dtype=float)
+    if np.isinf(vals).any():
+        idx = int(np.argmax(np.isinf(vals)))
+        raise ValueError(
+            f"{int(np.isinf(vals).sum())} infinite value(s) (SMP has no "
+            f"marker for them), e.g. site {out['site'].iloc[idx]!r}")
+    nan_value = np.isnan(vals)
+    if nan_value.any():
+        # missing readings are normal in observation records: drop them
+        # (logged) rather than writing a literal 'nan'
+        logger.warning("write_smp: dropping %d record(s) with NaN values",
+                       int(nan_value.sum()))
+        out = out[~nan_value].reset_index(drop=True)
+    bad_time = out["datetime"].isna()
+    if bad_time.any():
+        idx = int(np.argmax(bad_time.to_numpy()))
+        raise ValueError(
+            f"{int(bad_time.sum())} row(s) have a missing datetime, e.g. "
+            f"site {out['site'].iloc[idx]!r} -- drop those rows first")
     if sort:
         out = out.sort_values(["site", "datetime"], kind="stable")
 

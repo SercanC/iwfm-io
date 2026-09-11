@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+import pandas as pd
+
 
 def validate_nodes(node_file: Any) -> list[str]:
     """Validate a parsed node file.
@@ -43,10 +46,11 @@ def validate_nodes(node_file: Any) -> list[str]:
             f"Duplicate node IDs: {dupes.tolist()}"
         )
 
-    # Check for non-finite coordinates
+    # Check for non-finite coordinates (NaN, inf, non-numeric)
     for col in ["x", "y"]:
         if col in df.columns:
-            bad = df[~df[col].apply(lambda v: isinstance(v, (int, float)) and v == v)]
+            vals = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
+            bad = df[~np.isfinite(vals)]
             if len(bad) > 0:
                 errors.append(
                     f"Non-finite values in '{col}' column for nodes: "
@@ -92,10 +96,11 @@ def validate_elements(element_file: Any, node_file: Any | None = None) -> list[s
     # Check node references
     if node_file is not None and node_file.data is not None:
         valid_nodes = set(node_file.data["node_id"].tolist())
-        valid_nodes.add(0)  # 0 is valid for triangles (node4)
         for col in ["node1", "node2", "node3", "node4"]:
             if col in df.columns:
-                bad_refs = df[~df[col].isin(valid_nodes)]
+                # 0 is valid only for node4 (a triangle)
+                allowed = valid_nodes | ({0} if col == "node4" else set())
+                bad_refs = df[~df[col].isin(allowed)]
                 if len(bad_refs) > 0:
                     errors.append(
                         f"Invalid node references in '{col}' for elements: "
@@ -143,8 +148,19 @@ def validate_stratigraphy(strata_file: Any, node_file: Any | None = None) -> lis
     # bottoms = elevation minus cumulative thickness), so the
     # structural requirement is that they are non-negative.
     layer_cols = [c for c in df.columns if c not in ("node_id", "elevation")]
+    for col in ["elevation", *layer_cols]:
+        if col not in df.columns:
+            continue
+        vals = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
+        bad = df[~np.isfinite(vals)]
+        for node_id in bad["node_id"].tolist():
+            errors.append(
+                f"Node {int(node_id)}: missing/non-finite value in column "
+                f"'{col}'"
+            )
     for col in layer_cols:
-        bad = df[df[col] < 0]
+        vals = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
+        bad = df[np.isfinite(vals) & (vals < 0)]
         for node_id in bad["node_id"].tolist():
             errors.append(
                 f"Node {int(node_id)}: negative thickness in column "
@@ -182,6 +198,28 @@ def validate_preprocessor(pp: Any) -> list[str]:
 
     if element_file is not None:
         errors.extend(validate_elements(element_file, node_file))
+
+    # Declared counts (ND / NE / NREGN / NLAKE ...) vs table lengths:
+    # the writers emit the declared count, so a mismatch produces a
+    # deck IWFM cannot read
+    declared = [
+        (node_file, "n_nodes", "data", "ND"),
+        (element_file, "n_elements", "data", "NE"),
+        (element_file, "n_subregions", "subregions", "NREGN"),
+        (children.get("stream"), "n_reaches", "reaches", "NRH"),
+        (children.get("lake"), "n_lakes", "lakes", "NLAKE"),
+    ]
+    for obj, count_attr, table_attr, keyword in declared:
+        if obj is None:
+            continue
+        n = getattr(obj, count_attr, None)
+        table = getattr(obj, table_attr, None)
+        if n is None or table is None:
+            continue
+        if int(n) != len(table):
+            errors.append(
+                f"{keyword} declares {int(n)} but the table holds "
+                f"{len(table)} rows")
 
     if strata_file is not None:
         errors.extend(validate_stratigraphy(strata_file, node_file))

@@ -296,8 +296,22 @@ def build_well_mapping(model, wells, kh=None, spatial: str = "nearest",
     wells = wells.copy().reset_index(drop=True)
     if not {"well_id", "x", "y"} <= set(wells.columns):
         raise ValueError("wells needs columns well_id, x, y")
+    xy = wells[["x", "y"]].apply(pd.to_numeric, errors="coerce")
+    if xy.isna().any().any():
+        bad = wells.loc[xy.isna().any(axis=1), "well_id"].tolist()[:5]
+        raise ValueError(
+            f"wells have missing/non-numeric coordinates: {bad} -- a NaN "
+            "would silently snap to node 1")
+    wells[["x", "y"]] = xy
 
     nodes = model.nodes_df()[["node_id", "x", "y"]]
+    outside = ((wells["x"] < nodes["x"].min()) | (wells["x"] > nodes["x"].max())
+               | (wells["y"] < nodes["y"].min()) | (wells["y"] > nodes["y"].max()))
+    if outside.any():
+        logger.warning(
+            "%d well(s) lie outside the model's node bounding box (e.g. %s) "
+            "-- they map to the nearest edge node", int(outside.sum()),
+            wells.loc[outside, "well_id"].tolist()[:3])
     top, bot, n_layers = _layer_depths(model.stratigraphy_df())
 
     if kh is None:

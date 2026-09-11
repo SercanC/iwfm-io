@@ -2,15 +2,23 @@
 
 ## Dates
 - IWFM date strings: `MM/DD/YYYY_HH:MM`, and **hour 24:00 means end of
-  day** (`09/30/2021_24:00` == 2021-10-01 00:00). Use
-  `iwfm_io._tokens.parse_iwfm_date` / `format_iwfm_date`, never bare
-  `strptime`.
+  day** (`09/30/2021_24:00` == 2021-10-01 00:00; `24:MM` with minutes is
+  invalid). Use `iwfm_io.parse_iwfm_date` / `format_iwfm_date`, never
+  bare `strptime`. Recurring-year time series use year 2500 (some decks
+  4000) as "every year".
 - DLL date arrays are Excel serial days (days since 1899-12-30);
   convert with `iwfm_io.plots.excel_date_to_datetime`.
 
 ## Text input files
-- Comment lines start with `C`, `c`, `*`, or `/` **in column 1 only** —
-  a line starting with whitespace is data even if a `/` appears later.
+- Comment lines start with `C`, `c` or `*` **in column 1 only** — a
+  line starting with whitespace is data even if a `/` appears later, and
+  a line whose first non-blank character is `/` is a **data line with a
+  blank value** (a disabled optional entry such as `/  HTPOUTFL`), not
+  a comment. Inside a data line, the first `/` starts the trailing
+  comment, so names cannot contain `/`.
+- The readers are strict by default: a truncated file, a short row or a
+  non-numeric token raises `IWFMParseError` with the file, section and
+  line; `iwfm_io.strict_mode(False)` keeps what parsed and warns.
 - Data lines end with `/ KEYWORD description`; the same section can
   have different entries across IWFM versions (2015 vs 2024+), so
   `iwfm_io` readers match keywords, not positions.

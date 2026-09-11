@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iwfm-io"
-version = "2.12.0"
-description = "Read, write, analyze and visualize IWFM (Integrated Water Flow Model) models: pure-Python file I/O, DLL wrapper, and 58 plot functions"
+version = "2.14.0"
+description = "Read, write, analyze and visualize IWFM (Integrated Water Flow Model) models: pure-Python file I/O, DLL wrapper, and 66 plot functions"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 authors = [
     { name = "Sercan Ceyhan", email = "sercan.ceyhan@gmail.com" },
 ]
@@ -26,7 +26,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -76,3 +75,27 @@ pest = [
 
 [tool.setuptools.packages.find]
 include = ["iwfm_io*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+xfail_strict = true
+markers = [
+    "sample_model: needs .assets/sample_model (release asset sample_model.zip)",
+    "exe: runs the IWFM executables (IWFM_RUN_EXE_TESTS=1, Windows, sample_model/Bin)",
+    "dll: needs the IWFM DLL (Windows x64; dlls/<version>/IWFM_C_x64.dll)",
+    "c2vsimfg: needs a local C2VSimFG v1.5 checkout (IWFM_C2VSIMFG_DIR)",
+    "regression: reproductions imported from the 2026-09-09 hostile-QA pass",
+]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+# pyflakes-class checks only (undefined names, unused imports/variables)
+select = ["F"]
+
+[tool.ruff.lint.per-file-ignores]
+# package __init__ modules re-export names on purpose
+"__init__.py" = ["F401"]

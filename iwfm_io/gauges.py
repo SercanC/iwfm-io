@@ -266,13 +266,21 @@ def stream_hydrograph_series(link: GaugeLink, hyd_output,
                     "cannot locate the stage block: link has no "
                     "n_specs and the output column count is odd")
             n = len(h.columns) // 2
+        if len(h.columns) < 2 * n:
+            raise ValueError(
+                f"the hydrograph output has {len(h.columns)} columns for "
+                f"{n} hydrographs -- it holds the flow block only (the "
+                "HDF version of StrmHyd carries flows; stages are in the "
+                "text StrmHyd.out). Pass the text output for stage.")
         offset = n
     wanted = [int(i) + offset for i in link.links["hyd_id"]]
     missing = set(wanted) - set(h.columns)
     if missing:
         raise KeyError(
             f"hydrograph output is missing {len(missing)} column(s), "
-            f"e.g. {sorted(missing)[:3]}")
+            f"e.g. {sorted(missing)[:3]} -- it has {len(h.columns)} "
+            "columns; check the quantity and that the output matches "
+            "the stream main's hydrograph specs")
     out = h[wanted]
     out.columns = list(link.links["gauge_id"])
     return out

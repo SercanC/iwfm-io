@@ -11,11 +11,16 @@ All grid/stream helpers accept either:
   ``IOModelAdapter``).
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.tri
 from matplotlib.collections import PolyCollection, LineCollection
 from matplotlib.tri import Triangulation
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 
 
@@ -235,7 +240,6 @@ def water_year_totals(datetimes, values):
     years (fewer time steps than a full year) are dropped — a stub
     total would read as a real annual value.
     """
-    import pandas as pd
     df = pd.DataFrame(np.asarray(values, dtype=float),
                       index=pd.DatetimeIndex(datetimes))
     grouped = df.resample("YS-OCT")
@@ -322,6 +326,39 @@ def _get_element_configs(source):
 # Heads snapshot
 # ──────────────────────────────────────────────────────────────────
 
+def frame_interval_ms(fps):
+    """Milliseconds per animation frame for *fps* (must be > 0)."""
+    try:
+        fps = float(fps)
+    except (TypeError, ValueError):
+        raise ValueError(f"fps must be a positive number, got {fps!r}")
+    if not np.isfinite(fps) or fps <= 0:
+        raise ValueError(f"fps must be a positive number, got {fps!r}")
+    return max(int(round(1000.0 / fps)), 1)
+
+
+def fixed_levels(values, levels, vmin=None, vmax=None):
+    """Contour levels shared by every frame of an animation.
+
+    ``tricontourf(levels=<int>)`` picks the levels from each call's
+    data, so a per-frame redraw silently drifts away from the
+    colorbar drawn for frame 0.  Returns an explicit, monotonic level
+    array spanning ``[vmin, vmax]`` (2nd/98th percentiles by default).
+    """
+    if not isinstance(levels, (int, np.integer)):
+        return np.asarray(levels, dtype=float)
+    vals = np.asarray(values, dtype=float)
+    if vmin is None:
+        vmin = np.nanpercentile(vals, 2)
+    if vmax is None:
+        vmax = np.nanpercentile(vals, 98)
+    if not np.isfinite(vmin) or not np.isfinite(vmax):
+        raise ValueError("cannot derive contour levels: all values are NaN")
+    if vmax <= vmin:
+        vmax = vmin + 1.0
+    return np.linspace(vmin, vmax, int(levels) + 1)
+
+
 def get_heads_snapshot(source, layer, time_index=-1):
     """Return a 1D array of head values at nodes for a single layer and timestep.
 
@@ -339,6 +376,8 @@ def get_heads_snapshot(source, layer, time_index=-1):
     """
     if _has_df_methods(source):
         hdf = source.heads_df(layer)
+        if len(hdf) == 0:
+            raise ValueError("no head output available for a snapshot")
         return hdf.iloc[time_index].values
     # Legacy path
     ts = source.get_time_specs()
@@ -543,8 +582,14 @@ def plot_element_map(source, values, ax=None, cmap="viridis", label="",
     else:
         fig = ax.figure
     polygons = build_element_polygons(source)
+    values = np.asarray(values, dtype=float).ravel()
+    if len(values) != len(polygons):
+        raise ValueError(
+            f"plot_element_map: {len(values)} values for "
+            f"{len(polygons)} elements -- one value per element is "
+            "required (matplotlib would silently recycle the colours)")
     pc = PolyCollection(
-        polygons, array=np.asarray(values, dtype=float), cmap=cmap,
+        polygons, array=values, cmap=cmap,
         edgecolors="gray" if show_mesh else "face",
         linewidths=0.3 if show_mesh else 0,
     )
@@ -565,16 +610,46 @@ def plot_element_map(source, values, ax=None, cmap="viridis", label="",
 def plot_contour_map(source, node_values, ax=None, cmap="viridis",
                      levels=20, label="", title="", filled=True,
                      figsize=(10, 8)):
-    """Plot a contour map from node values."""
+    """Plot a contour map from node values.
+
+    Non-finite node values are honest gaps: every triangle touching such
+    a node is masked out of the contour instead of being drawn at a
+    substitute value.  Raises when no finite value is left.
+    """
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
     else:
         fig = ax.figure
     tri = build_triangulation(source)
-    if filled:
-        cs = ax.tricontourf(tri, node_values, levels=levels, cmap=cmap)
+    vals = np.asarray(node_values, dtype=float).ravel()
+    if len(vals) != len(tri.x):
+        raise ValueError(
+            f"plot_contour_map: {len(vals)} values for {len(tri.x)} nodes")
+    finite = np.isfinite(vals)
+    as_points = False
+    if not finite.all():
+        if not finite.any():
+            raise ValueError("plot_contour_map: every node value is NaN")
+        tri = matplotlib.tri.Triangulation(tri.x, tri.y, tri.triangles)
+        gap = ~finite[tri.triangles].all(axis=1)
+        if gap.all():
+            # too few finite nodes to form one triangle: show them as
+            # points on the same colour scale rather than nothing
+            as_points = True
+            logger.warning(
+                "plot_contour_map: only %d of %d nodes have a finite value "
+                "-- drawn as points, not contours", int(finite.sum()),
+                len(vals))
+        else:
+            tri.set_mask(gap)
+            vals = np.where(finite, vals, 0.0)   # masked triangles never draw
+    if as_points:
+        cs = ax.scatter(tri.x[finite], tri.y[finite], c=vals[finite],
+                        cmap=cmap, s=30, edgecolors="k", linewidths=0.3)
+    elif filled:
+        cs = ax.tricontourf(tri, vals, levels=levels, cmap=cmap)
     else:
-        cs = ax.tricontour(tri, node_values, levels=levels, cmap=cmap)
+        cs = ax.tricontour(tri, vals, levels=levels, cmap=cmap)
     ax.set_aspect("equal")
     style_map_axes(ax)
     if title:

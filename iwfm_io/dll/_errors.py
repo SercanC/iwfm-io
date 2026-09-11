@@ -1,5 +1,6 @@
 """IWFM DLL error handling."""
 
+import sys
 from ctypes import c_int, c_char, byref
 
 
@@ -20,5 +21,11 @@ def _check_status(iStat, dll):
         msg_buf = (c_char * buf_len)()
         msg_stat = c_int(0)
         dll.IW_GetLastMessage(c_len, msg_buf, byref(msg_stat))
-        message = bytes(msg_buf).decode("ascii", errors="replace").rstrip("\x00 ")
+        if msg_stat.value != 0:
+            message = "(the DLL could not report its last message)"
+        else:
+            message = bytes(msg_buf).decode("mbcs" if sys.platform == "win32"
+                                            else "utf-8",
+                                            errors="replace").rstrip("\x00 ")
+            message = message.strip() or "(no message from the DLL)"
         raise IWFMError(message, iStat.value)

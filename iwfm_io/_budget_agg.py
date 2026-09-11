@@ -120,6 +120,50 @@ def native_step_offset(
     return timedelta(days=1)
 
 
+
+def _days_in_month(year: int, month: int) -> int:
+    if month == 2:
+        leap = (year % 4 == 0 and year % 100 != 0) or year % 400 == 0
+        return 29 if leap else 28
+    return 30 if month in (4, 6, 9, 11) else 31
+
+
+def iwfm_increment_months(stamp: pd.Timestamp, months: int) -> pd.Timestamp:
+    """Advance a library stamp by *months* exactly as IWFM's
+    ``IncrementTimeStamp`` does (``TimeSeriesUtilities.f90``, month/year
+    branch), returning a library stamp again.
+
+    The library stores ``MM/DD/YYYY_24:00`` as the next day's midnight,
+    so the arithmetic is done on the IWFM date (the previous day for
+    midnight stamps): a start on the last day of its month at 24:00
+    lands on the last day of the target month; otherwise the day is kept
+    and only February is clamped. Applied incrementally window after
+    window this reproduces the DLL's end-of-month stickiness (a daily run
+    beginning 01/30 gets 02/28, 03/31, 04/30 ... window ends).
+    """
+    ts = pd.Timestamp(stamp)
+    midnight = ts == ts.normalize()
+    if midnight:
+        d = (ts - pd.Timedelta(days=1))
+        minutes = 1440
+    else:
+        d = ts.normalize()
+        minutes = ts.hour * 60 + ts.minute
+    year, month, day = d.year, d.month, d.day
+    last_day = day == _days_in_month(year, month)
+    total = month - 1 + int(months)
+    year += total // 12
+    month = total % 12 + 1
+    if last_day and minutes == 1440:
+        day = _days_in_month(year, month)
+    if month == 2 and day > _days_in_month(year, 2):
+        day = _days_in_month(year, 2)
+    out = pd.Timestamp(year=year, month=month, day=day)
+    if midnight:
+        return out + pd.Timedelta(days=1)
+    return out + pd.Timedelta(minutes=minutes)
+
+
 def window_end_labels(
     index: pd.DatetimeIndex,
     interval: str,
@@ -156,23 +200,38 @@ def window_end_labels(
     if len(index) == 0:
         return pd.DatetimeIndex([]), np.zeros(0, dtype=bool)
 
+    if not index.is_monotonic_increasing:
+        raise ValueError("window_end_labels needs a sorted DatetimeIndex")
+
     step_months = 1 if interval_u == "1MON" else 12
     step = native_step_offset(native_unit, delta_minutes, index)
     first_begin = index[0] - step
-    if interval_u == "1CALYEAR":
-        anchor = pd.Timestamp(year=first_begin.year, month=1, day=1)
-    else:
-        anchor = pd.Timestamp(first_begin)
 
     last = index[-1]
     bounds: List[pd.Timestamp] = []
-    i = 1
-    while True:
-        b = anchor + pd.DateOffset(months=step_months * i)
+    if interval_u == "1CALYEAR":
+        anchor = pd.Timestamp(year=first_begin.year, month=1, day=1)
+        i = 1
+        while True:
+            b = anchor + pd.DateOffset(years=i)
+            bounds.append(b)
+            if b >= last:
+                break
+            i += 1
+    else:
+        # DLL semantics: each window end is the previous one advanced by
+        # the print interval with IWFM's own month arithmetic
+        # (Class_Budget.f90 PrintResults: PrintTimeStamp =
+        # IncrementTimeStamp(PrintTimeStamp, iPrintDeltaT, 1)).
+        b = iwfm_increment_months(pd.Timestamp(first_begin), step_months)
         bounds.append(b)
-        if b >= last:
-            break
-        i += 1
+        guard = 0
+        while b < last:
+            b = iwfm_increment_months(b, step_months)
+            bounds.append(b)
+            guard += 1
+            if guard > 200_000:  # pragma: no cover
+                raise RuntimeError("window generation did not converge")
     bounds_idx = pd.DatetimeIndex(bounds)
 
     pos = np.searchsorted(bounds_idx.values, index.values, side="left")

@@ -11,14 +11,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from iwfm_io._parser import IWFMFileReader
-from iwfm_io._tokens import split_keyed_line, tokenize_data_line
-from iwfm_io.models.base import FileHeader, TimeSeriesSpec
-from iwfm_io.readers._param_blocks import (
-    LineCursor,
-    parse_node_layer_table,
-    parse_param_block,
-)
+from iwfm_io._parser import IWFMFileReader, IWFMParseError
+from iwfm_io._tokens import _KEYED_SEP_RE, split_keyed_line, tokenize_data_line
+from iwfm_io.models.base import TimeSeriesSpec
+from iwfm_io.readers._param_blocks import parse_param_block
 from iwfm_io.models.groundwater import (
     BCMain,
     BoundaryTSFile,
@@ -40,53 +36,13 @@ from iwfm_io.models.groundwater import (
 # Shared helpers
 # ------------------------------------------------------------------
 
-def _read_ts_data_to_eof(
-    reader: IWFMFileReader,
-    n_columns: int,
-    col_names: list[str] | None = None,
-) -> pd.DataFrame:
-    """Read time-series date+value rows until EOF or non-date line.
-
-    Dates are stored as raw strings to handle IWFM special years (4000,
-    2500) that are outside the pandas Timestamp range.
-
-    Parameters
-    ----------
-    reader : IWFMFileReader
-    n_columns : int
-    col_names : list[str], optional
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: date (str), col_1, col_2, ... (or *col_names*).
-    """
-    if col_names is None:
-        col_names = [f"col_{i + 1}" for i in range(n_columns)]
-
-    date_strs: list[str] = []
-    values: list[list[float]] = []
-
-    while not reader.eof:
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        tokens = tokenize_data_line(line)
-        if not tokens:
-            break
-        if "/" not in tokens[0] or "_" not in tokens[0]:
-            break
-        reader.next_data_line()
-        row_vals = [float(v) for v in tokens[1 : n_columns + 1]]
-        date_strs.append(tokens[0])
-        values.append(row_vals)
-
-    if not date_strs:
-        return pd.DataFrame(columns=["date"] + col_names)
-
-    df = pd.DataFrame(values, columns=col_names)
-    df.insert(0, "date", date_strs)
-    return df
+def _split_note(line: str) -> tuple[str, str]:
+    """Split a data line into its list-directed body and a trailing
+    ``/ note`` annotation (``""`` when absent)."""
+    m = _KEYED_SEP_RE.search(line)
+    if m is None:
+        return line, ""
+    return line[:m.start()], line[m.end():].strip().lstrip("/").strip()
 
 
 def _read_hydrograph_table(
@@ -126,57 +82,60 @@ def _read_hydrograph_table(
     rows: list[dict] = []
     n_cols = len(col_names)
 
-    for _ in range(n_rows):
-        line = reader.next_data_line()
-        # tokenize_data_line strips the trailing "/ comment" some models
-        # append to hydrograph rows (e.g. C2VSimFG subsidence InSAR
-        # notes) — captured separately into the "notes" column
-        tokens = tokenize_data_line(line)
-        m = re.search(r"\s/(.+)$", line)
-        note = m.group(1).strip().lstrip("/").strip() if m else ""
+    for i in range(n_rows):
+        try:
+            line = reader.next_data_line()
+        except IWFMParseError:
+            raise reader.error(
+                f"hydrograph table has only {i} of {n_rows} declared "
+                "rows") from None
+        # a trailing "/ note" (e.g. C2VSimFG InSAR station details) is
+        # transparent to IWFM's list-directed read; keep it separately
+        body, note = _split_note(line)
         row: dict = {col: None for col in col_names}
         row["notes"] = note
-
+        # IWFM (Class_BaseHydrograph.f90) consumes the leading numeric
+        # fields positionally and takes the REST OF THE LINE as the
+        # name -- names may contain blanks
         if n_cols == 7:
-            # Full hydrograph format: ID TYPE LAYER [X Y | NODE] NAME
             id_col, type_col, layer_col, x_col, y_col, node_col, name_col = col_names
-            loc_type = None
-            if len(tokens) >= 2:
-                row[id_col] = tokens[0]
-                loc_type = tokens[1]
-                row[type_col] = loc_type
-            if len(tokens) >= 3:
-                row[layer_col] = tokens[2]
-            if len(tokens) >= 7:
-                # Full 7-token form: some decks (e.g. C2VSimFG
-                # subsidence) write BOTH x-y and a placeholder node —
-                # ID TYPE LAYER X Y NODE NAME — regardless of the type
-                # flag; detect it by token count.
-                row[x_col] = tokens[3]
-                row[y_col] = tokens[4]
-                row[node_col] = tokens[5]
-                row[name_col] = tokens[6]
-            elif loc_type == "0":
-                # x-y format: remaining tokens are X Y NAME
-                if len(tokens) >= 5:
-                    row[x_col] = tokens[3]
-                    row[y_col] = tokens[4]
-                if len(tokens) >= 6:
-                    row[name_col] = tokens[5]
+            parts = body.split(None, 3)
+            if len(parts) < 3:
+                raise reader.error(
+                    f"hydrograph row {i + 1}: expected ID TYPE LAYER ..., "
+                    f"got {body.strip()!r}")
+            row[id_col], row[type_col], row[layer_col] = parts[:3]
+            rest = parts[3] if len(parts) > 3 else ""
+            if parts[1].strip() == "0":
+                xy = rest.split(None, 2)
+                if len(xy) < 2:
+                    raise reader.error(
+                        f"hydrograph row {i + 1}: type 0 needs X Y, got "
+                        f"{body.strip()!r}")
+                row[x_col], row[y_col] = xy[0], xy[1]
+                rest = xy[2] if len(xy) > 2 else ""
+                # some decks (C2VSimFG subsidence) write a placeholder
+                # node before the name regardless of the type flag:
+                # X Y 0 NAME -- an integer token followed by text
+                m = re.match(r"\s*(-?\d+)\s+(\S.*)$", rest)
+                if m:
+                    row[node_col], rest = m.group(1), m.group(2)
             else:
-                # node format: remaining tokens are NODE NAME
-                if len(tokens) >= 4:
-                    row[node_col] = tokens[3]
-                if len(tokens) >= 5:
-                    row[name_col] = tokens[4]
-        elif n_cols == 4:
-            # Simple BC hydrograph format: ID LAYER NODE NAME
-            for i, col in enumerate(col_names):
-                row[col] = tokens[i] if i < len(tokens) else None
+                nd = rest.split(None, 1)
+                if not nd:
+                    raise reader.error(
+                        f"hydrograph row {i + 1}: type {parts[1]} needs a "
+                        f"node, got {body.strip()!r}")
+                row[node_col] = nd[0]
+                rest = nd[1] if len(nd) > 1 else ""
+            row[name_col] = rest.strip() or None
         else:
-            # Generic fallback: assign by position
-            for i, col in enumerate(col_names):
-                row[col] = tokens[i] if i < len(tokens) else None
+            # positional: the last column is the name (rest of line)
+            parts = body.split(None, n_cols - 1)
+            for k, col in enumerate(col_names[:-1]):
+                row[col] = parts[k] if k < len(parts) else None
+            row[col_names[-1]] = (parts[n_cols - 1].strip()
+                                  if len(parts) >= n_cols else None)
 
         rows.append(row)
 
@@ -291,7 +250,9 @@ def read_gw_main(
     hydrograph_factxy = float(scalars.get("FACTXY") or 1.0)
 
     hydrograph_cols = ["id", "hydtyp", "layer", "x", "y", "node", "name"]
-    hydrographs = _read_hydrograph_table(reader, n_hydrographs, hydrograph_cols)
+    with reader.section("hydrograph table"):
+        hydrographs = _read_hydrograph_table(reader, n_hydrographs,
+                                             hydrograph_cols)
 
     # Face flow output block. FCHYDOUTFL is omitted entirely when NOUTF=0,
     # so only consume lines whose keyword belongs to this block.
@@ -314,10 +275,12 @@ def read_gw_main(
             break
 
     face_flow_cols = ["id", "layer", "node_a", "node_b", "name"]
-    face_flows = _read_hydrograph_table(reader, n_face_flows, face_flow_cols)
+    with reader.section("face flow table"):
+        face_flows = _read_hydrograph_table(reader, n_face_flows,
+                                            face_flow_cols)
 
     # Aquifer parameter section: fully parsed into DataFrames
-    tail = _parse_gw_param_tail(reader.skip_to_end())
+    tail = _parse_gw_param_tail(reader.tail_cursor())
 
     return GWMain(
         header=header,
@@ -334,15 +297,19 @@ def read_gw_main(
     )
 
 
-def _parse_gw_param_tail(raw_lines: list[str]) -> dict:
+def _parse_gw_param_tail(cursor) -> dict:
     """Parse the GW main tail: aquifer parameters, Kh anomalies, the
     optional groundwater return-flow section, and initial heads.
 
     Sections are recognized by their keyed lines (NEBK, IFLAGRF, FACTHP)
     because the return-flow block exists only in some format variants
-    (the sample model has it, C2VSimFG does not).  Any parse failure
-    keeps what was read so far and emits a ``UserWarning`` — the
-    unparsed remainder is not retained, so a written file would lack it.
+    (the sample model has it, C2VSimFG does not).  A parse failure is
+    an ``IWFMParseError`` in strict mode; in lenient mode what was read
+    so far is kept and an ``IWFMReadWarning`` is emitted — the unparsed
+    remainder is not retained, so a written file would lack it.
+
+    *cursor* is a :class:`~iwfm_io.readers._param_blocks.LineCursor`
+    (see :meth:`IWFMFileReader.tail_cursor`) positioned at NGROUP.
     """
     out: dict = {
         "ngroup": None,
@@ -359,13 +326,14 @@ def _parse_gw_param_tail(raw_lines: list[str]) -> dict:
         "facthp": None,
         "initial_heads": None,
     }
-    cursor = LineCursor(raw_lines)
+    section = "aquifer parameters"
     try:
-        block = parse_param_block(
-            cursor,
-            param_names=["kh", "ss", "sy", "aquitard_kv", "kv"],
-            factor_names=["fx", "fkh", "fs", "fn", "fv", "fl"],
-        )
+        with cursor.section(section):
+            block = parse_param_block(
+                cursor,
+                param_names=["kh", "ss", "sy", "aquitard_kv", "kv"],
+                factor_names=["fx", "fkh", "fs", "fn", "fv", "fl"],
+            )
         out["ngroup"] = block["ngroup"]
         out["param_factors"] = block["factors"]
         out["param_time_units"] = block["time_units"]
@@ -374,6 +342,7 @@ def _parse_gw_param_tail(raw_lines: list[str]) -> dict:
 
         # ---- Anomaly in hydraulic conductivity ----
         if cursor.peek_keyword() == "NEBK":
+            section = "Kh anomalies"
             nebk = int(cursor.read_keyed_value()[0])
             out["anomaly_nebk"] = nebk
             if cursor.peek_keyword() == "FACT":
@@ -393,6 +362,7 @@ def _parse_gw_param_tail(raw_lines: list[str]) -> dict:
 
         # ---- Groundwater return flow (only in newer format variants) ----
         if cursor.peek_keyword() == "IFLAGRF":
+            section = "groundwater return flow"
             out["iflagrf"] = int(cursor.read_keyed_value()[0])
             rows = []
             while not cursor.eof and cursor.peek_keyword() != "FACTHP":
@@ -413,6 +383,7 @@ def _parse_gw_param_tail(raw_lines: list[str]) -> dict:
 
         # ---- Initial groundwater heads ----
         if cursor.peek_keyword() == "FACTHP":
+            section = "initial heads"
             out["facthp"] = float(cursor.read_keyed_value()[0])
             rows = []
             while not cursor.eof:
@@ -434,16 +405,18 @@ def _parse_gw_param_tail(raw_lines: list[str]) -> dict:
             if rows:
                 out["initial_heads"] = pd.DataFrame(rows)
         if not cursor.eof:
-            import warnings
-            warnings.warn(
+            cursor.next()
+            cursor.degrade(
                 "GW main: unrecognized content after the parsed sections "
                 "was not understood and will be missing from written "
                 "output")
-    except (StopIteration, ValueError, IndexError) as exc:
-        import warnings
-        warnings.warn(
-            f"GW main aquifer-parameter tail only partially parsed ({exc}); "
-            "unparsed sections will be missing from written output")
+    except (ValueError, IndexError) as exc:
+        if isinstance(exc, IWFMParseError) and cursor.strict:
+            raise
+        with cursor.section(section):
+            cursor.degrade(
+                f"GW main tail only partially parsed ({exc}); unparsed "
+                "sections will be missing from written output")
     return out
 
 
@@ -489,7 +462,9 @@ def read_bc_main(
     bc_hyd_out_file, _ = reader.read_keyed_path(base_dir)
 
     bc_hyd_cols = ["id", "layer", "node", "name"]
-    bc_hydrographs = _read_hydrograph_table(reader, n_bc_hydrographs, bc_hyd_cols)
+    with reader.section("BC hydrograph table"):
+        bc_hydrographs = _read_hydrograph_table(reader, n_bc_hydrographs,
+                                                bc_hyd_cols)
 
     return BCMain(
         header=header,
@@ -498,6 +473,28 @@ def read_bc_main(
         bc_hyd_out_file=bc_hyd_out_file,
         bc_hydrographs=bc_hydrographs,
     )
+
+
+def _read_bc_rows(reader: IWFMFileReader, n_rows: int, n_int: int,
+                  n_float: int, what: str) -> list[list]:
+    """Read *n_rows* boundary-condition rows of ``n_int`` integers
+    followed by ``n_float`` numbers, with per-token error context."""
+    rows: list[list] = []
+    n_cols = n_int + n_float
+    with reader.section(what.replace(" row", " table")):
+        for i in range(n_rows):
+            try:
+                toks = reader.read_row(n_cols, what)
+            except IWFMParseError as exc:
+                if reader.eof and "end of file" in exc.msg:
+                    raise reader.error(
+                        f"{what}s: only {i} of {n_rows} declared rows "
+                        "present") from None
+                raise
+            ints = reader.to_ints(toks[:n_int], what)
+            floats = reader.to_floats(toks[n_int:n_cols], what)
+            rows.append(ints + floats)
+    return rows
 
 
 # ------------------------------------------------------------------
@@ -524,18 +521,9 @@ def read_spec_head_bc(path: str | Path) -> SpecifiedHeadFile:
     n_nodes, _ = reader.read_keyed_int()
     factor, _ = reader.read_keyed_float()
 
-    rows = reader.read_data_table(n_nodes, n_cols=4)
-    node_ids = [int(r[0]) for r in rows]
-    layers = [int(r[1]) for r in rows]
-    itscols = [int(r[2]) for r in rows]
-    heads = [float(r[3]) for r in rows]
-
-    df = pd.DataFrame({
-        "node_id": node_ids,
-        "layer": layers,
-        "itscol": itscols,
-        "head": heads,
-    })
+    rows = _read_bc_rows(reader, n_nodes, n_int=3, n_float=1,
+                         what="specified-head row")
+    df = pd.DataFrame(rows, columns=["node_id", "layer", "itscol", "head"])
 
     return SpecifiedHeadFile(
         header=header,
@@ -570,13 +558,9 @@ def read_spec_flow_bc(path: str | Path) -> SpecifiedFlowBCFile:
     factor, _ = reader.read_keyed_float()
     time_unit, _ = reader.read_keyed_value()
 
-    rows = reader.read_data_table(n_nodes, n_cols=4)
-    df = pd.DataFrame({
-        "node_id": [int(r[0]) for r in rows],
-        "layer": [int(r[1]) for r in rows],
-        "itscol": [int(r[2]) for r in rows],
-        "flow": [float(r[3]) for r in rows],
-    })
+    rows = _read_bc_rows(reader, n_nodes, n_int=3, n_float=1,
+                         what="specified-flow row")
+    df = pd.DataFrame(rows, columns=["node_id", "layer", "itscol", "flow"])
 
     return SpecifiedFlowBCFile(
         header=header,
@@ -613,14 +597,10 @@ def read_general_head_bc(path: str | Path) -> GeneralHeadBCFile:
     factc, _ = reader.read_keyed_float()
     time_unit, _ = reader.read_keyed_value()
 
-    rows = reader.read_data_table(n_nodes, n_cols=5)
-    df = pd.DataFrame({
-        "node_id": [int(r[0]) for r in rows],
-        "layer": [int(r[1]) for r in rows],
-        "itscol": [int(r[2]) for r in rows],
-        "head": [float(r[3]) for r in rows],
-        "conductance": [float(r[4]) for r in rows],
-    })
+    rows = _read_bc_rows(reader, n_nodes, n_int=3, n_float=2,
+                         what="general-head row")
+    df = pd.DataFrame(rows, columns=["node_id", "layer", "itscol", "head",
+                                     "conductance"])
 
     return GeneralHeadBCFile(
         header=header,
@@ -662,24 +642,34 @@ def read_constrained_head_bc(path: str | Path) -> ConstrainedHeadBCFile:
     tunitc, _ = reader.read_keyed_value()
 
     rows = []
-    for _ in range(n_nodes):
-        line = reader.next_data_line()
-        toks = tokenize_data_line(line)
-        name = ""
-        m = re.search(r"\s/(.+)$", line)
-        if m:
-            name = m.group(1).strip().lstrip("/").strip()
-        rows.append({
-            "node_id": int(float(toks[0])),
-            "layer": int(float(toks[1])),
-            "itscol": int(float(toks[2])),
-            "head": float(toks[3]),
-            "conductance": float(toks[4]),
-            "limiting_head": float(toks[5]),
-            "itscolf": int(float(toks[6])),
-            "max_flow": float(toks[7]),
-            "name": name,
-        })
+    what = "constrained-head row"
+    with reader.section("constrained-head table"):
+        for _ in range(n_nodes):
+            line = reader.next_data_line()
+            toks = tokenize_data_line(line)
+            if len(toks) < 8:
+                raise reader.error(
+                    f"{what}: expected 8 values but found {len(toks)}: "
+                    f"{line.strip()!r}")
+            name = ""
+            m = re.search(r"\s/(.+)$", line)
+            if m:
+                name = m.group(1).strip().lstrip("/").strip()
+            ids = reader.to_ints(toks[:3], what)
+            vals = reader.to_floats(toks[3:6], what)
+            itscolf = reader.to_ints(toks[6:7], what)[0]
+            max_flow = reader.to_floats(toks[7:8], what)[0]
+            rows.append({
+                "node_id": ids[0],
+                "layer": ids[1],
+                "itscol": ids[2],
+                "head": vals[0],
+                "conductance": vals[1],
+                "limiting_head": vals[2],
+                "itscolf": itscolf,
+                "max_flow": max_flow,
+                "name": name,
+            })
 
     return ConstrainedHeadBCFile(
         header=header,
@@ -716,12 +706,13 @@ def read_boundary_ts(path: str | Path) -> BoundaryTSFile:
     reader = IWFMFileReader(path)
     header = reader.read_header()
 
-    n_columns, _ = reader.read_keyed_int()
-    facthts, _ = reader.read_keyed_float()
-    factqts, _ = reader.read_keyed_float()
-    n_steps_update, _ = reader.read_keyed_int()
-    repeat_freq, _ = reader.read_keyed_int()
-    dss_file, _ = reader.read_keyed_value()
+    with reader.section("time-series spec"):
+        n_columns, _ = reader.read_keyed_int()
+        facthts, _ = reader.read_keyed_float()
+        factqts, _ = reader.read_keyed_float()
+        n_steps_update, _ = reader.read_keyed_int()
+        repeat_freq, _ = reader.read_keyed_int()
+        dss_file, _ = reader.read_keyed_value()
 
     spec = TimeSeriesSpec(
         n_columns=n_columns,
@@ -737,7 +728,7 @@ def read_boundary_ts(path: str | Path) -> BoundaryTSFile:
     if dss_file:
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        result.data = _read_ts_data_to_eof(reader, n_columns)
+        result.data = reader.read_ts_rows(n_columns)
 
     return result
 
@@ -810,23 +801,30 @@ def read_well_spec(path: str | Path) -> WellSpecFile:
     factlt, _ = reader.read_keyed_float()
 
     rows = []
-    for _ in range(n_wells):
-        line = reader.next_data_line()
-        toks = tokenize_data_line(line)
-        # Well name rides in the trailing "/..." comment
-        name = ""
-        m = re.search(r"\s/(.+)$", line)
-        if m:
-            name = m.group(1).strip().lstrip("/").strip()
-        rows.append({
-            "well_id": int(float(toks[0])),
-            "x": float(toks[1]),
-            "y": float(toks[2]),
-            "radius": float(toks[3]),
-            "perf_top": float(toks[4]),
-            "perf_bot": float(toks[5]),
-            "name": name,
-        })
+    with reader.section("well table"):
+        for _ in range(n_wells):
+            line = reader.next_data_line()
+            toks = tokenize_data_line(line)
+            if len(toks) < 6:
+                raise reader.error(
+                    f"well row: expected 6 values but found {len(toks)}: "
+                    f"{line.strip()!r}")
+            # Well name rides in the trailing "/..." comment
+            name = ""
+            m = re.search(r"\s/(.+)$", line)
+            if m:
+                name = m.group(1).strip().lstrip("/").strip()
+            well_id = reader.to_ints(toks[:1], "well row")[0]
+            vals = reader.to_floats(toks[1:6], "well row")
+            rows.append({
+                "well_id": well_id,
+                "x": vals[0],
+                "y": vals[1],
+                "radius": vals[2],
+                "perf_top": vals[3],
+                "perf_bot": vals[4],
+                "name": name,
+            })
 
     # Well pumping-configuration table: one row per well.
     # ID ICOLWL FRACWL IOPTWL TYPDSTWL DSTWL ICFIRIGWL ICADJWL ICWLMAX FWLMAX
@@ -836,7 +834,8 @@ def read_well_spec(path: str | Path) -> WellSpecFile:
     ]
     pump_rows: list[dict] = []
     for _ in range(n_wells):
-        line = reader.next_data_line()
+        with reader.section("well pumping configuration"):
+            line = reader.next_data_line()
         toks = tokenize_data_line(line)
         row = {col: (toks[i] if i < len(toks) else None)
                for i, col in enumerate(pump_cols)}
@@ -856,12 +855,17 @@ def read_well_spec(path: str | Path) -> WellSpecFile:
     while not reader.eof:
         try:
             line = reader.next_data_line()
-        except StopIteration:
+        except IWFMParseError:
             break
         value, keyword = split_keyed_line(line)
         kw = keyword.split()[0].upper() if keyword else ""
         if kw == "NGRP":
-            n_groups = int(value)
+            try:
+                n_groups = int(value)
+            except ValueError:
+                raise reader.error(
+                    f"expected an integer for NGRP but found {value!r}"
+                ) from None
             break
     if n_groups > 0:
         from iwfm_io.readers._element_groups import parse_element_groups
@@ -912,7 +916,8 @@ def read_elem_pump(path: str | Path,
 
     raw_rows: list[tuple[list[str], str]] = []
     for _ in range(n_sinks):
-        line = reader.next_data_line()
+        with reader.section("element pumping table"):
+            line = reader.next_data_line()
         m = re.search(r"\s/(.+)$", line)
         name = m.group(1).strip().lstrip("/").strip() if m else ""
         raw_rows.append((tokenize_data_line(line), name))
@@ -989,7 +994,7 @@ def read_ts_pumping(path: str | Path) -> TSPumpingFile:
     if spec.dss_file:
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        result.data = _read_ts_data_to_eof(reader, spec.n_columns)
+        result.data = reader.read_ts_rows(spec.n_columns)
 
     return result
 
@@ -1020,21 +1025,22 @@ def read_tile_drain(path: str | Path) -> TileDrainFile:
     factcdc, _ = reader.read_keyed_float()
     tunit_dr, _ = reader.read_keyed_value()
 
-    td_col_names = ["id", "node", "elev", "conductance", "dest_type", "dest"]
-    td_rows = reader.read_data_table(n_tile_drains, n_cols=6)
-    td_data = pd.DataFrame(
-        [
-            {
-                "id": int(r[0]),
-                "node": int(r[1]),
-                "elev": float(r[2]),
-                "conductance": float(r[3]),
-                "dest_type": int(r[4]),
-                "dest": int(r[5]),
-            }
-            for r in td_rows
-        ]
-    )
+    td_records = []
+    with reader.section("tile drain table"):
+        for _ in range(n_tile_drains):
+            r = reader.read_row(6, "tile drain row")
+            ids = reader.to_ints(r[:2], "tile drain row")
+            vals = reader.to_floats(r[2:4], "tile drain row")
+            dest = reader.to_ints(r[4:6], "tile drain row")
+            td_records.append({
+                "id": ids[0],
+                "node": ids[1],
+                "elev": vals[0],
+                "conductance": vals[1],
+                "dest_type": dest[0],
+                "dest": dest[1],
+            })
+    td_data = pd.DataFrame(td_records)
 
     # Subsurface irrigation section
     n_sub_irrig, _ = reader.read_keyed_int()
@@ -1044,23 +1050,24 @@ def read_tile_drain(path: str | Path) -> TileDrainFile:
 
     si_col_names = ["id", "node", "elev", "conductance"]
     if n_sub_irrig > 0:
-        si_rows = reader.read_data_table(n_sub_irrig, n_cols=4)
-        si_data = pd.DataFrame(
-            [
-                {
-                    "id": int(r[0]),
-                    "node": int(r[1]),
-                    "elev": float(r[2]),
-                    "conductance": float(r[3]),
-                }
-                for r in si_rows
-            ]
-        )
+        si_records = []
+        with reader.section("subsurface irrigation table"):
+            for _ in range(n_sub_irrig):
+                r = reader.read_row(4, "subsurface irrigation row")
+                ids = reader.to_ints(r[:2], "subsurface irrigation row")
+                vals = reader.to_floats(r[2:4], "subsurface irrigation row")
+                si_records.append({
+                    "id": ids[0],
+                    "node": ids[1],
+                    "elev": vals[0],
+                    "conductance": vals[1],
+                })
+        si_data = pd.DataFrame(si_records)
     else:
         si_data = pd.DataFrame(columns=si_col_names)
 
     # Hydrograph print control section
-    hyd_raw = reader.skip_to_end()
+    cursor = reader.tail_cursor()
 
     n_hydrographs = 0
     hyd_factvlou = 1.0
@@ -1068,7 +1075,6 @@ def read_tile_drain(path: str | Path) -> TileDrainFile:
     hyd_out_file = None
     hydrographs = None
     try:
-        cursor = LineCursor(hyd_raw)
         if cursor.peek_keyword() == "NOUTTD":
             n_hydrographs = int(cursor.read_keyed_value()[0])
             if cursor.peek_keyword() == "FACTVLOU":
@@ -1093,11 +1099,14 @@ def read_tile_drain(path: str | Path) -> TileDrainFile:
                 })
             if rows:
                 hydrographs = pd.DataFrame(rows)
-    except (StopIteration, ValueError, IndexError) as exc:
-        import warnings
-        warnings.warn(
-            f"Tile drain hydrograph section only partially parsed ({exc}); "
-            "unparsed entries will be missing from written output")
+    except (ValueError, IndexError) as exc:
+        if isinstance(exc, IWFMParseError) and cursor.strict:
+            raise
+        with cursor.section("tile drain hydrographs"):
+            cursor.degrade(
+                f"tile drain hydrograph section only partially parsed "
+                f"({exc}); unparsed entries will be missing from written "
+                "output")
 
     return TileDrainFile(
         header=header,
@@ -1188,10 +1197,11 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
     hydrograph_factxy = float(scalars.get("FACTXY") or 1.0)
 
     hyd_cols = ["id", "subtyp", "layer", "x", "y", "node", "name"]
-    hydrographs = _read_hydrograph_table(reader, n_hydrographs, hyd_cols)
+    with reader.section("subsidence hydrograph table"):
+        hydrographs = _read_hydrograph_table(reader, n_hydrographs, hyd_cols)
 
     # Subsidence parameter section: fully parsed into DataFrames
-    subsidence_param_raw = reader.skip_to_end()
+    _sub_cursor = reader.tail_cursor()
 
     ngroup = None
     param_factors: dict = {}
@@ -1199,28 +1209,30 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
     subsidence_params = None
     parametric_grids: list = []
     try:
-        _sub_cursor = LineCursor(subsidence_param_raw)
-        block = parse_param_block(
-            _sub_cursor,
-            param_names=["sce", "sci", "dc", "dcmin", "hc"],
-            factor_names=["fx", "fsce", "fsci", "fdc", "fdcmin", "fhc"],
-        )
-        if not _sub_cursor.eof:
-            import warnings
-            warnings.warn(
-                "Subsidence: unrecognized content after the parameter "
-                "section was not understood and will be missing from "
-                "written output")
+        with _sub_cursor.section("subsidence parameters"):
+            block = parse_param_block(
+                _sub_cursor,
+                param_names=["sce", "sci", "dc", "dcmin", "hc"],
+                factor_names=["fx", "fsce", "fsci", "fdc", "fdcmin", "fhc"],
+            )
         ngroup = block["ngroup"]
         param_factors = block["factors"]
         param_time_units = block["time_units"]
         subsidence_params = block["node_params"]
         parametric_grids = block["parametric_grids"]
-    except (StopIteration, ValueError, IndexError) as exc:
-        import warnings
-        warnings.warn(
-            f"Subsidence parameter tail only partially parsed ({exc}); "
-            "unparsed sections will be missing from written output")
+        if not _sub_cursor.eof:
+            _sub_cursor.next()
+            _sub_cursor.degrade(
+                "Subsidence: unrecognized content after the parameter "
+                "section was not understood and will be missing from "
+                "written output")
+    except (ValueError, IndexError) as exc:
+        if isinstance(exc, IWFMParseError) and _sub_cursor.strict:
+            raise
+        with _sub_cursor.section("subsidence parameters"):
+            _sub_cursor.degrade(
+                f"Subsidence parameter tail only partially parsed ({exc}); "
+                "unparsed sections will be missing from written output")
 
     return SubsidenceFile(
         header=header,

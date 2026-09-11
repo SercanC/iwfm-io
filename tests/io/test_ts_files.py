@@ -5,7 +5,6 @@ and DSS-mode IrigFrac."""
 
 import pandas as pd
 import pytest
-from pathlib import Path
 
 from tests.io.conftest import SAMPLE_MODEL, SIMULATION_DIR
 

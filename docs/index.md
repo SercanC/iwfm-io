@@ -9,8 +9,8 @@ Python file I/O, DLL wrapper, and visualization library for the **Integrated Wat
 | [Quick Start Tutorial](quickstart.md) | Install, read files, query the DLL, and make your first plot |
 | [API Reference](api-reference.md) | Full listing of all public functions and classes (incl. `iwfm_io.pest` and `iwfm_io.dss`) |
 | [Agents & Scripting Guide](agents.md) | Compact recipes for driving iwfm-io from code or AI agents |
-| [Plot Gallery](plotting.md) | 58 visualization functions across 13 modules |
-| [Example Gallery](GALLERY.md) | All 58 plots rendered from DWR's C2VSimFG v1.5 |
+| [Plot Gallery](plotting.md) | 66 visualization functions across 15 modules |
+| [Example Gallery](GALLERY.md) | All plots rendered from DWR's C2VSimFG v1.5 |
 | [Package Comparison](COMPARISON.md) | iwfm-io vs PyWFM vs cfbrush/iwfm |
 | [TEST_PLOTS_RESULTS.md](TEST_PLOTS_RESULTS.md) | Detailed plot-test pass/fail results |
 | [DLL_INQUIRY_MODE_LIMITS.md](DLL_INQUIRY_MODE_LIMITS.md) | DLL inquiry-mode limitations and file-based workarounds |
@@ -22,7 +22,7 @@ Python file I/O, DLL wrapper, and visualization library for the **Integrated Wat
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│  iwfm_io.plots    58 matplotlib visualization fns     │
+│  iwfm_io.plots    66 matplotlib visualization fns     │
 ├───────────────────────────────────────────────────────┤
 │  iwfm_io.pest     PEST(++) calibration support        │
 │                   obs codec · IES loader · stats ·    │

@@ -2,7 +2,6 @@
 layout, 7-token hydrograph rows, FCHYDOUTFL presence, title padding,
 TS precision, TUNITZ fallback, NaN guards, and annotation handling."""
 
-import warnings
 
 import pandas as pd
 import pytest
@@ -97,7 +96,7 @@ class TestHydrographSevenTokens:
             "   1.0   / FACTXY\n"
             "         / SUBHYDOUTFL\n"
             "   153  0  2  624221.7  4190333.7  0  InSAR01  / InSAR near X\n"
-            "   154  1  1  0  0  4123  OBS2\n"
+            "   154  1  1  4123  OBS2\n"   # type 1: NODE then the name
             "   0     / NGROUP\n"
             "   1.0  1.0  1.0  1.0  1.0  1.0\n"
             "   1  1e-05  5e-05  10.0  2.0  99999.0\n"
@@ -195,7 +194,7 @@ class TestNanGuards:
 
         w = IWFMFileWriter(tmp_output / "x.dat")
         df = pd.DataFrame({"a": [1, 2], "b": [1.0, float("nan")]})
-        with pytest.raises(ValueError, match="NaN"):
+        with pytest.raises(ValueError, match="NaN|missing value"):
             write_table_rows(w, df, ["a", "b"])
 
     def test_elem_pump_middle_nan_raises(self, tmp_output):

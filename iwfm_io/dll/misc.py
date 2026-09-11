@@ -1,6 +1,9 @@
 """IWFM miscellaneous exports: version info, type ID enums, and time utilities."""
 
-from ctypes import c_int, c_char, c_double, byref
+from ctypes import c_int, c_char, byref
+
+from ._proxy import _DLL_LOCK
+from ._validate import check_date, check_int, check_interval, check_window
 
 from ._errors import _check_status
 
@@ -324,9 +327,12 @@ def get_n_intervals(dll, begin_date, end_date, interval):
     interval : str
         Time step string (e.g. ``"1MON"``).
     """
+    begin_date, end_date = check_window(begin_date, end_date)
+    interval = check_interval(interval)
     b_enc = begin_date.encode("ascii")
     e_enc = end_date.encode("ascii")
     i_enc = interval.encode("ascii")
+    # both dates are validated MM/DD/YYYY_HH:MM, hence the same length
     c_len_date = c_int(len(b_enc))
     c_len_intv = c_int(len(i_enc))
     c_begin = (c_char * len(b_enc))(*b_enc)
@@ -334,10 +340,11 @@ def get_n_intervals(dll, begin_date, end_date, interval):
     c_intv = (c_char * len(i_enc))(*i_enc)
     n = c_int(0)
     iStat = c_int(0)
-    dll.IW_GetNIntervals(
-        c_begin, c_end, c_len_date, c_intv, c_len_intv, byref(n), byref(iStat),
-    )
-    _check_status(iStat, dll)
+    with _DLL_LOCK:
+        dll.IW_GetNIntervals(
+            c_begin, c_end, c_len_date, c_intv, c_len_intv, byref(n), byref(iStat),
+        )
+        _check_status(iStat, dll)
     return n.value
 
 
@@ -346,24 +353,30 @@ def increment_time(dll, date_time, interval, count=1):
 
     Returns the new date-time string.
     """
+    date_time = check_date("date_time", date_time)
+    interval = check_interval(interval)
+    count = check_int("count", count)
     dt_enc = date_time.encode("ascii")
     iv_enc = interval.encode("ascii")
     c_len_dt = c_int(len(dt_enc))
     c_len_iv = c_int(len(iv_enc))
-    # date-time is INOUT — needs mutable buffer
-    dt_buf = (c_char * len(dt_enc))(*dt_enc)
+    # date-time is INOUT: keep headroom beyond the 16-character stamp
+    dt_buf = (c_char * 32)(*dt_enc)
     iv_buf = (c_char * len(iv_enc))(*iv_enc)
     c_count = c_int(count)
     iStat = c_int(0)
-    dll.IW_IncrementTime(
-        c_len_dt, dt_buf, c_len_iv, iv_buf, c_count, byref(iStat),
-    )
-    _check_status(iStat, dll)
+    with _DLL_LOCK:
+        dll.IW_IncrementTime(
+            c_len_dt, dt_buf, c_len_iv, iv_buf, c_count, byref(iStat),
+        )
+        _check_status(iStat, dll)
     return bytes(dt_buf).decode("ascii").rstrip("\x00 ")
 
 
 def is_time_greater_than(dll, dt1, dt2):
     """Return True if *dt1* is later than *dt2*."""
+    dt1 = check_date("dt1", dt1)
+    dt2 = check_date("dt2", dt2)
     enc1 = dt1.encode("ascii")
     enc2 = dt2.encode("ascii")
     length = max(len(enc1), len(enc2))
@@ -372,6 +385,7 @@ def is_time_greater_than(dll, dt1, dt2):
     buf2 = (c_char * length)(*enc2.ljust(length))
     result = c_int(0)
     iStat = c_int(0)
-    dll.IW_IsTimeGreaterThan(c_len, buf1, buf2, byref(result), byref(iStat))
-    _check_status(iStat, dll)
+    with _DLL_LOCK:
+        dll.IW_IsTimeGreaterThan(c_len, buf1, buf2, byref(result), byref(iStat))
+        _check_status(iStat, dll)
     return result.value == 1

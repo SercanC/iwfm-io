@@ -8,8 +8,8 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from . import (build_triangulation, plot_contour_map, overlay_streams,
-               overlay_grid, excel_date_to_datetime, savefig,
+from . import (plot_contour_map, overlay_streams,
+               excel_date_to_datetime, savefig,
                _has_df_methods)
 
 
@@ -21,8 +21,13 @@ def _compute_layer_head_stats(model, layer, begin_date, end_date):
     """
     if _has_df_methods(model):
         hdf = model.heads_df(layer, begin_date, end_date)
+        if len(hdf) == 0:
+            raise ValueError(
+                f"no head output between {begin_date} and {end_date} "
+                f"(layer {layer}) -- check the dates against the model's "
+                "output period")
         # Convert DatetimeIndex to Excel serial dates for compatibility
-        from datetime import datetime, timedelta
+        from datetime import datetime
         base = datetime(1899, 12, 30)
         dates = np.array([(d.to_pydatetime() - base).total_seconds() / 86400.0
                           for d in hdf.index])
@@ -65,8 +70,12 @@ def plot_head_trend_map(model, layer, begin_date, end_date,
     t_years = np.array([(d - dt_objs[0]).total_seconds() / (365.25 * 86400)
                         for d in dt_objs])
 
+    if n_times < 3:
+        raise ValueError(
+            f"a head trend needs at least 3 output steps, got {n_times} "
+            f"between {begin_date} and {end_date}")
     # Linear regression at each node
-    slopes = np.zeros(n_nodes)
+    slopes = np.full(n_nodes, np.nan)
     for i in range(n_nodes):
         valid = np.isfinite(heads[i])
         if valid.sum() > 2:
@@ -74,7 +83,10 @@ def plot_head_trend_map(model, layer, begin_date, end_date,
             slopes[i] = p[0]
 
     # Symmetric color scale
-    vmax = np.percentile(np.abs(slopes[np.isfinite(slopes)]), 95)
+    finite = np.isfinite(slopes)
+    if not finite.any():
+        raise ValueError("no node has enough finite heads for a trend")
+    vmax = np.percentile(np.abs(slopes[finite]), 95)
 
     fig, ax, cs, cb = plot_contour_map(
         model, slopes, ax=ax, cmap="RdBu", levels=20,
@@ -150,14 +162,21 @@ def plot_drought_drawdown_rate(model, layer, begin_date, end_date,
         dt_objs = excel_date_to_datetime(dates)
         t_years = np.array([(d - dt_objs[0]).total_seconds() / (365.25 * 86400)
                             for d in dt_objs])
-        # Find peak and end for each node
-        peak_idx = np.argmax(heads, axis=1)
-        drawdown_rate = np.zeros(n_nodes)
+        # Find peak and end for each node (NaN-safe: missing steps are
+        # skipped, an all-NaN node gets NaN)
+        drawdown_rate = np.full(n_nodes, np.nan)
         for i in range(n_nodes):
-            pi = peak_idx[i]
-            trough_idx = pi + np.argmin(heads[i, pi:])
+            row = heads[i]
+            if not np.isfinite(row).any():
+                continue
+            pi = int(np.nanargmax(row))
+            tail = row[pi:]
+            if not np.isfinite(tail).any():
+                continue
+            trough_idx = pi + int(np.nanargmin(tail))
+            drawdown_rate[i] = 0.0
             if trough_idx > pi and t_years[trough_idx] > t_years[pi]:
-                drawdown_rate[i] = (heads[i, pi] - heads[i, trough_idx]) / \
+                drawdown_rate[i] = (row[pi] - row[trough_idx]) / \
                                    (t_years[trough_idx] - t_years[pi])
     else:
         dt_objs = excel_date_to_datetime(dates)
@@ -213,8 +232,13 @@ def plot_recovery_lag_map(model, layer, begin_date, end_date,
     recovery_time = np.full(n_nodes, np.nan)
     for i in range(n_nodes):
         h = heads[i]
-        peak_idx = np.argmax(h)
-        trough_idx = peak_idx + np.argmin(h[peak_idx:])
+        if not np.isfinite(h).any():
+            continue
+        peak_idx = int(np.nanargmax(h))
+        tail = h[peak_idx:]
+        if not np.isfinite(tail).any():
+            continue
+        trough_idx = peak_idx + int(np.nanargmin(tail))
         if trough_idx <= peak_idx:
             continue
         drop = h[peak_idx] - h[trough_idx]
@@ -228,9 +252,13 @@ def plot_recovery_lag_map(model, layer, begin_date, end_date,
             rec_idx = trough_idx + recovered[0]
             recovery_time[i] = t_years[rec_idx] - t_years[trough_idx]
 
-    # Replace NaN with max for visualization
-    max_time = np.nanmax(recovery_time) if np.any(np.isfinite(recovery_time)) else 1.0
-    display = np.where(np.isfinite(recovery_time), recovery_time, max_time)
+    # nodes that never recover (or never declined) stay NaN: they are
+    # masked out of the contour instead of being drawn at the maximum
+    if not np.isfinite(recovery_time).any():
+        raise ValueError(
+            "no node recovers within the window -- nothing to contour "
+            f"({begin_date} to {end_date}, threshold {recovery_threshold})")
+    display = recovery_time
 
     fig, ax, cs, cb = plot_contour_map(
         model, display, ax=ax, cmap="YlGnBu", levels=20,
@@ -245,18 +273,3 @@ def plot_recovery_lag_map(model, layer, begin_date, end_date,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        bd, ed = "10/01/1990_24:00", "09/30/2000_24:00"
-        plot_head_trend_map(m, 1, bd, ed, save_path="head_trend.png")
-        plot_seasonal_amplitude_map(m, 1, bd, ed, save_path="seasonal_amp.png")
-        plot_drought_drawdown_rate(m, 1, bd, ed, save_path="drought_dd.png")
-        plot_recovery_lag_map(m, 1, bd, ed, save_path="recovery_lag.png")
-    plt.show()

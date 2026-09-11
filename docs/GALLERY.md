@@ -1,6 +1,6 @@
 # Example Plot Gallery — C2VSimFG v1.5
 
-Every plot below was produced by `iwfm.plots` from **C2VSimFG v1.5**,
+Every plot below was produced by `iwfm_io.plots` from **C2VSimFG v1.5**,
 DWR's fine-grid groundwater–surface water model of California's
 Central Valley (30,179 nodes, 32,537 elements, 4 layers, water years
 1974–2021). Static maps and charts come from the 58-function DLL test

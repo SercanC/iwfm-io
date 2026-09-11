@@ -133,7 +133,7 @@ class TestApplyParametersEndToEnd:
             path=str(sm_path.relative_to(run)),
             table="reach_params", column="conductance",
             values_file="mult_cond.csv", key_cols=("stream_node_id",),
-            lower=1e-6)])
+            lower=1e-6, base_dir=".")])
         assert log.iloc[0]["n_applied"] == 4
         assert (run / "apply_parameters_log.csv").exists()
 

@@ -10,7 +10,6 @@ baseline Results instead (the full exe pass lives in the opt-in
 """
 
 import json
-import os
 import shutil
 from pathlib import Path
 
@@ -20,8 +19,7 @@ import pytest
 
 SAMPLE = Path(__file__).resolve().parents[2] / ".assets" / "sample_model"
 
-pytestmark = pytest.mark.skipif(
-    not SAMPLE.is_dir(), reason="sample model not available")
+pytestmark = pytest.mark.sample_model
 
 
 @pytest.fixture(scope="module")
@@ -58,6 +56,19 @@ def template(obs, tmp_path_factory):
         SAMPLE, obs, dest, parameters=("kh", "ss", "sy", "strk"),
         ies_num_reals=10)
     return qs
+
+
+@pytest.fixture
+def template_copy(template, tmp_path):
+    """A disposable copy of the module-scoped template.
+
+    Tests that apply parameters or otherwise write into the template
+    directory must use this — the shared ``template`` stays pristine.
+    """
+    import dataclasses
+    dest = tmp_path / "template"
+    shutil.copytree(template.template, dest)
+    return dataclasses.replace(template, template=dest)
 
 
 class TestSetup:
@@ -114,53 +125,47 @@ class TestSetup:
 
 
 class TestForwardRunSteps:
-    def test_apply_step_nested_parametric_table(self, template):
+    def test_apply_step_nested_parametric_table(self, template_copy):
         """The generated apply actions modify the parametric-grid kh
-        (nested table path) and the stream conductance in place."""
+        (nested table path) and the stream conductance, and applying
+        twice does NOT compound: multipliers act on the pristine
+        ``.base`` snapshot, so x2 applied twice is still x2."""
         from iwfm_io.pest.apply import ApplyAction, apply_parameters
         from iwfm_io.readers.groundwater import read_gw_main
         from iwfm_io.readers.stream import read_stream_main
 
-        d = template.template
+        d = template_copy.template
         actions = [ApplyAction(**a)
                    for a in json.loads((d / "_apply_actions.json")
                                        .read_text())]
         gw_path = d / "model" / "Simulation" / "GW" / "GW_MAIN.dat"
-        st_path = d / "model" / "Simulation" / "Stream" / \
-            "Stream_MAIN.dat"
+        st_path = d / "model" / "Simulation" / "Stream" /             "Stream_MAIN.dat"
         kh0 = read_gw_main(gw_path).parametric_grids[0]["params"]["kh"]
         cond0 = read_stream_main(st_path).reach_params["conductance"]
 
         mult = pd.read_csv(d / "mult_kh.csv")
         mult["value"] = 2.0
         mult.to_csv(d / "mult_kh.csv", index=False)
-        try:
-            log = apply_parameters(d, actions)
-            assert set(log["column"]) == {"kh", "ss", "sy",
-                                          "conductance"}
-            gw = read_gw_main(gw_path)
-            kh1 = gw.parametric_grids[0]["params"]["kh"]
-            assert np.allclose(kh1.values, kh0.values * 2.0)
-            # ×1 multipliers leave the other tables unchanged
-            cond1 = read_stream_main(st_path).reach_params["conductance"]
-            assert np.allclose(cond1.values, cond0.values)
-            # referenced paths survive the rewrite: re-apply parses fine
-            apply_parameters(d, actions)
-        finally:
-            mult["value"] = 0.5
-            mult.to_csv(d / "mult_kh.csv", index=False)
-            apply_parameters(d, actions)
-            mult["value"] = 1.0
-            mult.to_csv(d / "mult_kh.csv", index=False)
+        log = apply_parameters(d, actions)
+        assert set(log["column"]) == {"kh", "ss", "sy", "conductance"}
+        kh1 = read_gw_main(gw_path).parametric_grids[0]["params"]["kh"]
+        assert np.allclose(kh1.values, kh0.values * 2.0)
+        # x1 multipliers leave the other tables unchanged
+        cond1 = read_stream_main(st_path).reach_params["conductance"]
+        assert np.allclose(cond1.values, cond0.values)
+        # a second apply of the same multiplier must not compound (C1)
+        apply_parameters(d, actions)
+        kh2 = read_gw_main(gw_path).parametric_grids[0]["params"]["kh"]
+        assert np.allclose(kh2.values, kh0.values * 2.0)
 
-    def test_rewritten_mains_keep_working_dir_paths(self, template):
+    def test_rewritten_mains_keep_working_dir_paths(self, template_copy):
         """After repeated applies, referenced paths stay relative to the
         simulation working directory (no path accumulation)."""
         import re
 
         from iwfm_io.pest.apply import ApplyAction, apply_parameters
 
-        d = template.template
+        d = template_copy.template
         actions = [ApplyAction(**a)
                    for a in json.loads((d / "_apply_actions.json")
                                        .read_text())]
@@ -173,14 +178,14 @@ class TestForwardRunSteps:
         assert re.search(r"(?i)^\s*Stream[/\\]StreamInflow\.dat\s*/",
                          line), line
 
-    def test_extract_step_reproduces_baseline(self, template,
+    def test_extract_step_reproduces_baseline(self, template_copy,
                                               monkeypatch):
         """run_extract on the baseline hydrograph output reproduces the
         setup-time simulated values exactly."""
         from iwfm_io.pest import ObsFileSpec
         from iwfm_io.pest.quickstart import run_extract
 
-        d = template.template
+        d = template_copy.template
         results = d / "model" / "Results"
         shutil.copy(SAMPLE / "Results" / "GWHyd.out",
                     results / "GWHyd.out")
@@ -189,7 +194,7 @@ class TestForwardRunSteps:
         idx = pd.read_csv(d / "_obs_index.csv")
         out = ObsFileSpec(list(idx["obsnme"])).read_output(
             d / "iwfm_cal_heads.pout")
-        expected = template.paired.set_index("obsnme")["simulated"]
+        expected = template_copy.paired.set_index("obsnme")["simulated"]
         assert np.allclose(out.reindex(expected.index).values,
                            expected.values, rtol=1e-6)
 

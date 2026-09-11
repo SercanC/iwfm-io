@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 try:
@@ -20,9 +19,10 @@ try:
 except ImportError:
     HAS_GEO = False
 
-from iwfm_io._parser import IWFMFileReader
+from iwfm_io._parser import IWFMFileReader, IWFMParseError
+from iwfm_io._strict import strict_mode
 from iwfm_io._tokens import tokenize_data_line
-from iwfm_io.models.base import ConversionFactor, FileHeader
+from iwfm_io.models.base import ConversionFactor
 from iwfm_io.models.preprocessor import (
     ElementFile,
     LakeGeomFile,
@@ -58,10 +58,21 @@ def read_nodes(path: str | Path) -> NodeFile:
     factor_val, kw = reader.read_keyed_float()
     factor = ConversionFactor(value=factor_val, keyword=kw)
 
-    rows = reader.read_data_table(n_nodes, n_cols=3)
-    node_ids = [int(r[0]) for r in rows]
-    xs = [float(r[1]) for r in rows]
-    ys = [float(r[2]) for r in rows]
+    node_ids, xs, ys = [], [], []
+    with reader.section("node table"):
+        for i in range(n_nodes):
+            try:
+                r = reader.read_row(3, "node row")
+            except IWFMParseError as exc:
+                if reader.eof and "end of file" in exc.msg:
+                    raise reader.error(
+                        f"node table has only {i} of {n_nodes} declared "
+                        "(ND) rows") from None
+                raise
+            node_ids.append(reader.to_ints(r[:1], "node row")[0])
+            x, y = reader.to_floats(r[1:3], "node row")
+            xs.append(x)
+            ys.append(y)
 
     df = pd.DataFrame({"node_id": node_ids, "x": xs, "y": ys})
 
@@ -109,13 +120,24 @@ def read_elements(path: str | Path, node_file: NodeFile | None = None) -> Elemen
     subregions = pd.DataFrame({"subregion_id": sub_ids, "name": sub_names})
 
     # Read element table: IE  IDE(1) IDE(2) IDE(3) IDE(4) IRGE
-    rows = reader.read_data_table(n_elements, n_cols=6)
-    elem_ids = [int(r[0]) for r in rows]
-    n1 = [int(r[1]) for r in rows]
-    n2 = [int(r[2]) for r in rows]
-    n3 = [int(r[3]) for r in rows]
-    n4 = [int(r[4]) for r in rows]
-    subs = [int(r[5]) for r in rows]
+    rows = []
+    with reader.section("element table"):
+        for i in range(n_elements):
+            try:
+                r = reader.read_row(6, "element row")
+            except IWFMParseError as exc:
+                if reader.eof and "end of file" in exc.msg:
+                    raise reader.error(
+                        f"element table has only {i} of {n_elements} "
+                        "declared (NE) rows") from None
+                raise
+            rows.append(reader.to_ints(r[:6], "element row"))
+    elem_ids = [r[0] for r in rows]
+    n1 = [r[1] for r in rows]
+    n2 = [r[2] for r in rows]
+    n3 = [r[3] for r in rows]
+    n4 = [r[4] for r in rows]
+    subs = [r[5] for r in rows]
 
     df = pd.DataFrame({
         "element_id": elem_ids,
@@ -193,26 +215,33 @@ def read_strata(path: str | Path,
     # Read n_nodes rows when the caller supplies the count (matching
     # how the model reads); otherwise read until EOF/non-numeric line.
     data_rows = []
-    while not reader.eof:
-        if n_nodes is not None and len(data_rows) >= n_nodes:
-            break
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        tokens = tokenize_data_line(line)
-        if not tokens or not tokens[0].lstrip("-").isdigit():
-            break
-        reader.next_data_line()
-        if len(tokens) < n_cols:
-            raise ValueError(
-                f"Stratigraphy row for node {tokens[0]} has "
-                f"{len(tokens)} of {n_cols} expected values")
-        row = [int(tokens[0])] + [float(t) for t in tokens[1:n_cols]]
-        data_rows.append(row)
-    if n_nodes is not None and len(data_rows) != n_nodes:
-        raise ValueError(
-            f"Stratigraphy table has {len(data_rows)} rows but "
-            f"n_nodes={n_nodes} was expected")
+    with reader.section("stratigraphy table"):
+        while not reader.eof:
+            if n_nodes is not None and len(data_rows) >= n_nodes:
+                break
+            line = reader.peek_data_line()
+            if line is None:
+                break
+            tokens = tokenize_data_line(line)
+            if not tokens or not tokens[0].lstrip("-").isdigit():
+                reader.next_data_line()
+                reader.degrade(
+                    "stratigraphy row: expected a node id but found "
+                    f"{line.strip()[:60]!r}; the rest of the file was not "
+                    "read")
+                break
+            reader.next_data_line()
+            if len(tokens) < n_cols:
+                raise reader.error(
+                    f"Stratigraphy row for node {tokens[0]} has "
+                    f"{len(tokens)} of {n_cols} expected values")
+            row = [int(tokens[0])] + reader.to_floats(
+                tokens[1:n_cols], f"stratigraphy row for node {tokens[0]}")
+            data_rows.append(row)
+        if n_nodes is not None and len(data_rows) != n_nodes:
+            raise reader.error(
+                f"Stratigraphy table has {len(data_rows)} rows but "
+                f"n_nodes={n_nodes} was expected")
 
     df = pd.DataFrame(data_rows, columns=col_names)
     df["node_id"] = df["node_id"].astype(int)
@@ -256,16 +285,20 @@ def read_stream_geom(path: str | Path, node_file: NodeFile | None = None) -> Str
     for _ in range(n_reaches):
         # Reach header line: IRHID  NRD  IDWN  NAME (name may be
         # multiple words; a trailing "/ comment" is stripped)
-        line = reader.next_data_line()
-        # keep the raw name substring — re-joining tokens would
-        # collapse internal double spaces, which changes the name IWFM
-        # stores in the binary (observed in C2VSimFG reach names)
-        body = re.split(r"\s+/", line, maxsplit=1)[0]
-        parts = body.split(None, 3)
-        reach_id = int(parts[0])
-        n_nodes_in_reach = int(parts[1])
-        outflow_dest = int(parts[2])
-        name = parts[3].rstrip() if len(parts) > 3 else ""
+        with reader.section("reach table"):
+            line = reader.next_data_line()
+            # keep the raw name substring — re-joining tokens would
+            # collapse internal double spaces, which changes the name
+            # IWFM stores in the binary (observed in C2VSimFG reach names)
+            body = re.split(r"\s+/", line, maxsplit=1)[0]
+            parts = body.split(None, 3)
+            if len(parts) < 3:
+                raise reader.error(
+                    "reach row: expected IRHID NRD IDWN [NAME] but found "
+                    f"{line.strip()!r}")
+            reach_id, n_nodes_in_reach, outflow_dest = reader.to_ints(
+                parts[:3], "reach row")
+            name = parts[3].rstrip() if len(parts) > 3 else ""
         reach_data.append({
             "reach_id": reach_id,
             "n_nodes": n_nodes_in_reach,
@@ -274,16 +307,15 @@ def read_stream_geom(path: str | Path, node_file: NodeFile | None = None) -> Str
         })
 
         # Stream node lines: ISTRMND  IGWND
-        for _ in range(n_nodes_in_reach):
-            node_line = reader.next_data_line()
-            node_tokens = tokenize_data_line(node_line)
-            stream_node_id = int(node_tokens[0])
-            gw_node_id = int(node_tokens[1])
-            stream_nodes.append({
-                "stream_node_id": stream_node_id,
-                "reach_id": reach_id,
-                "gw_node_id": gw_node_id,
-            })
+        with reader.section(f"reach {reach_id} stream nodes"):
+            for _ in range(n_nodes_in_reach):
+                stream_node_id, gw_node_id = reader.read_ints(
+                    2, "stream node row")
+                stream_nodes.append({
+                    "stream_node_id": stream_node_id,
+                    "reach_id": reach_id,
+                    "gw_node_id": gw_node_id,
+                })
 
     reaches_df = pd.DataFrame(reach_data)
     nodes_df = pd.DataFrame(stream_nodes)
@@ -315,30 +347,30 @@ def read_stream_geom(path: str | Path, node_file: NodeFile | None = None) -> Str
     # Then (NRTB-1) continuation lines: HRTB QRTB
     total_stream_nodes = len(stream_nodes)
     rating_rows = []
-    for _ in range(total_stream_nodes):
-        # First line has stream_node_id, bottom_elev, first stage/flow pair
-        line = reader.next_data_line()
-        tokens = tokenize_data_line(line)
-        sn_id = int(tokens[0])
-        bottom_elev = float(tokens[1])
-        stage = float(tokens[2])
-        flow = float(tokens[3])
-        rating_rows.append({
-            "stream_node_id": sn_id,
-            "bottom_elev": bottom_elev,
-            "stage": stage,
-            "flow": flow,
-        })
-        # Remaining rating table points
-        for _ in range(n_rating_points - 1):
-            cont_line = reader.next_data_line()
-            cont_tokens = tokenize_data_line(cont_line)
+    with reader.section("rating tables"):
+        for _ in range(total_stream_nodes):
+            # First line has stream_node_id, bottom_elev, first
+            # stage/flow pair
+            tokens = reader.read_row(4, "rating table row")
+            sn_id = reader.to_ints(tokens[:1], "rating table row")[0]
+            bottom_elev, stage, flow = reader.to_floats(
+                tokens[1:4], "rating table row")
             rating_rows.append({
                 "stream_node_id": sn_id,
                 "bottom_elev": bottom_elev,
-                "stage": float(cont_tokens[0]),
-                "flow": float(cont_tokens[1]),
+                "stage": stage,
+                "flow": flow,
             })
+            # Remaining rating table points
+            for _ in range(n_rating_points - 1):
+                stage, flow = reader.read_floats(
+                    2, f"rating table row for stream node {sn_id}")
+                rating_rows.append({
+                    "stream_node_id": sn_id,
+                    "bottom_elev": bottom_elev,
+                    "stage": stage,
+                    "flow": flow,
+                })
 
     rating_df = pd.DataFrame(rating_rows)
 
@@ -347,12 +379,15 @@ def read_stream_geom(path: str | Path, node_file: NodeFile | None = None) -> Str
     # interacts with the aquifer).
     n_partial, _ = reader.read_keyed_int()
     partial_rows = []
-    for _ in range(n_partial):
-        tokens = tokenize_data_line(reader.next_data_line())
-        partial_rows.append({
-            "stream_node_id": int(tokens[0]),
-            "fraction": float(tokens[1]),
-        })
+    with reader.section("partial interaction table"):
+        for _ in range(n_partial):
+            tokens = reader.read_row(2, "partial interaction row")
+            partial_rows.append({
+                "stream_node_id": reader.to_ints(
+                    tokens[:1], "partial interaction row")[0],
+                "fraction": reader.to_floats(
+                    tokens[1:2], "partial interaction row")[0],
+            })
     partial_df = pd.DataFrame(partial_rows) if partial_rows else None
 
     return StreamGeomFile(
@@ -391,29 +426,32 @@ def read_lake_geom(path: str | Path) -> LakeGeomFile:
     n_lakes, _ = reader.read_keyed_int()
 
     lake_data = []
-    for _ in range(n_lakes):
-        # First line: LAKE_ID  TYPDST  DST  NELAKE  IELAKE(1)
-        line = reader.next_data_line()
-        tokens = tokenize_data_line(line)
-        lake_id = int(tokens[0])
-        dest_type = int(tokens[1])
-        dest_id = int(tokens[2])
-        n_elements = int(tokens[3])
-        elements = [int(t) for t in tokens[4:]]
+    with reader.section("lake table"):
+        for _ in range(n_lakes):
+            # First line: LAKE_ID  TYPDST  DST  NELAKE  IELAKE(1)
+            tokens = reader.read_row(4, "lake row")
+            lake_id, dest_type, dest_id, n_elements = reader.to_ints(
+                tokens[:4], "lake row")
+            elements = reader.to_ints(tokens[4:], f"lake {lake_id} elements")
 
-        # Remaining element IDs on continuation lines (one or more
-        # element ids per line)
-        while len(elements) < n_elements:
-            cont_tokens = tokenize_data_line(reader.next_data_line())
-            elements.extend(int(t) for t in cont_tokens)
+            # Remaining element IDs on continuation lines (one or more
+            # element ids per line)
+            while len(elements) < n_elements:
+                cont_tokens = reader.read_row(1, f"lake {lake_id} elements")
+                elements.extend(reader.to_ints(
+                    cont_tokens, f"lake {lake_id} elements"))
+            if len(elements) > n_elements:
+                raise reader.error(
+                    f"lake {lake_id} lists {len(elements)} elements but "
+                    f"declares NELAKE={n_elements}")
 
-        lake_data.append({
-            "lake_id": lake_id,
-            "dest_type": dest_type,
-            "dest_id": dest_id,
-            "n_elements": n_elements,
-            "elements": elements,
-        })
+            lake_data.append({
+                "lake_id": lake_id,
+                "dest_type": dest_type,
+                "dest_id": dest_id,
+                "n_elements": n_elements,
+                "elements": elements,
+            })
 
     df = pd.DataFrame(lake_data)
     return LakeGeomFile(header=header, n_lakes=n_lakes, data=df)
@@ -426,6 +464,7 @@ def read_lake_geom(path: str | Path) -> LakeGeomFile:
 def read_preprocessor_main(
     path: str | Path,
     follow_references: bool = True,
+    strict: bool | None = None,
 ) -> PreprocessorMain:
     """Read the preprocessor main input file.
 
@@ -434,11 +473,19 @@ def read_preprocessor_main(
     path : str or Path
     follow_references : bool
         If True, also read referenced child files (Element, Node, etc.).
+    strict : bool, optional
+        Reader mode for this file and its children: ``True`` raises
+        :class:`~iwfm_io.IWFMParseError` on malformed input, ``False``
+        warns and keeps what parsed.  ``None`` (default) uses the mode
+        in effect (see :func:`iwfm_io.strict_mode`; strict by default).
 
     Returns
     -------
     PreprocessorMain
     """
+    if strict is not None:
+        with strict_mode(strict):
+            return read_preprocessor_main(path, follow_references)
     reader = IWFMFileReader(path)
     header = reader.read_header()
     base_dir = Path(path).parent
@@ -462,24 +509,26 @@ def read_preprocessor_main(
     # File paths (6 entries)
     path_keys = ["binary_output", "element", "node", "strata", "stream", "lake"]
     file_paths: dict[str, str | None] = {}
-    for key in path_keys:
-        fp, kw = reader.read_keyed_path(base_dir)
-        file_paths[key] = fp
+    with reader.section("file list"):
+        for key in path_keys:
+            fp, kw = reader.read_keyed_path(base_dir)
+            file_paths[key] = fp
 
     # Config values
     config: dict = {}
-    kout, _ = reader.read_keyed_int()
-    config["kout"] = kout
-    kdeb, _ = reader.read_keyed_int()
-    config["kdeb"] = kdeb
-    factltou, _ = reader.read_keyed_float()
-    config["factltou"] = factltou
-    unitltou, _ = reader.read_keyed_value()
-    config["unitltou"] = unitltou
-    factarou, _ = reader.read_keyed_float()
-    config["factarou"] = factarou
-    unitarou, _ = reader.read_keyed_value()
-    config["unitarou"] = unitarou
+    with reader.section("output control"):
+        kout, _ = reader.read_keyed_int()
+        config["kout"] = kout
+        kdeb, _ = reader.read_keyed_int()
+        config["kdeb"] = kdeb
+        factltou, _ = reader.read_keyed_float()
+        config["factltou"] = factltou
+        unitltou, _ = reader.read_keyed_value()
+        config["unitltou"] = unitltou
+        factarou, _ = reader.read_keyed_float()
+        config["factarou"] = factarou
+        unitarou, _ = reader.read_keyed_value()
+        config["unitarou"] = unitarou
 
     result = PreprocessorMain(
         header=header,

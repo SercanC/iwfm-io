@@ -247,7 +247,13 @@ def apply_kriging_factors(factors, pp_values, log: bool = False
         Value per ``node_id``.
     """
     vals = pd.Series(pp_values).astype(float)
-    missing = set(factors["pp_id"].astype(str)) - set(vals.index.astype(str))
+    vals.index = vals.index.astype(str)
+    if not np.isfinite(vals.to_numpy()).all():
+        bad = vals.index[~np.isfinite(vals.to_numpy())].tolist()
+        raise ValueError(
+            f"pp_values has NaN/inf for pilot point(s) {bad[:3]}")
+    pp_ids = factors["pp_id"].astype(str)
+    missing = set(pp_ids) - set(vals.index)
     if missing:
         raise KeyError(
             f"pp_values missing for {len(missing)} pilot point(s), "
@@ -256,7 +262,13 @@ def apply_kriging_factors(factors, pp_values, log: bool = False
         if (vals <= 0).any():
             raise ValueError("log kriging requires positive pilot values")
         vals = np.log10(vals)
-    v = factors["pp_id"].map(vals).astype(float) * factors["weight"]
+    wsum = factors.groupby("node_id")["weight"].sum()
+    off = wsum[(wsum - 1.0).abs() > 1e-6]
+    if len(off):
+        raise ValueError(
+            f"kriging weights do not sum to 1 for {len(off)} node(s), "
+            f"e.g. {off.head(3).to_dict()}")
+    v = pp_ids.map(vals).astype(float) * factors["weight"]
     out = v.groupby(factors["node_id"]).sum()
     if log:
         out = 10.0**out

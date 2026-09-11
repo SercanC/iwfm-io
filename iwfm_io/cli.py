@@ -142,6 +142,18 @@ def _cmd_pest_analyze(args) -> int:
 
 
 # --------------------------------------------------------------- parser
+def _add_traceback_everywhere(parser):
+    """Accept ``--traceback`` after any subcommand too (the error hint
+    tells users to re-run with it, wherever they typed the command)."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for sp in action.choices.values():
+                sp.add_argument("--traceback", action="store_true",
+                                default=argparse.SUPPRESS,
+                                help=argparse.SUPPRESS)
+                _add_traceback_everywhere(sp)
+
+
 def _build_parser() -> "argparse.ArgumentParser":
     parser = argparse.ArgumentParser(
         prog="iwfm-io",
@@ -246,6 +258,7 @@ def _build_parser() -> "argparse.ArgumentParser":
                         "JSON file")
     p.set_defaults(func=_cmd_pest_analyze)
 
+    _add_traceback_everywhere(parser)
     return parser
 
 

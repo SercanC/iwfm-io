@@ -15,9 +15,10 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -48,6 +49,62 @@ def _maybe_day_index(df, day_index):
     out = df.copy(deep=False)
     out.index = iwfm_day(df.index)
     return out
+
+
+
+_BUDGET_TYPE_CODES = {
+    # IWFM DLL budget type ids (IW_GetBudgetTypeIDs, 2025.0.1747)
+    1001: "StrmNode", 1002: "StrmReach", 1003: "DiverDetail",
+    2001: "Lake", 3001: "GW", 4001: "LWU", 4002: "RootZone",
+    4003: "NonPondedCrop_LWU", 4004: "NonPondedCrop_RZ",
+    4005: "PondedCrop_LWU", 4006: "PondedCrop_RZ",
+    5001: "UnsatZone", 6001: "SWShed",
+}
+
+#: keyword arguments the DLL wrapper's DataFrame methods take; accepted
+#: (and, where meaningful, applied) so DLL-written code runs unchanged
+_DLL_COMPAT_KWARGS = frozenset({"fact_lt", "fact_ar", "fact_vl",
+                                "length_unit", "area_unit", "volume_unit"})
+
+
+def _as_index(value, what, lo, hi):
+    """Validate an integer-like index (numpy ints ok, bools not) in
+    ``[lo, hi]`` and return it as ``int``."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+            value, (int, np.integer)):
+        raise TypeError(f"{what} must be an integer, got {value!r}")
+    value = int(value)
+    if not lo <= value <= hi:
+        raise IndexError(f"{what} {value} out of range [{lo}, {hi}]")
+    return value
+
+
+def _check_compat_kwargs(kwargs, what):
+    unknown = set(kwargs) - _DLL_COMPAT_KWARGS
+    if unknown:
+        raise TypeError(
+            f"{what}() got unexpected keyword argument(s) "
+            f"{sorted(unknown)}")
+    return float(kwargs.get("fact_vl", 1.0))
+
+
+def _excel_serials(index) -> np.ndarray:
+    """DatetimeIndex -> Excel serial days (fractional; the DLL convention)."""
+    base = pd.Timestamp("1899-12-30")
+    return ((pd.DatetimeIndex(index) - base)
+            / pd.Timedelta(days=1)).to_numpy(dtype=float)
+
+
+def _file_sig(path):
+    """(mtime_ns, size) of *path*, or None when it cannot be stat'ed --
+    the cheap fingerprint that tells a cached table its source changed."""
+    if path is None:
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 class IOModelAdapter:
@@ -96,9 +153,11 @@ class IOModelAdapter:
         well_spec=None,
         diver_specs=None,
         budget_texts=None,
+        strict=True,
     ):
         self._pp = preprocessor
         self._sim = simulation
+        self._strict = bool(strict)
         self._heads_hdf = heads_hdf
         self._budget_hdfs = budget_hdfs or {}
         self._budget_texts = budget_texts or {}
@@ -114,6 +173,83 @@ class IOModelAdapter:
         self._cache: dict[str, Any] = {}
 
     # -- helpers --------------------------------------------------------
+
+    def _reader_mode(self):
+        """Context manager applying this adapter's reader mode to the
+        files it reads lazily (components, time series)."""
+        from iwfm_io._strict import strict_mode
+        return strict_mode(self._strict)
+
+    # -- public handles on the parsed inputs / discovered outputs --------
+
+    @property
+    def model_root(self):
+        """Root folder :func:`open_model` discovered the model in (``None``
+        for an adapter built from explicit file objects)."""
+        return self._root
+
+    @property
+    def simulation(self):
+        """The parsed simulation main (``SimulationMain``) or ``None``."""
+        return self._sim
+
+    @property
+    def preprocessor(self):
+        """The parsed preprocessor main (``PreprocessorMain``) or ``None``."""
+        return self._pp
+
+    @property
+    def gw_main(self):
+        """The parsed groundwater main (``GWMain``) or ``None``."""
+        return self._gw_main
+
+    @property
+    def stream_main(self):
+        """The parsed stream main (``StreamMain``) or ``None``."""
+        return self._stream_main
+
+    @property
+    def heads_file(self):
+        """Path of the head output this adapter serves (HDF or text), or
+        ``None``."""
+        return self._heads_hdf
+
+    @property
+    def available_budgets(self):
+        """Sorted budget names this adapter can serve -- HDF and text
+        (``.bud``) sources alike."""
+        return sorted({*self._budget_hdfs, *self._budget_texts})
+
+    @property
+    def available_zbudgets(self):
+        """Sorted zone-budget names with an HDF source."""
+        return sorted(self._zbudget_hdfs)
+
+    def _cached_file(self, key, paths, builder):
+        """Return ``builder()`` cached under *key* until any of *paths*
+        changes on disk (mtime or size).  Every table the adapter reads
+        lazily from a file goes through here, so an edited input or a
+        re-run model is picked up without re-opening the adapter."""
+        sig = tuple(_file_sig(p) for p in paths)
+        hit = self._cache.get(key)
+        if hit is not None and hit[0] == sig:
+            return hit[1]
+        value = builder()
+        self._cache[key] = (sig, value)
+        return value
+
+    def reload(self):
+        """Drop every cached table so the next access re-reads the files.
+
+        Tables read lazily from disk (components, time series, budgets,
+        heads, stream flows) already refresh themselves when their source
+        file changes; ``reload()`` forces it -- e.g. after a run that
+        rewrote outputs in place with the same size and timestamp.  The
+        grid tables come from the preprocessor deck parsed at open; use
+        ``open_model`` again after editing that.
+        """
+        self._cache.clear()
+        return self
 
     def _child(self, key):
         """Get a child object from the preprocessor."""
@@ -365,6 +501,7 @@ class IOModelAdapter:
         n_nodes = len(ndf)
         strata = self._child("strata")
         n_layers = strata.n_layers if strata else 1
+        layer = _as_index(layer, "layer", 1, n_layers)
 
         if Path(self._heads_hdf).suffix.lower() == ".out":
             result = self._heads_from_text(layer, n_nodes, n_layers)
@@ -375,10 +512,15 @@ class IOModelAdapter:
             # Filter columns for requested layer: node_N_layer_M pattern
             layer_cols = [c for c in head_df.columns
                           if c.endswith(f"_layer_{layer}")]
+            if len(layer_cols) != n_nodes:
+                raise ValueError(
+                    f"{self._heads_hdf}: {len(layer_cols)} head columns "
+                    f"for layer {layer} but the grid has {n_nodes} nodes")
             result = head_df[layer_cols].copy()
-            # Rename to node_N for consistency with IWFMModel.heads_df()
-            result.columns = [c.replace(f"_layer_{layer}", "")
-                              for c in layer_cols]
+        # Columns are labelled by the model's node IDs (the file is in
+        # node order); positional node_1..N labels would mislabel any
+        # grid whose IDs are not contiguous
+        result.columns = [f"node_{int(n)}" for n in ndf["node_id"]]
         # Filter by date range if specified
         if begin_date is not None:
             from iwfm_io._tokens import parse_iwfm_date
@@ -460,24 +602,27 @@ class IOModelAdapter:
 
     def _heads_from_text(self, layer, n_nodes, n_layers):
         """Heads for one layer from a GWHeadAll.out text file."""
-        full = self._cache.get("heads_text")
-        if full is None:
+        def build():
             from iwfm_io._tokens import parse_iwfm_date
             from iwfm_io.readers.text_output import read_head_all_out
             raw = read_head_all_out(self._heads_hdf)
+            if raw.empty or "date" not in raw.columns:
+                raise ValueError(
+                    f"{self._heads_hdf} holds no head records (an empty or "
+                    "truncated GWHeadAll.out -- did the simulation finish?)")
             idx = pd.DatetimeIndex(
                 [parse_iwfm_date(d) for d in raw["date"]], name="datetime")
             full = raw.drop(columns="date")
             full.index = idx
-            self._cache["heads_text"] = full
+            return full
+        full = self._cached_file("heads_text", [self._heads_hdf], build)
         if full.shape[1] != n_nodes * n_layers:
             raise ValueError(
                 f"{self._heads_hdf}: {full.shape[1]} head columns but the "
                 f"grid has {n_nodes} nodes x {n_layers} layers")
+        layer = _as_index(layer, "layer", 1, n_layers)
         start = (layer - 1) * n_nodes
-        result = full.iloc[:, start:start + n_nodes].copy()
-        result.columns = [f"node_{n}" for n in range(1, n_nodes + 1)]
-        return result
+        return full.iloc[:, start:start + n_nodes].copy()
 
     def get_gw_heads_for_layer(self, layer, begin_date, end_date, factor=1.0):
         """Compatibility method matching ``IWFMModel.get_gw_heads_for_layer``.
@@ -519,14 +664,18 @@ class IOModelAdapter:
             :func:`iwfm_io.aggregate_budget`, which also handles the
             storage stocks.
         """
+        fact_vl = _check_compat_kwargs(kwargs, "budget_df")
+        budget_name = self._budget_key(budget_name)
         bud = self._read_budget_source(budget_name, interval=interval)
-        locs = bud["locations"]
-        if isinstance(location, int):
-            if location < 1 or location > len(locs):
-                raise IndexError(f"Location {location} out of range [1, {len(locs)}]")
-            loc_name = locs[location - 1]
-        else:
+        locs = list(bud["locations"])
+        if isinstance(location, str):
+            if location not in locs:
+                raise KeyError(
+                    f"budget {budget_name!r} has no location "
+                    f"{location!r}; available: {locs}")
             loc_name = location
+        else:
+            loc_name = locs[_as_index(location, "location", 1, len(locs)) - 1]
         df = bud["data"][loc_name]
         if begin_date is not None:
             from iwfm_io._tokens import parse_iwfm_date
@@ -535,8 +684,36 @@ class IOModelAdapter:
             from iwfm_io._tokens import parse_iwfm_date
             df = df[df.index <= parse_iwfm_date(end_date)]
         if columns is not None:
-            df = df.iloc[:, [c - 1 for c in columns]]
+            ncol = df.shape[1]
+            sel = [_as_index(c, "column", 1, ncol) - 1 for c in columns]
+            df = df.iloc[:, sel]
+        else:
+            df = df.copy()
+        if fact_vl != 1.0:
+            df = df * fact_vl
         return _maybe_day_index(df, day_index)
+
+    def _budget_key(self, budget_type):
+        """Resolve a budget name, DLL type code or loose name to a key."""
+        keys = list(self._budget_hdfs) + [k for k in self._budget_texts
+                                          if k not in self._budget_hdfs]
+        if isinstance(budget_type, (bool, np.bool_)):
+            raise TypeError("budget name must be a string or a DLL type code")
+        if isinstance(budget_type, (int, np.integer)):
+            name = _BUDGET_TYPE_CODES.get(int(budget_type))
+            if name is None:
+                raise KeyError(
+                    f"unknown DLL budget type code {int(budget_type)}; "
+                    f"known: {sorted(_BUDGET_TYPE_CODES)}")
+            budget_type = name
+        if budget_type in keys:
+            return budget_type
+        key = self._find_budget_key(str(budget_type))
+        if key is None:
+            raise RuntimeError(
+                f"IOModelAdapter: no budget named {budget_type!r}; "
+                f"available: {keys}")
+        return key
 
     def hydrograph_df(self, hdf_name, column=None, begin_date=None,
                       end_date=None, day_index=False, **kwargs):
@@ -549,9 +726,11 @@ class IOModelAdapter:
         column : int, optional
             0-based column to extract as 'value'.  None returns all columns.
         """
+        fact_vl = _check_compat_kwargs(kwargs, "hydrograph_df")
         if hdf_name not in self._hydrograph_hdfs:
             raise RuntimeError(
-                f"IOModelAdapter: no hydrograph HDF for '{hdf_name}'")
+                f"IOModelAdapter: no hydrograph HDF for '{hdf_name}'; "
+                f"available: {sorted(self._hydrograph_hdfs)}")
         from iwfm_io.readers.hdf5 import read_hydrograph_hdf
         df = read_hydrograph_hdf(self._hydrograph_hdfs[hdf_name])
         if begin_date is not None:
@@ -561,9 +740,150 @@ class IOModelAdapter:
             from iwfm_io._tokens import parse_iwfm_date
             df = df[df.index <= parse_iwfm_date(end_date)]
         if column is not None:
+            column = _as_index(column, "column", 0, df.shape[1] - 1)
             col_name = df.columns[column]
             df = pd.DataFrame({"value": df[col_name]}, index=df.index)
+        if fact_vl != 1.0:
+            df = df * fact_vl
         return _maybe_day_index(df, day_index)
+
+
+    # -- DLL-API budget / hydrograph shims -----------------------------
+    # The plot functions were written against IWFMModel's getters; these
+    # serve the same shapes from the result files so every plot renders
+    # DLL-free. Dates come back as Excel serial days like the DLL.
+
+    def _budget_frame(self, budget_type, location, begin_date=None,
+                      end_date=None, interval=None, fact_vl=1.0):
+        native = (self._sim.time_unit if self._sim else "") or ""
+        if interval is not None and str(interval).upper() in (
+                "", native.upper()):
+            interval = None
+        return self.budget_df(budget_type, location, begin_date=begin_date,
+                              end_date=end_date, interval=interval,
+                              fact_vl=fact_vl)
+
+    def get_budget_n_columns(self, budget_type, location):
+        return int(self._budget_frame(budget_type, location).shape[1])
+
+    def get_budget_column_titles(self, budget_type, location,
+                                 length_unit="FT", area_unit="SQ FT",
+                                 volume_unit="CU FT"):
+        """Column titles of a budget (the file's own names; the unit
+        arguments are accepted for DLL compatibility)."""
+        return [str(c) for c in self._budget_frame(budget_type,
+                                                   location).columns]
+
+    def get_budget_timeseries(self, budget_type, location, columns,
+                              begin_date, end_date, interval,
+                              fact_lt=1.0, fact_ar=1.0, fact_vl=1.0):
+        df = self._budget_frame(budget_type, location, begin_date,
+                                end_date, interval, fact_vl)
+        ncol = df.shape[1]
+        sel = [_as_index(c, "column", 1, ncol) - 1 for c in columns]
+        sub = df.iloc[:, sel]
+        return {"dates": _excel_serials(sub.index),
+                "values": sub.to_numpy(dtype=float),
+                "data_types": [str(c) for c in sub.columns]}
+
+    def get_budget_monthly_average(self, budget_type, location,
+                                   begin_date, end_date, fact_vl=1.0,
+                                   lu_type=0, swshed_comp=0):
+        """Mean and standard deviation of each column by calendar month
+        (Jan..Dec) over the window, from monthly aggregation."""
+        from iwfm_io._tokens import iwfm_day
+        df = self._budget_frame(budget_type, location, begin_date,
+                                end_date, "1MON", fact_vl)
+        months = iwfm_day(df.index).month
+        g = df.groupby(np.asarray(months))
+        mean = g.mean().reindex(range(1, 13))
+        std = g.std(ddof=0).reindex(range(1, 13))
+        return {"names": [str(c) for c in df.columns],
+                "flows": mean.to_numpy(dtype=float).T,
+                "std_devs": std.to_numpy(dtype=float).T}
+
+    def get_budget_annual(self, budget_type, location, begin_date,
+                          end_date, fact_vl=1.0, lu_type=0, swshed_comp=0):
+        """Annual (water-year) values of each column: ``flows`` is
+        ``(n_columns, n_years)`` and ``years`` labels each window by the
+        year it ends in."""
+        from iwfm_io._tokens import iwfm_day
+        df = self._budget_frame(budget_type, location, begin_date,
+                                end_date, "1YEAR", fact_vl)
+        years = iwfm_day(df.index).year.to_numpy(dtype=np.int32)
+        return {"names": [str(c) for c in df.columns],
+                "flows": df.to_numpy(dtype=float).T,
+                "years": years}
+
+    def get_budget_cum_gw_storage_change(self, subregion, begin_date,
+                                         end_date, interval, fact_vl=1.0):
+        """Cumulative change in groundwater storage for a subregion
+        (``(dates, values)`` like the DLL)."""
+        df = self._budget_frame("GW", subregion, begin_date, end_date,
+                                interval, fact_vl)
+        beg = self._find_column(df, "BEGINNING STORAGE")
+        end = self._find_column(df, "ENDING STORAGE")
+        if beg is not None and end is not None:
+            change = df[end] - df[beg]
+        else:
+            col = (self._find_column(df, "CHANGE IN STORAGE")
+                   or self._find_column(df, "STORAGE", "CHANGE"))
+            if col is None:
+                raise KeyError(
+                    "GW budget has no storage columns; columns: "
+                    f"{list(df.columns)}")
+            change = df[col]
+        cum = change.cumsum()
+        return _excel_serials(cum.index), cum.to_numpy(dtype=float)
+
+    def get_hydrograph_type_list(self):
+        """Hydrograph output kinds available from the result files, as
+        ``[{"name", "location_type"}]`` where ``location_type`` is the
+        adapter's hydrograph key (used as the DLL's type id)."""
+        out = []
+        for key in sorted(self._hydrograph_hdfs):
+            k = key.lower()
+            if "strm" in k or "stream" in k:
+                name = "Stream flow hydrograph"
+            elif "subs" in k:
+                name = "Subsidence hydrograph"
+            elif "tile" in k:
+                name = "Tile drain hydrograph"
+            else:
+                name = "Groundwater head hydrograph"
+            out.append({"name": name, "location_type": key})
+        return out
+
+    def get_n_hydrographs(self, location_type):
+        return int(self.hydrograph_df(location_type).shape[1])
+
+    def get_hydrograph_ids(self, location_type):
+        return np.arange(1, self.get_n_hydrographs(location_type) + 1,
+                         dtype=np.int32)
+
+    def get_hydrograph(self, hyd_type, index, layer, begin_date, end_date,
+                       interval=None, fact_lt=1.0, fact_vl=1.0):
+        """``(dates, values)`` for hydrograph *index* (1-based id) of the
+        hydrograph file *hyd_type* (an adapter key). Only the native
+        output interval is served; ``layer`` is accepted for DLL
+        compatibility."""
+        native = (self._sim.time_unit if self._sim else "") or ""
+        n = self.get_n_hydrographs(hyd_type)
+        idx = _as_index(index, "hydrograph index", 1, n)
+        df = self.hydrograph_df(hyd_type, column=idx - 1,
+                                begin_date=begin_date, end_date=end_date)
+        if (interval not in (None, "") and str(interval).upper()
+                != native.upper() and len(df)):
+            # instantaneous quantity: the value at each window end
+            # (complete windows only), DLL-anchored windows
+            from iwfm_io._budget_agg import window_end_labels
+            labels, complete = window_end_labels(df.index, str(interval),
+                                                 native or None)
+            keep = df[complete]
+            df = keep.groupby(np.asarray(labels[complete])).last()
+            df.index = pd.DatetimeIndex(df.index)
+        vals = df["value"].to_numpy(dtype=float) * float(fact_vl)
+        return _excel_serials(df.index), vals
 
     # -- Budget-backed state (DLL-free) ---------------------------------
 
@@ -585,22 +905,21 @@ class IOModelAdapter:
                 raise ValueError(
                     f"text budget '{key}' serves only its native output "
                     "interval — resample the returned DataFrame instead")
-            cache_key = f"_budget_text::{key}"
-            if cache_key in self._cache:
-                return self._cache[cache_key]
             from iwfm_io._tokens import parse_iwfm_date
             from iwfm_io.readers.text_output import read_budget_text
-            sections = read_budget_text(self._budget_texts[key])
-            data = {}
-            for loc, df in sections.items():
-                df = df.copy()
-                idx = pd.DatetimeIndex(
-                    [parse_iwfm_date(d) for d in df.pop("date")])
-                df.index = idx
-                data[loc] = df
-            result = {"locations": list(data), "data": data}
-            self._cache[cache_key] = result
-            return result
+
+            def build():
+                sections = read_budget_text(self._budget_texts[key])
+                data = {}
+                for loc, df in sections.items():
+                    df = df.copy()
+                    idx = pd.DatetimeIndex(
+                        [parse_iwfm_date(d) for d in df.pop("date")])
+                    df.index = idx
+                    data[loc] = df
+                return {"locations": list(data), "data": data}
+            return self._cached_file(f"_budget_text::{key}",
+                                     [self._budget_texts[key]], build)
         available = sorted({*self._budget_hdfs, *self._budget_texts})
         raise RuntimeError(
             f"IOModelAdapter: no budget source for '{key}' "
@@ -608,12 +927,13 @@ class IOModelAdapter:
 
     def _read_full_budget(self, key):
         """Read (and cache) a whole budget: {locations, data, ...}."""
-        cache_key = f"_budget_full::{key}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        bud = self._read_budget_source(key)
-        self._cache[cache_key] = bud
-        return bud
+        return self._cached_file(f"_budget_full::{key}",
+                                 [self._budget_path(key)],
+                                 lambda: self._read_budget_source(key))
+
+    def _budget_path(self, key):
+        """Source file of a budget key (HDF preferred, else text)."""
+        return self._budget_hdfs.get(key) or self._budget_texts.get(key)
 
     def _find_budget_key(self, *tokens):
         """Find a budget key whose normalized name contains any token."""
@@ -642,9 +962,6 @@ class IOModelAdapter:
         without budget output get 0.0. Returns an empty DataFrame when
         the model has no stream node budget HDF.
         """
-        cache_key = f"stream_flows::{factor}::{stat}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
         columns = [
             "stream_node_id", "flow", "stage", "gain_from_gw",
             "gain_from_lakes", "tributary_inflows", "return_flows",
@@ -656,8 +973,12 @@ class IOModelAdapter:
                 "stream_flows_df: no stream node budget HDF found — "
                 "returning empty DataFrame")
             return pd.DataFrame(columns=columns)
-        bud = self._read_full_budget(key)
+        return self._cached_file(
+            f"stream_flows::{factor}::{stat}", [self._budget_path(key)],
+            lambda: self._stream_flows(key, columns, factor, stat))
 
+    def _stream_flows(self, key, columns, factor, stat):
+        bud = self._read_full_budget(key)
         sn_ids = self.stream_nodes_df()["stream_node_id"].astype(int).values
         out = {c: np.zeros(len(sn_ids)) for c in columns[1:]}
         col_map = {
@@ -682,9 +1003,7 @@ class IOModelAdapter:
                 src = self._find_column(df, *subs)
                 if src is not None:
                     out[out_col][i] = float(row[src]) * factor
-        result = pd.DataFrame({"stream_node_id": sn_ids, **out})
-        self._cache[cache_key] = result
-        return result
+        return pd.DataFrame({"stream_node_id": sn_ids, **out})
 
     def subsidence_df(self, factor=1.0):
         """Not available from IO readers without live DLL snapshot.
@@ -708,8 +1027,10 @@ class IOModelAdapter:
         simulated period. *location_type* is accepted for interface
         compatibility (locations are the budget's subregions).
         """
-        if "supply_demand" in self._cache:
-            df = self._cache["supply_demand"]
+        lwu_key = self._find_budget_key("LWU")
+        df = self._cache.get("supply_demand")
+        if df is not None and df[0] == _file_sig(self._budget_path(lwu_key)):
+            df = df[1]
         else:
             bud = self._lwu_budget()
             if bud is None:
@@ -746,7 +1067,8 @@ class IOModelAdapter:
                     "urban_shortage": col_total("URBAN", "SHORTAGE"),
                 })
             df = pd.DataFrame(rows).sort_values("location_id").reset_index(drop=True)
-            self._cache["supply_demand"] = df
+            self._cache["supply_demand"] = (
+                _file_sig(self._budget_path(lwu_key)), df)
         if locations is not None:
             df = df[df["location_id"].isin([int(x) for x in np.atleast_1d(locations)])]
         if factor != 1.0:
@@ -781,8 +1103,9 @@ class IOModelAdapter:
     def get_subregion_ag_pumping_avg_depth_to_gw(self):
         """Average depth to groundwater (GSE − layer-1 head, end of run)
         per subregion, computed from the heads output and stratigraphy."""
-        if "subregion_depth" in self._cache:
-            return self._cache["subregion_depth"]
+        hit = self._cache.get("subregion_depth")
+        if hit is not None and hit[0] == _file_sig(self._heads_hdf):
+            return hit[1]
         heads = self.heads_df(layer=1).iloc[-1].to_numpy()
         strat = self.stratigraphy_df()
         gse_col = (self._find_column(strat, "ELEVATION")
@@ -813,7 +1136,7 @@ class IOModelAdapter:
                 sums[s][1] += 1
         result = np.array([sums[s][0] / sums[s][1] if sums[s][1] else np.nan
                            for s in subs])
-        self._cache["subregion_depth"] = result
+        self._cache["subregion_depth"] = (_file_sig(self._heads_hdf), result)
         return result
 
     # -- Land use (from the budget outputs) -----------------------------
@@ -892,10 +1215,11 @@ class IOModelAdapter:
                 f"No zone-budget HDF matching {zbudget_type!r}; available: "
                 f"{sorted(self._zbudget_hdfs)}")
 
-        cache_key = f"_zbudget_subregions::{key}"
-        if cache_key in self._cache:
-            z = self._cache[cache_key]
-        else:
+        if float(fact_ar) != 1.0:
+            raise ValueError("get_zbudget_timeseries: fact_ar is not "
+                             "supported by the file-based adapter")
+        interval = None if interval in (None, "") else str(interval).upper()
+        def build():
             from iwfm_io.models.base import ZoneDefinition
             from iwfm_io.readers.hdf5 import read_zbudget_hdf
             elems = self.elements_df()
@@ -908,8 +1232,10 @@ class IOModelAdapter:
                     "zone_id": elems["subregion"].astype(int),
                 }),
             )
-            z = read_zbudget_hdf(self._zbudget_hdfs[key], zone_def=zd)
-            self._cache[cache_key] = z
+            return read_zbudget_hdf(self._zbudget_hdfs[key], zone_def=zd,
+                                    interval=interval)
+        z = self._cached_file(f"_zbudget_subregions::{key}::{interval}",
+                              [self._zbudget_hdfs[key]], build)
 
         df = z["data"][f"Subregion {int(zone_id)}"]
         if begin_date is not None:
@@ -921,7 +1247,7 @@ class IOModelAdapter:
         cols = list(columns)
         sub = df.iloc[:, cols]
         # Plotting code converts dates with excel_date_to_datetime
-        excel = (sub.index - pd.Timestamp("1899-12-30")).days.to_numpy(float)
+        excel = _excel_serials(sub.index)
         return {
             "dates": excel,
             "values": sub.to_numpy() * fact_vl,
@@ -1183,7 +1509,8 @@ class IOModelAdapter:
         ``"well_spec"``, ``"bc_main"``).  Returns None when the model
         does not reference it."""
         from iwfm_io._links import load_component
-        return load_component(self, name)
+        with self._reader_mode():
+            return load_component(self, name)
 
     def timeseries(self, role):
         """The parsed time-series file for a pointer-target role,
@@ -1191,7 +1518,8 @@ class IOModelAdapter:
         ``"ts_pumping"``, ``"return_flow"``).  Returns None when the
         model does not reference it."""
         from iwfm_io._links import load_timeseries
-        return load_timeseries(self, role)
+        with self._reader_mode():
+            return load_timeseries(self, role)
 
     def series(self, role, column, raw=False, expand=True):
         """One referenced time-series column as a ``date``/``value``
@@ -1210,7 +1538,8 @@ class IOModelAdapter:
             et = m.series("et", n)
         """
         from iwfm_io._links import series
-        return series(self, role, column, raw=raw, expand=expand)
+        with self._reader_mode():
+            return series(self, role, column, raw=raw, expand=expand)
 
     def column_usage(self, role):
         """Reverse lookup: who references each column of a time-series
@@ -1218,7 +1547,8 @@ class IOModelAdapter:
         n_refs, examples) — the way to answer "what is ``col_5`` of
         the ET file?"."""
         from iwfm_io._links import column_usage
-        return column_usage(self, role)
+        with self._reader_mode():
+            return column_usage(self, role)
 
     def validate_references(self):
         """Validate every cross-file reference: pointer columns within
@@ -1226,7 +1556,8 @@ class IOModelAdapter:
         tables, (type, dest) pairs valid under their code tables.
         Returns a findings DataFrame (empty = everything resolves)."""
         from iwfm_io._links import validate_references
-        return validate_references(self)
+        with self._reader_mode():
+            return validate_references(self)
 
     # -- Convenience accessors ------------------------------------------
     #
@@ -1253,16 +1584,18 @@ class IOModelAdapter:
             m.crop_series("irrigation_period", "rice_fl")
         """
         from iwfm_io._links import crop_series
-        return crop_series(self, kind, crop, element=element, raw=raw,
-                           expand=expand)
+        with self._reader_mode():
+            return crop_series(self, kind, crop, element=element, raw=raw,
+                               expand=expand)
 
     def urban_series(self, kind, element=None, raw=False, expand=True):
         """An urban driver series at an element: ``"population"``,
         ``"per_capita_use"``, ``"water_use_specs"``, ``"et"``,
         ``"return_flow"``, or ``"reuse"``."""
         from iwfm_io._links import urban_series
-        return urban_series(self, kind, element=element, raw=raw,
-                            expand=expand)
+        with self._reader_mode():
+            return urban_series(self, kind, element=element, raw=raw,
+                                expand=expand)
 
     def well_pumping(self, well_id, kind="pumping", scaled=True,
                      raw=False, expand=True):
@@ -1271,16 +1604,18 @@ class IOModelAdapter:
         the unscaled column; ``kind="max"`` for the maximum-pumping
         column)."""
         from iwfm_io._links import well_pumping
-        return well_pumping(self, well_id, kind=kind, scaled=scaled,
-                            raw=raw, expand=expand)
+        with self._reader_mode():
+            return well_pumping(self, well_id, kind=kind, scaled=scaled,
+                                raw=raw, expand=expand)
 
     def element_pumping(self, element_id, kind="pumping", scaled=True,
                         raw=False, expand=True):
         """An element's pumping series from the time-series pumping
         file — its ICOLSK column times its FRACSK share."""
         from iwfm_io._links import element_pumping
-        return element_pumping(self, element_id, kind=kind,
-                               scaled=scaled, raw=raw, expand=expand)
+        with self._reader_mode():
+            return element_pumping(self, element_id, kind=kind,
+                                   scaled=scaled, raw=raw, expand=expand)
 
     def bc_series(self, node, layer=None, raw=False, expand=True):
         """The boundary condition at a GW node (and layer), searching
@@ -1288,8 +1623,9 @@ class IOModelAdapter:
         column of the time-series BC file; constant BCs (ITSCOL=0)
         return their value as a single stamp at the simulation start."""
         from iwfm_io._links import bc_series
-        return bc_series(self, node, layer=layer, raw=raw,
-                         expand=expand)
+        with self._reader_mode():
+            return bc_series(self, node, layer=layer, raw=raw,
+                             expand=expand)
 
     def diversion_series(self, diversion_id, kind="delivery",
                          scaled=True, raw=False, expand=True):
@@ -1298,15 +1634,17 @@ class IOModelAdapter:
         ``"nonrecoverable_loss"``, or ``"spill"`` column times the
         matching fraction (``scaled=False`` for the bare column)."""
         from iwfm_io._links import diversion_series
-        return diversion_series(self, diversion_id, kind=kind,
-                                scaled=scaled, raw=raw, expand=expand)
+        with self._reader_mode():
+            return diversion_series(self, diversion_id, kind=kind,
+                                    scaled=scaled, raw=raw, expand=expand)
 
     def lake_max_elevation(self, lake_id=None, raw=False, expand=True):
         """A lake's maximum-elevation series from the MaxLakeElev
         file (``lake_id`` optional for single-lake models)."""
         from iwfm_io._links import lake_max_elevation
-        return lake_max_elevation(self, lake_id=lake_id, raw=raw,
-                                  expand=expand)
+        with self._reader_mode():
+            return lake_max_elevation(self, lake_id=lake_id, raw=raw,
+                                      expand=expand)
 
     # -- Model overview -------------------------------------------------
 
@@ -1389,6 +1727,11 @@ class IOModelAdapter:
                 for name, path in self._zbudget_hdfs.items()
             },
         }
+        errors = list(getattr(self, "_results_errors", []) or [])
+        if errors:
+            # result files that exist but could not be read (zero-byte,
+            # truncated, locked): never silently absent
+            info["results"]["errors"] = errors
         return info
 
     def __repr__(self):
@@ -1439,8 +1782,16 @@ def _find_main_file(root, subdir, patterns):
                 candidates.append(f)
         if candidates:
             break
-    preferred = [f for f in candidates if "main" in f.name.lower()]
-    return (preferred or candidates)[0] if candidates else None
+    if not candidates:
+        return None
+    _stale = ("copy", "backup", "bak", "old", "orig", "(1)", "~")
+
+    def rank(f):
+        name = f.name.lower()
+        return (0 if "main" not in name else -1,      # prefer *main*
+                1 if any(t in name for t in _stale) else 0,   # skip copies
+                len(name), name)
+    return sorted(candidates, key=rank)[0]
 
 
 def _sniff_simulation_main(path, max_lines=500):
@@ -1501,20 +1852,35 @@ def _classify_hdf(path, n_head_columns=None):
             attrs = f["Attributes"].attrs if "Attributes" in f else {}
             if any("DataColumnTypes" in k for k in attrs):
                 return "budget"
-            if len(keys) > 1:
+            descriptor = attrs.get("Descriptor", b"")
+            if isinstance(descriptor, bytes):
+                descriptor = descriptor.decode(errors="replace")
+            if "budget" in str(descriptor).lower():
                 return "budget"
             n_cols = f[keys[0]].shape[1] if f[keys[0]].ndim == 2 else None
-            if n_head_columns and n_cols == n_head_columns:
+            if len(keys) == 1 and (
+                    (n_head_columns and n_cols == n_head_columns)
+                    or "headall" in path.stem.lower()):
                 return "heads"
-            if "headall" in path.stem.lower():
-                return "heads"
+            if len(keys) > 1:
+                return "budget"
             return "hydrograph"
     except Exception as exc:
         logger.warning("Could not classify %s: %s", path.name, exc)
-        return None
+        raise _UnreadableResult(path, exc) from exc
 
 
-def open_model(path, preprocessor=None, simulation=None, results_dir=None):
+class _UnreadableResult(Exception):
+    """A results file that could not be opened/classified."""
+
+    def __init__(self, path, exc):
+        super().__init__(f"{Path(path).name}: {exc}")
+        self.path = Path(path)
+        self.reason = f"{type(exc).__name__}: {exc}"
+
+
+def open_model(path, preprocessor=None, simulation=None, results_dir=None,
+               strict=True):
     """Open an IWFM model from its folder — the simplest way to read a model.
 
     No DLL required; works on any operating system. Point it at the model's
@@ -1542,6 +1908,13 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
     results_dir : str or Path, optional
         Explicit results folder. Overrides discovery (default:
         ``<root>/Results``).
+    strict : bool
+        Reader mode for every input file read now or lazily later
+        through the adapter.  ``True`` (default): malformed input raises
+        :class:`~iwfm_io.IWFMParseError` naming the file, line and
+        section.  ``False``: readers warn (:class:`~iwfm_io.IWFMReadWarning`)
+        and keep what they could parse.  Equivalent to wrapping the call
+        in :func:`iwfm_io.strict_mode`.
 
     Returns
     -------
@@ -1555,6 +1928,14 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
         If *path* does not exist, or no preprocessor main file can be
         located (the grid geometry is required for everything else).
     """
+    from iwfm_io._strict import strict_mode
+
+    with strict_mode(strict):
+        return _open_model(path, preprocessor, simulation, results_dir,
+                           strict)
+
+
+def _open_model(path, preprocessor, simulation, results_dir, strict):
     from iwfm_io.readers.preprocessor import read_preprocessor_main
     from iwfm_io.readers.simulation import read_simulation_main
 
@@ -1563,6 +1944,7 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
         raise FileNotFoundError(f"Model path does not exist: {path}")
 
     # Resolve the model root folder
+    path = path.resolve()
     if path.is_dir():
         root = path
     else:
@@ -1572,7 +1954,13 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
             preprocessor = path
         elif simulation is None:
             simulation = path
-        root = path.parent.parent if path.parent.parent.is_dir() else path.parent
+        # the root is the folder above Preprocessor/ or Simulation/;
+        # a main file sitting in the model root keeps that root
+        parent = path.parent
+        if parent.name.lower() in ("preprocessor", "simulation"):
+            root = parent.parent
+        else:
+            root = parent
 
     # Discover main files
     if preprocessor is None:
@@ -1646,6 +2034,7 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
     budget_hdfs = {}
     hydrograph_hdfs = {}
     zbudget_hdfs = {}
+    results_errors = []
     if results_dir.is_dir():
         n_head_columns = None
         try:
@@ -1654,7 +2043,12 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
         except Exception:
             pass
         for f in sorted(results_dir.glob("*.hdf")):
-            kind = _classify_hdf(f, n_head_columns)
+            try:
+                kind = _classify_hdf(f, n_head_columns)
+            except _UnreadableResult as bad:
+                results_errors.append({"path": str(bad.path),
+                                       "error": bad.reason})
+                continue
             if kind == "heads":
                 heads_hdf = f
             elif kind == "budget":
@@ -1707,6 +2101,8 @@ def open_model(path, preprocessor=None, simulation=None, results_dir=None):
         well_spec=well_spec,
         diver_specs=diver_specs,
         budget_texts=budget_texts,
+        strict=strict,
     )
     adapter._root = root
+    adapter._results_errors = results_errors
     return adapter

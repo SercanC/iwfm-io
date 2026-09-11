@@ -230,7 +230,7 @@ def _plotly_sankey(names, values, title, save_path, figsize=(14, 8)):
 
 def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
                        interval="1MON", fact_vl=CUFT_TO_AF,
-                       combine_storage=True, annual=True, engine="auto",
+                       combine_storage=True, annual=True, engine="matplotlib",
                        ax=None, figsize=(14, 8),
                        save_path=None):
     """Sankey of the average water-year budget.
@@ -250,7 +250,8 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
     engine : str
         ``"plotly"`` uses plotly's Sankey (interactive HTML, or PNG via
         the *kaleido* package), ``"matplotlib"`` the built-in flow
-        diagram, ``"auto"`` (default) plotly when it is installed.
+        diagram (default: matplotlib, so the return type does not depend
+        on what is installed); ``"auto"`` picks plotly when available.
     """
     titles = model.get_budget_column_titles(budget_type, location)
     n_cols = len(titles)
@@ -510,20 +511,3 @@ def plot_cumulative_departure(model, budget_type, location,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        budgets = m.get_budget_list()
-        if budgets:
-            bt = budgets[0]["budget_type"]
-            bd, ed = "10/01/1990_24:00", "09/30/2000_24:00"
-            plot_budget_sankey(m, bt, 1, bd, ed, save_path="sankey.png")
-            plot_budget_butterfly(m, bt, 1, bd, ed, save_path="butterfly.png")
-            plot_cumulative_departure(m, bt, 1, bd, ed, save_path="cum_dep.png")
-    plt.show()

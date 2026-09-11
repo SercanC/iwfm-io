@@ -5,14 +5,10 @@ Readers for IWFM time-series input files (Precip, ET, IrigFrac, SupplyAdjust).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-
-import pandas as pd
 
 from iwfm_io._parser import IWFMFileReader
-from iwfm_io._tokens import parse_iwfm_date, tokenize_data_line
+from iwfm_io._tokens import is_iwfm_date, split_keyed_line
 from iwfm_io.models.base import TimeSeriesSpec
-from iwfm_io._tokens import split_keyed_line
 from iwfm_io.models.timeseries import (
     ETFile,
     IrigFracFile,
@@ -20,50 +16,7 @@ from iwfm_io.models.timeseries import (
     PrecipFile,
     SupplyAdjustFile,
     TimeSeriesDataFile,
-    TimeSeriesFile,
 )
-
-
-def _read_ts_data_to_eof(
-    reader: IWFMFileReader,
-    n_columns: int,
-    col_names: list[str] | None = None,
-) -> pd.DataFrame:
-    """Read time-series data rows until EOF.
-
-    Each row: ``DATE  val1  val2  ...``
-
-    The date strings are stored as-is in the ``date`` column because IWFM
-    uses special years (4000, 2500) for repeating/cyclic data that are
-    outside pandas Timestamp range.
-    """
-    if col_names is None:
-        col_names = [f"col_{i+1}" for i in range(n_columns)]
-
-    date_strs: list[str] = []
-    values: list[list[float]] = []
-
-    while not reader.eof:
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        tokens = tokenize_data_line(line)
-        if not tokens:
-            break
-        # Check first token is an IWFM date
-        if "/" not in tokens[0] or "_" not in tokens[0]:
-            break
-        reader.next_data_line()
-        row_vals = [float(v) for v in tokens[1 : n_columns + 1]]
-        date_strs.append(tokens[0])
-        values.append(row_vals)
-
-    if not date_strs:
-        return pd.DataFrame(columns=["date"] + col_names)
-
-    df = pd.DataFrame(values, columns=col_names)
-    df.insert(0, "date", date_strs)
-    return df
 
 
 def read_timeseries_file(
@@ -115,17 +68,33 @@ def read_timeseries_file(
         keywords.append(kw.split()[0] if kw else "")
         return value
 
-    n_columns = int(_keyed())
+    def _int(value, what):
+        try:
+            return int(value)
+        except ValueError:
+            raise reader.error(
+                f"expected an integer for {what} but found {value!r}"
+            ) from None
+
+    with reader.section("time-series spec"):
+        n_columns = _int(_keyed(), "NCOL")
 
     # FACT line: detect by keyword unless the caller decided
     if has_factor is None:
         line = reader.peek_data_line()
         _, kw = split_keyed_line(line) if line is not None else ("", "")
         has_factor = bool(kw) and kw.split()[0].upper().startswith("FACT")
-    factor = float(_keyed()) if has_factor else None
+    factor = None
+    if has_factor:
+        raw = _keyed()
+        try:
+            factor = float(raw)
+        except ValueError:
+            raise reader.error(
+                f"expected a number for FACT but found {raw!r}") from None
 
-    n_steps_update = int(_keyed())
-    repeat_freq = int(_keyed())
+    n_steps_update = _int(_keyed(), "NSP")
+    repeat_freq = _int(_keyed(), "NFQ")
 
     # DSSFL line: present in most layouts, absent in a few (e.g.
     # SurfaceFlowDest).  A data row starts with an IWFM date, which a
@@ -138,7 +107,7 @@ def read_timeseries_file(
             value, kw = split_keyed_line(line)
             kw1 = kw.split()[0].upper() if kw else ""
             first_tok = value.split()[0] if value.split() else ""
-            looks_like_date = "/" in first_tok and "_" in first_tok
+            looks_like_date = is_iwfm_date(first_tok)
             if kw1.startswith("DSS") or (not kw and not looks_like_date):
                 has_dssfl = True
     if has_dssfl:
@@ -159,8 +128,7 @@ def read_timeseries_file(
         spec = TimeSeriesSpec(n_columns=n_columns, dss_file=dss_file)
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        result.data = _read_ts_data_to_eof(reader, n_columns,
-                                           col_names=columns)
+        result.data = reader.read_ts_rows(n_columns, col_names=columns)
 
     return result
 
@@ -189,7 +157,7 @@ def read_precip(path: str | Path) -> PrecipFile:
     if spec.dss_file:
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        result.data = _read_ts_data_to_eof(reader, spec.n_columns)
+        result.data = reader.read_ts_rows(spec.n_columns)
 
     return result
 
@@ -220,7 +188,7 @@ def read_et(path: str | Path) -> ETFile:
         dss_pathnames = reader.read_dss_pathnames(spec)
         return ETFile(header=header, spec=spec, data=data, dss_pathnames=dss_pathnames)
 
-    data = _read_ts_data_to_eof(reader, spec.n_columns)
+    data = reader.read_ts_rows(spec.n_columns)
     return ETFile(header=header, spec=spec, data=data)
 
 
@@ -242,10 +210,11 @@ def read_irigfrac(path: str | Path) -> IrigFracFile:
     reader = IWFMFileReader(path)
     header = reader.read_header()
 
-    n_columns, _ = reader.read_keyed_int()
-    n_steps_update, _ = reader.read_keyed_int()
-    repeat_freq, _ = reader.read_keyed_int()
-    dss_file, _ = reader.read_keyed_value()
+    with reader.section("time-series spec"):
+        n_columns, _ = reader.read_keyed_int()
+        n_steps_update, _ = reader.read_keyed_int()
+        repeat_freq, _ = reader.read_keyed_int()
+        dss_file, _ = reader.read_keyed_value()
 
     result = IrigFracFile(
         header=header,
@@ -258,7 +227,7 @@ def read_irigfrac(path: str | Path) -> IrigFracFile:
         spec = TimeSeriesSpec(n_columns=n_columns, dss_file=dss_file)
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        result.data = _read_ts_data_to_eof(reader, n_columns)
+        result.data = reader.read_ts_rows(n_columns)
     return result
 
 
@@ -283,10 +252,11 @@ def read_irr_period(path: str | Path) -> IrrPeriodFile:
     reader = IWFMFileReader(path)
     header = reader.read_header()
 
-    n_columns, _ = reader.read_keyed_int()
-    n_steps_update, _ = reader.read_keyed_int()
-    repeat_freq, _ = reader.read_keyed_int()
-    dss_file, _ = reader.read_keyed_value()
+    with reader.section("time-series spec"):
+        n_columns, _ = reader.read_keyed_int()
+        n_steps_update, _ = reader.read_keyed_int()
+        repeat_freq, _ = reader.read_keyed_int()
+        dss_file, _ = reader.read_keyed_value()
 
     result = IrrPeriodFile(
         header=header,
@@ -300,8 +270,11 @@ def read_irr_period(path: str | Path) -> IrrPeriodFile:
         spec = TimeSeriesSpec(n_columns=n_columns, dss_file=dss_file)
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        data = _read_ts_data_to_eof(reader, n_columns)
+        data = reader.read_ts_rows(n_columns, what="irrigation periods")
         for col in data.columns[1:]:
+            if data[col].isna().any():
+                raise reader.error(
+                    f"irrigation-period column {col} has missing flags")
             data[col] = data[col].astype(int)
         result.data = data
 
@@ -326,10 +299,11 @@ def read_supply_adjust(path: str | Path) -> SupplyAdjustFile:
     reader = IWFMFileReader(path)
     header = reader.read_header()
 
-    n_columns, _ = reader.read_keyed_int()
-    n_steps_update, _ = reader.read_keyed_int()
-    repeat_freq, _ = reader.read_keyed_int()
-    dss_file, _ = reader.read_keyed_value()
+    with reader.section("time-series spec"):
+        n_columns, _ = reader.read_keyed_int()
+        n_steps_update, _ = reader.read_keyed_int()
+        repeat_freq, _ = reader.read_keyed_int()
+        dss_file, _ = reader.read_keyed_value()
 
     result = SupplyAdjustFile(
         header=header,
@@ -342,5 +316,5 @@ def read_supply_adjust(path: str | Path) -> SupplyAdjustFile:
         spec = TimeSeriesSpec(n_columns=n_columns, dss_file=dss_file)
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        result.data = _read_ts_data_to_eof(reader, n_columns)
+        result.data = reader.read_ts_rows(n_columns)
     return result

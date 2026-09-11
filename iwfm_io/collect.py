@@ -49,6 +49,39 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def _date_mask(index, begin_date=None, end_date=None):
+    """Boolean mask selecting ``index`` entries within a date window.
+
+    Bounds may be IWFM strings (``10/01/1990_24:00`` — compared as the
+    instant they denote), plain dates (``"1990-10-01"``, ``date`` — the
+    *owning day* under the 24:00 convention, so ``end_date="1991-09-30"``
+    keeps the ``09/30/1991_24:00`` stamp that is stored as Oct 1
+    midnight), or timestamps with a time of day (compared directly).
+    """
+    import numpy as np
+    from iwfm_io._tokens import is_iwfm_date, iwfm_day, parse_iwfm_date
+
+    idx = pd.DatetimeIndex(index)
+    mask = np.ones(len(idx), dtype=bool)
+    days = None
+    for bound, is_begin in ((begin_date, True), (end_date, False)):
+        if bound is None or bound == "":
+            continue
+        if isinstance(bound, str) and is_iwfm_date(bound):
+            inst = pd.Timestamp(parse_iwfm_date(bound))
+            mask &= (idx >= inst) if is_begin else (idx <= inst)
+            continue
+        ts = pd.Timestamp(bound)
+        if ts == ts.normalize():
+            if days is None:
+                days = iwfm_day(idx)
+            mask &= (days >= ts) if is_begin else (days <= ts)
+        else:
+            mask &= (idx >= ts) if is_begin else (idx <= ts)
+    return mask
+
+
+
 def _run_collect_tasks(tasks, fn, max_workers):
     """Run collection tasks and flatten their frame lists, preserving order.
 
@@ -135,10 +168,8 @@ def collect_budgets(
         out = []
         for loc in loc_names:
             df = result["data"][loc].copy()
-            if begin_date:
-                df = df[df.index >= begin_date]
-            if end_date:
-                df = df[df.index <= end_date]
+            if begin_date is not None or end_date is not None:
+                df = df[_date_mask(df.index, begin_date, end_date)]
 
             df.index.name = "datetime"
             df_long = (
@@ -257,10 +288,8 @@ def collect_zbudgets(
 
             for zone_name in zone_names:
                 df = result["data"][zone_name].copy()
-                if begin_date:
-                    df = df[df.index >= begin_date]
-                if end_date:
-                    df = df[df.index <= end_date]
+                if begin_date is not None or end_date is not None:
+                    df = df[_date_mask(df.index, begin_date, end_date)]
                 df.index.name = "datetime"
                 df_long = (
                     df.reset_index()
@@ -281,10 +310,8 @@ def collect_zbudgets(
             for layer_key, data_dict in result["data"].items():
                 for comp_name, df in data_dict.items():
                     df = df.copy()
-                    if begin_date:
-                        df = df[df.index >= begin_date]
-                    if end_date:
-                        df = df[df.index <= end_date]
+                    if begin_date is not None or end_date is not None:
+                        df = df[_date_mask(df.index, begin_date, end_date)]
                     df.index.name = "datetime"
                     df_long = (
                         df.reset_index()
@@ -421,10 +448,8 @@ def collect_hydrographs(
                 return []
             df = df[available]
 
-        if begin_date:
-            df = df[df.index >= begin_date]
-        if end_date:
-            df = df[df.index <= end_date]
+        if begin_date is not None or end_date is not None:
+            df = df[_date_mask(df.index, begin_date, end_date)]
 
         df.index.name = "datetime"
         df_long = (
@@ -513,6 +538,11 @@ def collect_gwheads(
     from .readers.hdf5 import read_head_hdf
 
     have_metadata = n_nodes is not None and n_layers is not None
+    if not have_metadata and (nodes is not None or layers is not None):
+        raise ValueError(
+            "collect_gwheads: filtering by nodes/layers needs n_nodes and "
+            "n_layers (the head file carries no node ids) -- pass both, or "
+            "drop the filters to get every column")
     tasks = [(run_label, Path(results_dir)) for run_label, results_dir in runs.items()]
 
     def _load(task):
@@ -539,10 +569,8 @@ def collect_gwheads(
                     keep.append(col)
             df = df[keep]
 
-        if begin_date:
-            df = df[df.index >= begin_date]
-        if end_date:
-            df = df[df.index <= end_date]
+        if begin_date is not None or end_date is not None:
+            df = df[_date_mask(df.index, begin_date, end_date)]
 
         df.index.name = "datetime"
         df_long = (
@@ -692,6 +720,9 @@ def aggregate_budget(df: pd.DataFrame, period: str = "WY",
     if long_form:
         keys = [c for c in ("run", "budget_type", "location")
                 if c in df.columns]
+        if len(df) == 0:
+            return pd.DataFrame(columns=keys + [label_name, "component",
+                                                "value"])
 
         if data_types is not None:
             # Type-aware path: pivot each key group to a wide frame so the
@@ -741,6 +772,15 @@ def aggregate_budget(df: pd.DataFrame, period: str = "WY",
                                  observed=True)["value"]
                     .agg(rule).reset_index())
         result = pd.concat(pieces, ignore_index=True)
+        # a window with a missing step is unknown, not "the sum of the
+        # rest" -- match the typed path, which propagates NaN
+        gkeys = keys + [label_name, "component"]
+        has_nan = (out.assign(_nan=out["value"].isna())
+                   .groupby(gkeys, observed=True)["_nan"].any()
+                   .rename("_nan").reset_index())
+        result = result.merge(has_nan, on=gkeys, how="left")
+        result.loc[result["_nan"].fillna(False).astype(bool), "value"] = np.nan
+        result = result.drop(columns="_nan")
         return result.sort_values(
             keys + [label_name, "component"]).reset_index(drop=True)
 
@@ -762,5 +802,9 @@ def aggregate_budget(df: pd.DataFrame, period: str = "WY",
         return out
 
     agg = {col: budget_component_agg(col) for col in df.columns}
-    out = df.groupby(pd.Index(labels, name=label_name)).agg(agg)
-    return out
+    grouper = pd.Index(labels, name=label_name)
+    out = df.groupby(grouper).agg(agg)
+    # a window with a missing step is unknown, not "the sum of the rest"
+    # (the typed path propagates NaN; keep both paths consistent)
+    nan_any = df.isna().groupby(grouper).any()
+    return out.mask(nan_any.reindex(out.index)[out.columns])

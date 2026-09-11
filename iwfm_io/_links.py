@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
@@ -373,27 +372,38 @@ def _reader(name: str):
 def load_component(model, name: str):
     """Parse (and cache) a component by registry name, or None when the
     model does not reference it."""
-    cache = model._cache.setdefault("_components", {})
-    if name in cache:
-        return cache[name]
-
-    obj = None
     attr = PRELOADED.get(name)
-    if attr is not None:
-        obj = getattr(model, attr, None)
-    if obj is None:
-        comp = COMPONENTS[name]
-        if comp.parent is None:
-            parent = model._sim
-            paths = getattr(parent, "file_paths", {}) if parent else {}
-        else:
-            parent = load_component(model, comp.parent)
-            paths = getattr(parent, "file_paths", {}) if parent else {}
-        path = paths.get(comp.path_key)
-        if path and Path(path).exists():
-            obj = _reader(comp.reader)(path)
-    cache[name] = obj
-    return obj
+    if attr is not None and getattr(model, attr, None) is not None:
+        return getattr(model, attr)
+    comp = COMPONENTS[name]
+    path = _component_path(model, comp)
+    if path is None or not Path(path).exists():
+        return None
+    cached = getattr(model, "_cached_file", None)
+    if cached is None:                      # duck-typed model without the cache
+        return _read_component(model, comp, path)
+    return cached(f"_component::{name}", [path],
+                  lambda: _read_component(model, comp, path))
+
+
+def _component_path(model, comp):
+    if comp.parent is None:
+        parent = model._sim
+    else:
+        parent = load_component(model, comp.parent)
+    paths = getattr(parent, "file_paths", {}) if parent else {}
+    return paths.get(comp.path_key)
+
+
+def _read_component(model, comp, path):
+    fn = _reader(comp.reader)
+    kwargs = {}
+    if "n_elements" in fn.__code__.co_varnames[:fn.__code__.co_argcount]:
+        try:
+            kwargs["n_elements"] = int(len(model.elements_df()))
+        except Exception:
+            pass
+    return fn(path, **kwargs)
 
 
 def _target_path(model, target: TsTarget):
@@ -415,16 +425,15 @@ def load_timeseries(model, role: str):
         raise KeyError(
             f"unknown time-series role {role!r}; known roles: "
             f"{sorted(TS_TARGETS)}")
-    cache = model._cache.setdefault("_timeseries", {})
-    if role in cache:
-        return cache[role]
     target = TS_TARGETS[role]
     path = _target_path(model, target)
-    obj = None
-    if path and Path(path).exists():
-        obj = _reader(target.reader)(path)
-    cache[role] = obj
-    return obj
+    if not path or not Path(path).exists():
+        return None
+    cached = getattr(model, "_cached_file", None)
+    if cached is None:
+        return _reader(target.reader)(path)
+    return cached(f"_timeseries::{role}", [path],
+                  lambda: _reader(target.reader)(path))
 
 
 def _ts_meta(obj, target: TsTarget):
@@ -539,35 +548,66 @@ def column_usage(model, role: str) -> pd.DataFrame:
 
 
 def _entity_ids(model, entity: str, group_source: str | None = None):
+    """The set of known ids for *entity*.
+
+    Empty only when the entity's file is genuinely absent (a model
+    without streams or lakes, a component the model does not
+    reference); a parse failure propagates as ``IWFMParseError``.
+    """
     cache = model._cache.setdefault("_entity_ids", {})
     key = entity if group_source is None else f"group:{group_source}"
     if key in cache:
         return cache[key]
     ids: set = set()
-    try:
-        if entity == "element":
-            ids = set(model.elements_df()["element_id"].astype(int))
-        elif entity == "node":
-            ids = set(model.nodes_df()["node_id"].astype(int))
-        elif entity == "stream_node":
+    pp = getattr(model, "_pp", None)
+    children = getattr(pp, "children", {}) if pp is not None else {}
+    if entity == "element":
+        ids = set(model.elements_df()["element_id"].astype(int))
+    elif entity == "node":
+        ids = set(model.nodes_df()["node_id"].astype(int))
+    elif entity == "stream_node":
+        if children.get("stream") is not None:
             ids = set(model.stream_nodes_df()["stream_node_id"]
                       .astype(int))
-        elif entity == "subregion":
-            ids = set(model.subregions_df()["subregion_id"].astype(int))
-        elif entity == "lake":
+    elif entity == "subregion":
+        ids = set(model.subregions_df()["subregion_id"].astype(int))
+    elif entity == "lake":
+        if children.get("lake") is not None:
             lakes = model.lakes_df()
             if lakes is not None and "lake_id" in lakes.columns:
                 ids = set(lakes["lake_id"].astype(int))
-        elif entity == "group":
-            comp = load_component(model, group_source)
-            groups = (getattr(comp, "element_groups", None)
-                      or getattr(comp, "delivery_groups", None)) if comp \
-                else None
-            ids = {g["group_id"] for g in groups} if groups else set()
-    except Exception:
-        ids = set()
+    elif entity == "group":
+        comp = load_component(model, group_source)
+        groups = (getattr(comp, "element_groups", None)
+                  or getattr(comp, "delivery_groups", None)) if comp \
+            else None
+        ids = {g["group_id"] for g in groups} if groups else set()
+    else:
+        raise KeyError(f"unknown entity {entity!r}")
     cache[key] = ids
     return ids
+
+
+def _numeric_values(rows, severity_src, table, column, raw,
+                    what="pointer"):
+    """Numeric, integral values of a column; non-numeric text and
+    non-integral numbers are reported as findings (never coerced away).
+    Missing values (NaN/None) are skipped — they are legitimate blanks
+    (e.g. the spill pair of a no-spill diversion layout)."""
+    present = raw[raw.notna()]
+    num = pd.to_numeric(present, errors="coerce")
+    bad_text = present[num.isna()]
+    if len(bad_text):
+        _finding(rows, "error", severity_src, table, column,
+                 f"non-numeric {what} value(s)",
+                 sorted({str(v) for v in bad_text}))
+    num = num.dropna().astype(float)
+    frac = num[num != num.round()]
+    if len(frac):
+        _finding(rows, "error", severity_src, table, column,
+                 f"non-integral {what} value(s)",
+                 sorted(frac.unique().tolist()))
+    return num[num == num.round()].astype(int)
 
 
 def _finding(rows, severity, source, table, column, issue, bad):
@@ -602,7 +642,8 @@ def validate_references(model) -> pd.DataFrame:
         if obj is not None:
             _, ncol, _ = _ts_meta(obj, target)
         for col in cols:
-            vals = pd.to_numeric(df[col], errors="coerce").dropna()
+            vals = _numeric_values(rows, link.source, link.table, col,
+                                   df[col])
             used = vals[vals != 0]
             if used.empty:
                 continue
@@ -637,8 +678,8 @@ def validate_references(model) -> pd.DataFrame:
         ids = _entity_ids(model, link.entity)
         if not ids:
             continue
-        vals = pd.to_numeric(df[link.column], errors="coerce").dropna()
-        vals = vals.astype(int)
+        vals = _numeric_values(rows, link.source, link.table, link.column,
+                               df[link.column], what=f"{link.entity} id")
         if link.zero_ok:
             vals = vals[vals != 0]
         bad = sorted(set(vals) - ids)
@@ -659,6 +700,8 @@ def validate_references(model) -> pd.DataFrame:
                 or link.type_col not in df.columns:
             continue
         types = pd.to_numeric(df[link.type_col], errors="coerce")
+        _numeric_values(rows, link.source, link.table, link.type_col,
+                        df[link.type_col], what="destination type")
         unknown = sorted(set(types.dropna().astype(int))
                          - set(link.codes))
         if unknown:
@@ -671,8 +714,9 @@ def validate_references(model) -> pd.DataFrame:
             sel = df[types == code]
             if sel.empty:
                 continue
-            dests = pd.to_numeric(sel[link.dest_col],
-                                  errors="coerce").dropna().astype(int)
+            dests = _numeric_values(rows, link.source, link.table,
+                                    link.dest_col, sel[link.dest_col],
+                                    what=f"type {code} destination")
             if entity.startswith("group:"):
                 ids = _entity_ids(model, "group",
                                   entity.split(":", 1)[1])

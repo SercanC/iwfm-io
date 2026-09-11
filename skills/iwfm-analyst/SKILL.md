@@ -60,6 +60,18 @@ model, and use its budget names/locations verbatim.
 - If a request is ambiguous ("show me the budget"), default to the
   groundwater budget for the whole model area and offer the other
   locations `describe()` listed.
+- Readers are strict: a broken input file raises `IWFMParseError`
+  naming the file, section and line. Tell the user which file/line is
+  broken instead of working around it; only fall back to
+  `open_model(path, strict=False)` (keeps what parsed, warns) when they
+  accept partial data. `m.validate_references()` lists cross-file
+  pointer problems as a table — run it when a model misbehaves.
+- After the user re-runs a model, the same `open_model` object serves
+  the new outputs (files are re-read when they change); `m.reload()`
+  forces it. `m.available_budgets` lists what `budget_df` can serve.
+- Never post-edit a file the writers refused to write: they raise
+  `ValueError` on NaN/blank cells, names with `/`, or missing layers
+  because IWFM would misread the result — fix the DataFrame instead.
 
 ## Task recipes
 
@@ -107,7 +119,7 @@ full surface in the api-reference `iwfm_io.pest` section.
 
 ## Plotting
 
-Load `references/plotting.md` for the catalog of all 58 plot functions
+Load `references/plotting.md` for the catalog of all 66 plot functions
 grouped by user intent (maps, time series, trends, water balance,
 animations…). All of them work without the Windows DLL via the
 `open_model` adapter. Example gallery (real Central Valley model):
@@ -128,7 +140,10 @@ and several outputs exist in both text and HDF form.
   so the original model is never modified in place.
 - Simulation runtimes vary wildly: the 441-node sample runs in ~40 s;
   C2VSimFG takes ~8 hours. Warn before launching anything big and run
-  it in the background.
+  it in the background. Pass `run_model(..., timeout=<seconds>)` for
+  unattended runs (IWFM's ZBudget can loop forever on a bad print
+  interval); a failure raises `RunError` with the FATAL lines — show
+  those lines to the user.
 - The Windows DLL is optional (only needed for live simulation state).
   If a DLL task comes up: `iwfm_io.dll.download_dll("2025.0.1747")`, and note
   that `IWFMModel` takes the **preprocessor main .IN file**, not the

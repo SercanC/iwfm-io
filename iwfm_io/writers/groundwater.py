@@ -8,9 +8,11 @@ initial conditions — are regenerated from the parsed DataFrames.
 
 from __future__ import annotations
 
+import pandas as pd
+
 from pathlib import Path
 
-from iwfm_io._writer import IWFMFileWriter
+from iwfm_io._writer import IWFMFileWriter, format_cell, numbered_columns
 from iwfm_io.models.groundwater import (
     BCMain,
     BoundaryTSFile,
@@ -28,11 +30,14 @@ from iwfm_io.models.groundwater import (
 )
 from iwfm_io.writers._param_blocks import (
     check_count,
+    fmt_int,
+    fmt_name,
     fmt_num,
     write_element_groups,
     write_param_block,
     write_table_rows,
 )
+from iwfm_io.writers._timeseries import write_ts_body
 
 
 def _nrows(df) -> int:
@@ -45,12 +50,20 @@ def _note(row) -> str:
     return v if isinstance(v, str) else ""
 
 
-def _cell(value) -> str:
-    """A table cell: blank for missing values, ``fmt_num`` otherwise."""
-    import pandas as pd
-    if value is None or (not isinstance(value, str) and pd.isna(value)):
-        return ""
-    return fmt_num(value)
+def _hydrograph_row(row, id_col: str, type_col: str, what: str) -> list[str]:
+    """``ID TYPE LAYER X Y NODE NAME`` cells of a GW/subsidence
+    hydrograph row: ids/type/layer must be integral, x/y/node/name may
+    be blank (a hydrograph is located by either coordinates or node)."""
+    return [
+        fmt_int(row[id_col], f"{what} id"),
+        fmt_int(row[type_col], f"{what} type"),
+        fmt_int(row["layer"], f"{what} layer"),
+        format_cell(row["x"], what=f"{what} x", allow_blank=True),
+        format_cell(row["y"], what=f"{what} y", allow_blank=True),
+        format_cell(row["node"], what=f"{what} node", allow_blank=True,
+                    integer=True),
+        fmt_name(row["name"], f"{what} name"),
+    ]
 
 
 # ------------------------------------------------------------------
@@ -112,15 +125,7 @@ def write_gw_main(
     if gw.hydrographs is not None and len(gw.hydrographs) > 0:
         for _, row in gw.hydrographs.iterrows():
             w.write_data_line(
-                [
-                    _cell(row["id"]),
-                    _cell(row["hydtyp"]),
-                    _cell(row["layer"]),
-                    _cell(row["x"]),
-                    _cell(row["y"]),
-                    _cell(row["node"]),
-                    row["name"] if row["name"] is not None else "",
-                ],
+                _hydrograph_row(row, "id", "hydtyp", "GW hydrograph"),
                 widths=[6, 8, 10, 14, 14, 14, 12],
                 note=_note(row),
             )
@@ -137,11 +142,11 @@ def write_gw_main(
         for _, row in gw.face_flows.iterrows():
             w.write_data_line(
                 [
-                    _cell(row["id"]),
-                    _cell(row["layer"]),
-                    _cell(row["node_a"]),
-                    _cell(row["node_b"]),
-                    row["name"] if row["name"] is not None else "",
+                    fmt_int(row["id"], "face flow id"),
+                    fmt_int(row["layer"], "face flow layer"),
+                    fmt_int(row["node_a"], "face flow node_a"),
+                    fmt_int(row["node_b"], "face flow node_b"),
+                    fmt_name(row["name"], "face flow name"),
                 ],
                 widths=[6, 8, 12, 12, 12],
                 note=_note(row),
@@ -171,9 +176,8 @@ def write_gw_main(
     w.write_keyed_value(fmt_num(gw.anomaly_factor), "FACT")
     w.write_keyed_value(gw.anomaly_time_unit or "1day", "TUNITH")
     if gw.kh_anomalies is not None and len(gw.kh_anomalies) > 0:
-        cols = ["ic", "element_id"] + [
-            c for c in gw.kh_anomalies.columns
-            if c.startswith("kh_layer_")]
+        cols = ["ic", "element_id"] + numbered_columns(
+            gw.kh_anomalies, "kh_layer_")
         write_table_rows(w, gw.kh_anomalies, cols,
                          widths=[8, 10] + [14] * (len(cols) - 2))
 
@@ -191,9 +195,8 @@ def write_gw_main(
     w.write_keyed_value(fmt_num(gw.facthp if gw.facthp is not None else 1.0),
                         "FACTHP")
     if gw.initial_heads is not None and len(gw.initial_heads) > 0:
-        cols = ["node_id"] + [
-            c for c in gw.initial_heads.columns
-            if c.startswith("head_layer_")]
+        cols = ["node_id"] + numbered_columns(gw.initial_heads,
+                                             "head_layer_")
         write_table_rows(w, gw.initial_heads, cols,
                          widths=[10] + [14] * (len(cols) - 1))
 
@@ -225,7 +228,10 @@ def _normalize_heads_frame(heads) -> "tuple[list[int], pd.DataFrame]":
     cols = list(df.columns)
     if "node_id" in cols:
         id_col = "node_id"
-        layer_cols = [c for c in cols if str(c).startswith("head_layer_")]
+        layer_cols = numbered_columns(df, "head_layer_")
+        # HP[k] is positional in the file: the layers must be 1..NL
+        # with no gap, or layer 3 would silently be written as HP[2]
+        numbered_columns(df, "head_layer_", n=len(layer_cols))
     else:
         id_col = cols[0]
         layer_cols = cols[1:]
@@ -296,13 +302,15 @@ def write_gw_initial_conditions(
         ids, or any NaN head.
     """
     node_ids, df = _normalize_heads_frame(heads)
-    layer_cols = [c for c in df.columns if c.startswith("head_layer_")]
+    layer_cols = numbered_columns(df, "head_layer_")
 
     w = IWFMFileWriter(path)
     w.write_comment("C" + "*" * 79)
     if header:
         for line in header:
-            w.write_comment(line)
+            # free text: every physical line becomes its own comment line
+            for part in str(line).splitlines() or [""]:
+                w.write_comment(part.strip())
     else:
         w.write_comment("C ***** GROUNDWATER INITIAL CONDITIONS "
                         f"({len(node_ids)} nodes, {len(layer_cols)} layers)")
@@ -450,10 +458,10 @@ def write_bc_main(
         for _, row in bc.bc_hydrographs.iterrows():
             w.write_data_line(
                 [
-                    _cell(row["id"]),
-                    _cell(row["layer"]),
-                    _cell(row["node"]),
-                    row["name"] if row["name"] is not None else "",
+                    fmt_int(row["id"], "BC hydrograph id"),
+                    fmt_int(row["layer"], "BC hydrograph layer"),
+                    fmt_int(row["node"], "BC hydrograph node"),
+                    fmt_name(row["name"], "BC hydrograph name"),
                 ],
                 widths=[6, 8, 12, 12],
                 note=_note(row),
@@ -485,10 +493,10 @@ def write_spec_head_bc(sf: SpecifiedHeadFile, path: str | Path) -> None:
         for _, row in sf.data.iterrows():
             w.write_data_line(
                 [
-                    int(row["node_id"]),
-                    int(row["layer"]),
-                    int(row["itscol"]),
-                    fmt_num(float(row["head"])),
+                    fmt_int(row["node_id"], "specified head node_id"),
+                    fmt_int(row["layer"], "specified head layer"),
+                    fmt_int(row["itscol"], "specified head itscol"),
+                    fmt_num(row["head"], what="specified head"),
                 ],
                 widths=[10, 8, 8, 12],
             )
@@ -523,10 +531,10 @@ def write_spec_flow_bc(sf: SpecifiedFlowBCFile, path: str | Path) -> None:
         for _, row in sf.data.iterrows():
             w.write_data_line(
                 [
-                    int(row["node_id"]),
-                    int(row["layer"]),
-                    int(row["itscol"]),
-                    fmt_num(float(row["flow"])),
+                    fmt_int(row["node_id"], "specified flow node_id"),
+                    fmt_int(row["layer"], "specified flow layer"),
+                    fmt_int(row["itscol"], "specified flow itscol"),
+                    fmt_num(row["flow"], what="specified flow"),
                 ],
                 widths=[10, 8, 8, 14],
             )
@@ -563,11 +571,12 @@ def write_general_head_bc(gh: GeneralHeadBCFile, path: str | Path) -> None:
         for _, row in gh.data.iterrows():
             w.write_data_line(
                 [
-                    int(row["node_id"]),
-                    int(row["layer"]),
-                    int(row["itscol"]),
-                    fmt_num(float(row["head"])),
-                    fmt_num(float(row["conductance"])),
+                    fmt_int(row["node_id"], "general head BC node_id"),
+                    fmt_int(row["layer"], "general head BC layer"),
+                    fmt_int(row["itscol"], "general head BC itscol"),
+                    fmt_num(row["head"], what="general head BC head"),
+                    fmt_num(row["conductance"],
+                            what="general head BC conductance"),
                 ],
                 widths=[10, 8, 8, 14, 14],
             )
@@ -609,22 +618,20 @@ def write_constrained_head_bc(
 
     if ch.data is not None:
         for _, row in ch.data.iterrows():
+            what = "constrained head BC"
             values = [
-                int(row["node_id"]),
-                int(row["layer"]),
-                int(row["itscol"]),
-                fmt_num(float(row["head"])),
-                fmt_num(float(row["conductance"])),
-                fmt_num(float(row["limiting_head"])),
-                int(row["itscolf"]),
-                fmt_num(float(row["max_flow"])),
+                fmt_int(row["node_id"], f"{what} node_id"),
+                fmt_int(row["layer"], f"{what} layer"),
+                fmt_int(row["itscol"], f"{what} itscol"),
+                fmt_num(row["head"], what=f"{what} head"),
+                fmt_num(row["conductance"], what=f"{what} conductance"),
+                fmt_num(row["limiting_head"], what=f"{what} limiting_head"),
+                fmt_int(row["itscolf"], f"{what} itscolf"),
+                fmt_num(row["max_flow"], what=f"{what} max_flow"),
             ]
             widths = [10, 8, 8, 14, 14, 14, 10, 14]
-            name = row.get("name", "")
-            if name:
-                values.append(f"/{name}")
-                widths.append(4)
-            w.write_data_line(values, widths)
+            w.write_data_line(values, widths,
+                              note=fmt_name(row.get("name"), f"{what} name"))
 
     w.flush()
 
@@ -649,19 +656,15 @@ def write_boundary_ts(
 
     spec = bt.spec
     cfg = bt.config
-    w.write_keyed_value(spec.n_columns, "NBTSD")
-    w.write_keyed_value(spec.factor, "FACTHTS")
-    w.write_keyed_value(cfg.get("factqts", 1.0), "FACTQTS")
-    w.write_keyed_value(spec.n_steps_update, "NSPHTS")
-    w.write_keyed_value(spec.repeat_freq, "NFQHTS")
-    w.write_keyed_value(spec.dss_file, "DSSFL")
-    # Load-bearing comment — see IWFMFileWriter.write_timeseries_spec
-    w.write_comment("C  end of specification")
-
-    if bt.dss_pathnames:
-        w.write_dss_pathnames(bt.dss_pathnames)
-    elif bt.data is not None:
-        w.write_timeseries_data(bt.data)
+    write_ts_body(
+        w,
+        [(spec.n_columns, "NBTSD"),
+         (spec.factor, "FACTHTS"),
+         (cfg.get("factqts", 1.0), "FACTQTS"),
+         (spec.n_steps_update, "NSPHTS"),
+         (spec.repeat_freq, "NFQHTS"),
+         (spec.dss_file, "DSSFL")],
+        bt.data, bt.dss_pathnames, n_columns=spec.n_columns)
 
     w.flush()
 
@@ -715,23 +718,22 @@ def write_elem_pump(ep: ElemPumpFile, path: str | Path) -> None:
 
     if ep.data is not None:
         # Per-layer fraction columns are dynamic (one per aquifer layer)
-        frac_cols = sorted(
-            (c for c in ep.data.columns if c.startswith("fracskl_")),
-            key=lambda c: int(c.rsplit("_", 1)[1]))
+        frac_cols = numbered_columns(ep.data, "fracskl_")
         col_order = (
             ["id", "icolsk", "fracsk", "ioptsk"] + frac_cols
             + ["typdstsk", "dstsk", "icfirigsk", "icadjsk", "icskmax",
                "fskmax"]
         )
+        int_cols = {"id", "icolsk", "ioptsk", "typdstsk", "dstsk",
+                    "icfirigsk", "icadjsk", "icskmax"}
         widths = ([5, 6, 9, 9] + [12] * len(frac_cols)
                   + [12, 8, 12, 10, 10, 8])
-        import pandas as pd
+
+        def _isna(v):
+            return v is None or (not isinstance(v, str) and pd.isna(v))
+
         for _, row in ep.data.iterrows():
             vals = [row.get(col) for col in col_order]
-
-            def _isna(v):
-                return v is None or (not isinstance(v, str) and pd.isna(v))
-
             n_valid = len(vals)
             while n_valid and _isna(vals[n_valid - 1]):
                 n_valid -= 1
@@ -739,16 +741,15 @@ def write_elem_pump(ep: ElemPumpFile, path: str | Path) -> None:
             for col, val in zip(col_order[:n_valid], vals[:n_valid]):
                 if _isna(val):
                     raise ValueError(
-                        f"NaN in elem-pump column {col!r} — only "
+                        f"NaN in elem-pump column {col!r} -- only "
                         "TRAILING values may be omitted; a gap in the "
                         "middle would shift IWFM's read")
-                tokens.append(fmt_num(val))
-            line = "".join(str(t).rjust(wd)
-                           for t, wd in zip(tokens, widths))
-            name = row.get("name") or ""
-            if isinstance(name, str) and name:
-                line += f"    /{name}"
-            w.write_raw(line)
+                tokens.append(format_cell(
+                    val, what=f"elem-pump column {col!r}",
+                    integer=col in int_cols))
+            w.write_data_line(tokens, widths[:n_valid],
+                              note=fmt_name(row.get("name"),
+                                            "elem-pump name"))
 
     check_count(ep.n_groups, len(ep.element_groups),
                 "Element pumping: NGRP")
@@ -782,32 +783,28 @@ def write_well_spec(ws: WellSpecFile, path: str | Path) -> None:
     if ws.data is not None:
         for _, row in ws.data.iterrows():
             line_vals = [
-                int(row["well_id"]),
-                fmt_num(row["x"]), fmt_num(row["y"]),
-                fmt_num(row["radius"]),
-                fmt_num(row["perf_top"]), fmt_num(row["perf_bot"]),
+                fmt_int(row["well_id"], "well_id"),
+                fmt_num(row["x"], what="well x"),
+                fmt_num(row["y"], what="well y"),
+                fmt_num(row["radius"], what="well radius"),
+                fmt_num(row["perf_top"], what="well perf_top"),
+                fmt_num(row["perf_bot"], what="well perf_bot"),
             ]
-            widths = [8, 16, 16, 10, 12, 12]
-            name = row.get("name") or ""
-            parts = "".join(str(v).rjust(wd)
-                            for v, wd in zip(line_vals, widths))
-            if name:
-                parts += f"    /{name}"
-            w.write_raw(parts)
+            w.write_data_line(line_vals, [8, 16, 16, 10, 12, 12],
+                              note=fmt_name(row.get("name"), "well name"))
 
     w.write_comment("C  Well Pumping Configuration")
     if ws.pump_config is not None:
         cols = ["id", "icolwl", "fracwl", "ioptwl", "typdstwl", "dstwl",
                 "icfirigwl", "icadjwl", "icwlmax", "fwlmax"]
+        int_cols = {"id", "icolwl", "ioptwl", "typdstwl", "dstwl",
+                    "icfirigwl", "icadjwl", "icwlmax"}
         widths = [8, 8, 8, 8, 8, 10, 10, 8, 8, 8]
         for _, row in ws.pump_config.iterrows():
-            cells = [fmt_num(row[c]) for c in cols]
-            if "" in cells:
-                bad = cols[cells.index("")]
-                raise ValueError(
-                    f"NaN in well pump-config column {bad!r} for well "
-                    f"{row.get('id')} — a blank cell would shift IWFM's "
-                    "read")
+            cells = [format_cell(
+                row[c], what=f"well pump-config column {c!r} for well "
+                             f"{row.get('id')}",
+                integer=c in int_cols) for c in cols]
             w.write_data_line(cells, widths, note=_note(row))
 
     check_count(ws.n_groups, len(ws.element_groups), "Well specs: NGRP")
@@ -832,17 +829,19 @@ def write_ts_pumping(ts: TSPumpingFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(ts.header)
 
-    w.write_timeseries_spec(
-        ts.spec,
-        keywords=["NCOLPUMP", "FACTPUMP", "NSPPUMP", "NFQPUMP", "DSSFL"],
-    )
-
-    if ts.dss_pathnames:
-        w.write_dss_pathnames(ts.dss_pathnames)
-    elif ts.data is not None:
-        w.write_timeseries_data(ts.data)
-
+    _write_ts_file(w, ts, ["NCOLPUMP", "FACTPUMP", "NSPPUMP", "NFQPUMP",
+                           "DSSFL"])
     w.flush()
+
+
+def _write_ts_file(w: IWFMFileWriter, ts, keywords: list[str]) -> None:
+    """Body of a 5-parameter time-series file (spec + data)."""
+    spec = ts.spec
+    fields = list(zip(
+        [spec.n_columns, spec.factor, spec.n_steps_update,
+         spec.repeat_freq, spec.dss_file], keywords))
+    write_ts_body(w, fields, ts.data, ts.dss_pathnames,
+                  n_columns=spec.n_columns)
 
 
 # ------------------------------------------------------------------
@@ -870,12 +869,12 @@ def write_tile_drain(td: TileDrainFile, path: str | Path) -> None:
         for _, row in td.data.iterrows():
             w.write_data_line(
                 [
-                    int(row["id"]),
-                    int(row["node"]),
-                    fmt_num(float(row["elev"])),
-                    fmt_num(float(row["conductance"])),
-                    int(row["dest_type"]),
-                    int(row["dest"]),
+                    fmt_int(row["id"], "tile drain id"),
+                    fmt_int(row["node"], "tile drain node"),
+                    fmt_num(row["elev"], what="tile drain elev"),
+                    fmt_num(row["conductance"], what="tile drain conductance"),
+                    fmt_int(row["dest_type"], "tile drain dest_type"),
+                    fmt_int(row["dest"], "tile drain dest"),
                 ],
                 widths=[6, 8, 12, 12, 10, 8],
             )
@@ -891,10 +890,11 @@ def write_tile_drain(td: TileDrainFile, path: str | Path) -> None:
         for _, row in td.sub_irrig_data.iterrows():
             w.write_data_line(
                 [
-                    int(row["id"]),
-                    int(row["node"]),
-                    fmt_num(float(row["elev"])),
-                    fmt_num(float(row["conductance"])),
+                    fmt_int(row["id"], "sub-irrigation id"),
+                    fmt_int(row["node"], "sub-irrigation node"),
+                    fmt_num(row["elev"], what="sub-irrigation elev"),
+                    fmt_num(row["conductance"],
+                            what="sub-irrigation conductance"),
                 ],
                 widths=[6, 8, 12, 12],
             )
@@ -910,7 +910,9 @@ def write_tile_drain(td: TileDrainFile, path: str | Path) -> None:
     if td.hydrographs is not None and len(td.hydrographs) > 0:
         for _, row in td.hydrographs.iterrows():
             w.write_data_line(
-                [int(row["id"]), int(row["idtyp"]), row["name"]],
+                [fmt_int(row["id"], "tile drain hydrograph id"),
+                 fmt_int(row["idtyp"], "tile drain hydrograph idtyp"),
+                 fmt_name(row["name"], "tile drain hydrograph name")],
                 widths=[8, 8, 16],
                 note=_note(row),
             )
@@ -956,15 +958,8 @@ def write_subsidence(
     if sub.hydrographs is not None and len(sub.hydrographs) > 0:
         for _, row in sub.hydrographs.iterrows():
             w.write_data_line(
-                [
-                    _cell(row["id"]),
-                    _cell(row["subtyp"]),
-                    _cell(row["layer"]),
-                    _cell(row["x"]),
-                    _cell(row["y"]),
-                    _cell(row["node"]),
-                    row["name"] if row["name"] is not None else "",
-                ],
+                _hydrograph_row(row, "id", "subtyp",
+                                "subsidence hydrograph"),
                 widths=[6, 8, 10, 14, 14, 14, 12],
                 note=_note(row),
             )

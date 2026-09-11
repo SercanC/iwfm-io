@@ -1,10 +1,9 @@
 """Integration test: load the entire sample model via iwfm_io."""
 
 import pytest
-from pathlib import Path
 
 from tests.io.conftest import (
-    SAMPLE_MODEL, PREPROCESSOR_DIR, SIMULATION_DIR, RESULTS_DIR, BUDGET_DIR,
+    PREPROCESSOR_DIR, SIMULATION_DIR, RESULTS_DIR, BUDGET_DIR,
 )
 
 

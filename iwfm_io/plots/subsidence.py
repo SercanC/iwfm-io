@@ -6,9 +6,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from . import (plot_contour_map, overlay_streams, overlay_grid,
-               build_triangulation, excel_date_to_datetime,
-               _has_df_methods, savefig)
+from . import (plot_contour_map, overlay_streams, build_triangulation, _has_df_methods, savefig)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -102,7 +100,7 @@ def plot_subsidence_vs_head(heads_ts, subsidence_ts, dates=None,
         t = np.arange(len(dates))
         sc = ax.scatter(heads_ts, subsidence_ts, c=t, cmap="viridis",
                         s=15, alpha=0.7, edgecolors="none")
-        cb = fig.colorbar(sc, ax=ax, label="Time step")
+        fig.colorbar(sc, ax=ax, label="Time step")
         # Connect with thin lines to show path
         ax.plot(heads_ts, subsidence_ts, "k-", linewidth=0.3, alpha=0.4)
     else:
@@ -114,8 +112,6 @@ def plot_subsidence_vs_head(heads_ts, subsidence_ts, dates=None,
     arrow_indices = [n // 4, n // 2, 3 * n // 4]
     for ai in arrow_indices:
         if ai + 1 < n:
-            dx = heads_ts[ai + 1] - heads_ts[ai]
-            dy = subsidence_ts[ai + 1] - subsidence_ts[ai]
             ax.annotate("", xy=(heads_ts[ai + 1], subsidence_ts[ai + 1]),
                         xytext=(heads_ts[ai], subsidence_ts[ai]),
                         arrowprops=dict(arrowstyle="->", color="red",
@@ -140,12 +136,3 @@ def plot_subsidence_vs_head(heads_ts, subsidence_ts, dates=None,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    # Note: subsidence data requires a model that has been run
-    # (not just inquiry mode for most configurations).
-    # This example assumes you have subsidence output available.
-    print("Subsidence plots require simulation output data.")
-    print("See function docstrings for usage with precomputed arrays.")

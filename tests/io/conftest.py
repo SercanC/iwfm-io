@@ -1,20 +1,21 @@
 """Shared pytest fixtures for iwfm_io tests."""
 
-from pathlib import Path
 
 import pytest
 
-# Root of the sample model (relative to repo root)
-SAMPLE_MODEL = Path(__file__).resolve().parent.parent.parent / ".assets" / "sample_model"
+# Root of the sample model — one definition, shared with the root conftest
+from tests.conftest import SAMPLE_MODEL  # noqa: E402
 PREPROCESSOR_DIR = SAMPLE_MODEL / "Preprocessor"
 SIMULATION_DIR = SAMPLE_MODEL / "Simulation"
 RESULTS_DIR = SAMPLE_MODEL / "Results"
 BUDGET_DIR = SAMPLE_MODEL / "Budget"
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def sample_model():
-    """Path to the sample_model directory."""
+    """Path to the sample_model directory (skips when absent)."""
+    if not SAMPLE_MODEL.is_dir():
+        pytest.skip("sample model not present (.assets/sample_model)")
     return SAMPLE_MODEL
 
 

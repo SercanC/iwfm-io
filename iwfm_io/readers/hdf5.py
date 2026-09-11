@@ -69,6 +69,13 @@ logger = logging.getLogger(__name__)
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _truncate_rows(data, n):
+    """First *n* rows of a dataset given as an array or a {name: array}."""
+    if isinstance(data, dict):
+        return {k: v[:n] for k, v in data.items()}
+    return data[:n]
+
+
 def _excel_to_datetime(dates_array) -> List[datetime]:
     """Convert an array of Excel serial date numbers to Python datetime objects.
 
@@ -453,14 +460,14 @@ def read_budget_hdf(
             # Align DatetimeIndex length to actual row count (guard against
             # attribute/data mismatch)
             if n_rows != len(date_index):
+                n_keep = min(n_rows, len(date_index))
                 logger.warning(
                     "Location '%s': NTimeSteps attr=%d but dataset rows=%d; "
-                    "truncating date index.",
-                    loc_name,
-                    len(date_index),
-                    n_rows,
+                    "keeping the first %d steps.",
+                    loc_name, len(date_index), n_rows, n_keep,
                 )
-                idx = date_index[:n_rows]
+                idx = date_index[:n_keep]
+                data_cols = _truncate_rows(data_cols, n_keep)
             else:
                 idx = date_index
 
@@ -548,14 +555,13 @@ def read_hydrograph_hdf(path: Union[str, Path]) -> pd.DataFrame:
         col_names = [f"col_{i + 1}" for i in range(n_cols)]
 
         if n_rows != len(date_index):
+            n_keep = min(n_rows, len(date_index))
             logger.warning(
-                "%s: NTimeSteps attr=%d but dataset rows=%d; "
-                "truncating date index.",
-                path.name,
-                len(date_index),
-                n_rows,
+                "%s: NTimeSteps attr=%d but dataset rows=%d; keeping the "
+                "first %d steps.", path.name, len(date_index), n_rows, n_keep,
             )
-            idx = date_index[:n_rows]
+            idx = date_index[:n_keep]
+            raw = raw[:n_keep]
         else:
             idx = date_index
 
@@ -663,14 +669,13 @@ def read_head_hdf(
         col_names = [f"col_{i + 1}" for i in range(n_total_cols)]
 
     if n_rows != len(date_index):
+        n_keep = min(n_rows, len(date_index))
         logger.warning(
-            "%s: NTimeSteps attr=%d but dataset rows=%d; "
-            "truncating date index.",
-            path.name,
-            len(date_index),
-            n_rows,
+            "%s: NTimeSteps attr=%d but dataset rows=%d; keeping the first "
+            "%d steps.", path.name, len(date_index), n_rows, n_keep,
         )
-        idx = date_index[:n_rows]
+        idx = date_index[:n_keep]
+        raw = raw[:n_keep]
     else:
         idx = date_index
 
@@ -717,95 +722,115 @@ def read_zone_def(path: Union[str, Path]) -> ZoneDefinition:
     ValueError
         If the file cannot be parsed.
     """
+    from iwfm_io._parser import IWFMParseError
+    from iwfm_io._tokens import is_comment, split_keyed_line
+
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Zone definition file not found: {path}")
 
-    with open(path, "r", encoding="utf-8", errors="replace") as fh:
-        lines = fh.readlines()
+    with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
+        lines = fh.read().splitlines()
 
-    # Strip comment lines (start with C, case-insensitive) and blank lines
-    data_lines: List[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
+    def _err(msg, lineno=None):
+        return IWFMParseError(msg, path=path, lineno=lineno,
+                              section="zone definition")
+
+    # Blocks of consecutive data lines, delimited by comment/blank lines
+    # (IWFM's C/c/* markers).  Expected: [ZEXTENT], [zone names],
+    # [element assignments]; the name block may be absent.
+    blocks: List[List[tuple]] = []
+    current: List[tuple] = []
+    for i, line in enumerate(lines, start=1):
+        if is_comment(line):
+            if current:
+                blocks.append(current)
+                current = []
             continue
-        if stripped.upper().startswith("C"):
-            continue
-        # Strip inline comments after '/'
-        if "/" in stripped:
-            stripped = stripped[: stripped.index("/")].strip()
-        if stripped:
-            data_lines.append(stripped)
+        value, _ = split_keyed_line(line)
+        if value:
+            current.append((i, value))
+    if current:
+        blocks.append(current)
+    if not blocks:
+        raise _err("no data lines found", lineno=len(lines) or None)
 
-    if not data_lines:
-        raise ValueError(f"No data lines found in {path}")
-
-    # First data value: ZEXTENT
-    zextent = int(data_lines[0].split()[0])
+    # ZEXTENT is the first data value
+    lineno, value = blocks[0][0]
+    try:
+        zextent = int(value.split()[0])
+    except ValueError:
+        raise _err(f"ZEXTENT must be an integer, found {value!r}",
+                   lineno) from None
+    if zextent not in (0, 1):
+        raise _err(f"ZEXTENT must be 0 or 1, found {zextent}", lineno)
     extent = "horizontal" if zextent == 1 else "vertical"
+    n_assign = 2 if extent == "horizontal" else 3
+    rest = blocks[0][1:]
+    for b in blocks[1:]:
+        rest.extend(b)
 
-    # Parse zone name table: read lines with exactly 2 tokens where first
-    # token is an integer, until we hit the element assignment section.
-    # Heuristic: zone IDs are small sequential integers; element assignment
-    # lines have 2 tokens (horizontal) or 3 tokens (vertical).
+    def _is_assignment(value: str) -> bool:
+        toks = value.split()
+        if len(toks) != n_assign:
+            return False
+        try:
+            [int(t) for t in toks]
+        except ValueError:
+            return False
+        return True
+
     zones: Dict[int, str] = {}
-    elem_start = 1  # index into data_lines where element assignments begin
-
-    for i in range(1, len(data_lines)):
-        tokens = data_lines[i].split()
-        if len(tokens) < 2:
-            continue
-
-        zid = int(tokens[0])
-        # Detect transition to element section: if we already have zones
-        # and see a line whose second token is a pure integer that could be
-        # a zone ID we've already seen, we're in the element section.
-        if zones and len(tokens) == 2:
-            try:
-                second_val = int(tokens[1])
-                if second_val in zones:
-                    elem_start = i
-                    break
-            except ValueError:
-                pass
-        if zones and len(tokens) == 3:
-            # Vertical: IE LAYER ZONE — all numeric
-            try:
-                int(tokens[1])
-                int(tokens[2])
-                elem_start = i
-                break
-            except ValueError:
-                pass
-
-        # This is a zone name line
-        zones[zid] = tokens[1]
-
-    # Parse element assignment lines
     elem_ids: List[int] = []
     layers: List[int] = []
     zone_ids: List[int] = []
+    seen: set = set()
+    in_elements = False
+    for lineno, value in rest:
+        toks = value.split()
+        if not in_elements and not _is_assignment(value):
+            # zone name row: ZID then the rest of the line is the name
+            try:
+                zid = int(toks[0])
+            except ValueError:
+                raise _err(f"zone id must be an integer, found "
+                           f"{toks[0]!r}", lineno) from None
+            name = value.split(None, 1)[1].strip() if len(toks) > 1 else ""
+            if zid in zones:
+                raise _err(f"zone {zid} is named twice", lineno)
+            zones[zid] = name
+            continue
+        if not _is_assignment(value):
+            raise _err(
+                f"element assignment row must hold {n_assign} integers "
+                f"({'IE ZONE' if n_assign == 2 else 'IE LAYER ZONE'}), "
+                f"found {value!r}", lineno)
+        in_elements = True
+        vals = [int(t) for t in toks]
+        key = (vals[0], vals[1]) if n_assign == 3 else vals[0]
+        if key in seen:
+            where = (f"element {vals[0]} layer {vals[1]}" if n_assign == 3
+                     else f"element {vals[0]}")
+            raise _err(f"{where} is assigned twice", lineno)
+        seen.add(key)
+        elem_ids.append(vals[0])
+        if n_assign == 3:
+            layers.append(vals[1])
+        zone_ids.append(vals[-1])
 
-    for i in range(elem_start, len(data_lines)):
-        tokens = data_lines[i].split()
-        if extent == "horizontal":
-            if len(tokens) >= 2:
-                elem_ids.append(int(tokens[0]))
-                zone_ids.append(int(tokens[1]))
-        else:
-            if len(tokens) >= 3:
-                elem_ids.append(int(tokens[0]))
-                layers.append(int(tokens[1]))
-                zone_ids.append(int(tokens[2]))
+    # zone ids are the union of the name table and the assignments;
+    # unnamed zones get a placeholder name
+    for zid in sorted(set(zone_ids) - set(zones)):
+        zones[zid] = f"Zone {zid}"
 
     if extent == "horizontal":
         element_zones = pd.DataFrame(
-            {"element_id": elem_ids, "zone_id": zone_ids}
+            {"element_id": elem_ids, "zone_id": zone_ids}, dtype=int
         )
     else:
         element_zones = pd.DataFrame(
-            {"element_id": elem_ids, "layer": layers, "zone_id": zone_ids}
+            {"element_id": elem_ids, "layer": layers, "zone_id": zone_ids},
+            dtype=int,
         )
 
     return ZoneDefinition(extent=extent, zones=zones, element_zones=element_zones)
@@ -1154,7 +1179,6 @@ def read_zbudget_hdf(
         # Read metadata
         n_elements = int(attrs.get("SystemData%NElements", 0))
         n_layers = int(attrs.get("SystemData%NLayers", 0))
-        n_data = int(attrs.get("NData", 0))
 
         # Read data names and types from datasets
         full_names_raw = attrs_grp["FullDataNames"][()]

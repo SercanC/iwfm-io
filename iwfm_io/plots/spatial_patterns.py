@@ -7,7 +7,6 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 from . import (build_triangulation, overlay_streams, overlay_grid,
                excel_date_to_datetime, savefig, _has_df_methods,
                style_map_axes)
@@ -103,7 +102,7 @@ def plot_small_multiples(model, layer, begin_date, end_date,
     if _has_df_methods(model):
         hdf = model.heads_df(layer, begin_date, end_date)
         # Convert DatetimeIndex to Excel serial dates for compatibility
-        from datetime import datetime as _dt, timedelta as _td
+        from datetime import datetime as _dt
         _base = _dt(1899, 12, 30)
         dates = np.array([(d.to_pydatetime() - _base).total_seconds() / 86400.0
                           for d in hdf.index])
@@ -202,7 +201,14 @@ def plot_head_vs_gse_scatter(model, layer=1, ax=None, figsize=(8, 8),
         sdf = model.stratigraphy_df()
         gs = sdf["elevation"].values
         heads = get_heads_snapshot(model, layer)
-        top = sdf[f"aquitard_{layer}"].values
+        # aquifer top ELEVATION: GSE minus every aquitard/aquifer
+        # thickness above this layer's aquifer (the stratigraphy table
+        # holds thicknesses)
+        top = gs.astype(float).copy()
+        for k in range(1, layer + 1):
+            top = top - sdf[f"aquitard_{k}"].to_numpy(dtype=float)
+            if k < layer:
+                top = top - sdf[f"aquifer_{k}"].to_numpy(dtype=float)
     else:
         gs = model.get_ground_surface_elevation()
         heads = get_heads_snapshot(model, layer)
@@ -243,17 +249,3 @@ def plot_head_vs_gse_scatter(model, layer=1, ax=None, figsize=(8, 8),
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        bd, ed = "10/01/1990_24:00", "09/30/2000_24:00"
-        plot_sparkline_grid(m, 1, bd, ed, save_path="sparklines.png")
-        plot_small_multiples(m, 1, bd, ed, save_path="small_multiples.png")
-        plot_head_vs_gse_scatter(m, save_path="head_vs_gse.png")
-    plt.show()

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from iwfm_io._writer import IWFMFileWriter
 from iwfm_io.models.simulation import SimulationMain
+from iwfm_io.writers._param_blocks import fmt_int, write_titles
 
 
 def write_simulation_main(
@@ -27,10 +28,8 @@ def write_simulation_main(
     w.write_header(sim.header)
 
     # IWFM reads exactly 3 title lines positionally (verified against
-    # the executable: fewer titles shift the file list) — pad to 3.
-    titles = (list(sim.titles) + [".", ".", "."])[:3]
-    for title in titles:
-        w.write_raw(f"    {title}")
+    # the executable: fewer titles shift the file list) -- pad to 3.
+    write_titles(w, sim.titles, "Simulation main titles")
     w.write_comment("C  end of titles")
 
     path_keys = [
@@ -61,7 +60,7 @@ def write_simulation_main(
     w.write_comment("C  end of file list")
 
     w.write_keyed_value(sim.sim_begin, "BDT")
-    w.write_keyed_value(sim.restart, "RESTART")
+    w.write_keyed_value(fmt_int(sim.restart, "RESTART"), "RESTART")
     if sim.time_step is not None:
         # Non-time-tracked layout (BDT/EDT are plain numbers)
         w.write_keyed_value(sim.time_step, "DELTAT")
@@ -71,21 +70,22 @@ def write_simulation_main(
     w.write_comment("C  end of simulation period")
 
     out = sim.output
-    w.write_keyed_value(out.get("istrt", 0), "ISTRT")
-    w.write_keyed_value(out.get("kdeb", 0), "KDEB")
-    w.write_keyed_value(out.get("cache", 500000), "CACHE")
+    w.write_keyed_value(fmt_int(out.get("istrt", 0), "ISTRT"), "ISTRT")
+    w.write_keyed_value(fmt_int(out.get("kdeb", 0), "KDEB"), "KDEB")
+    w.write_keyed_value(fmt_int(out.get("cache", 500000), "CACHE"), "CACHE")
 
     sv = sim.solver
-    w.write_keyed_value(sv.get("msolve", 2), "MSOLVE")
+    w.write_keyed_value(fmt_int(sv.get("msolve", 2), "MSOLVE"), "MSOLVE")
     w.write_keyed_value(sv.get("relax", 1.0), "RELAX")
-    w.write_keyed_value(sv.get("mxiter", 1500), "MXITER")
-    w.write_keyed_value(sv.get("mxitersp", 50), "MXITERSP")
+    w.write_keyed_value(fmt_int(sv.get("mxiter", 1500), "MXITER"), "MXITER")
+    w.write_keyed_value(fmt_int(sv.get("mxitersp", 50), "MXITERSP"),
+                        "MXITERSP")
     w.write_keyed_value(sv.get("stopc", 0.0001), "STOPC")
     if "stopcvl" in sv:
         # STOPCVL exists only in older (2015-era) main file layouts
         w.write_keyed_value(sv["stopcvl"], "STOPCVL")
     w.write_keyed_value(sv.get("stopcsp", 0.001), "STOPCSP")
 
-    w.write_keyed_value(sim.supply_adjust_flag, "KOPTDV")
+    w.write_keyed_value(fmt_int(sim.supply_adjust_flag, "KOPTDV"), "KOPTDV")
 
     w.flush()

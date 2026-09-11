@@ -42,6 +42,7 @@ Example::
 from __future__ import annotations
 
 import json
+import shutil
 import logging
 import re
 import sys
@@ -157,9 +158,21 @@ def _load_obs(obs, date_format: Optional[str]) -> "pd.DataFrame":
             f"observations need columns site, datetime, value "
             f"(missing: {sorted(missing)})")
     df = df.copy()
+    if "excluded" in df.columns:
+        flag = df["excluded"].fillna(False)
+        if flag.dtype == object:
+            flag = flag.astype(str).str.strip().str.casefold().isin(
+                ("x", "true", "1", "yes"))
+        n_ex = int(flag.astype(bool).sum())
+        if n_ex:
+            logger.info("dropping %d observation(s) flagged excluded", n_ex)
+        df = df[~flag.astype(bool)].drop(columns=["excluded"])
     df["site"] = df["site"].astype(str).str.strip()
-    df["datetime"] = pd.to_datetime(df["datetime"])
+    dayfirst = bool(date_format) and date_format.strip().lower()[:2] == "dd"
+    df["datetime"] = pd.to_datetime(df["datetime"], dayfirst=dayfirst)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    if "weight" in df.columns:
+        df["weight"] = pd.to_numeric(df["weight"], errors="coerce")
     n_nan = int(df["value"].isna().sum())
     if n_nan:
         logger.warning("dropping %d observation(s) with non-numeric "
@@ -169,8 +182,10 @@ def _load_obs(obs, date_format: Optional[str]) -> "pd.DataFrame":
     if dup.any():
         logger.warning("averaging %d duplicate (site, datetime) "
                        "observation(s)", int(dup.sum()))
-        df = (df.groupby(["site", "datetime"], as_index=False)["value"]
-              .mean())
+        agg = {"value": "mean"}
+        if "weight" in df.columns:
+            agg["weight"] = "mean"
+        df = df.groupby(["site", "datetime"], as_index=False).agg(agg)
     if df.empty:
         raise ValueError("no usable observations")
     return df.sort_values(["site", "datetime"]).reset_index(drop=True)
@@ -339,7 +354,7 @@ def _build_parameter_specs(model, gw, sim, model_dir: Path,
                 base_dir=sim_base))
 
     if "strk" in parameters:
-        stream = model._stream_main
+        stream = model.stream_main
         st_path = (sim.file_paths or {}).get("stream_main")
         if stream is None or st_path is None:
             raise ValueError(
@@ -442,8 +457,24 @@ def pest_setup_from_model(model_dir, obs, dest_dir, case: str = "iwfm_cal",
 
     model_dir = Path(model_dir).resolve()
     dest = Path(dest_dir)
+    try:
+        weight_ok = np.isfinite(float(weight)) and float(weight) >= 0
+    except (TypeError, ValueError):
+        weight_ok = False
+    if not weight_ok:
+        raise ValueError(
+            f"weight must be a finite non-negative number, got {weight!r} "
+            "(pestpp-ies rejects a NaN weight at parse time)")
+    if dest.exists() and any(dest.iterdir()):
+        if not overwrite:
+            raise FileExistsError(
+                f"{dest} exists and is not empty (pass overwrite=True to "
+                "rebuild the template)")
+        from iwfm_io.scenario import _check_paths_disjoint
+        _check_paths_disjoint(model_dir, dest)
+        shutil.rmtree(dest)
     model = open_model(model_dir)
-    sim, gw = model._sim, model._gw_main
+    sim, gw = model.simulation, model.gw_main
     if sim is None:
         raise ValueError(f"could not locate/parse a simulation main "
                          f"file under {model_dir}")
@@ -491,6 +522,9 @@ def pest_setup_from_model(model_dir, obs, dest_dir, case: str = "iwfm_cal",
         {site: hyd[hid] for site, hid in id_of.items()}, index=hyd.index)
 
     paired = match_sim_to_obs(sim_by_site, obs_df, max_gap=max_gap)
+    if "weight" in obs_df.columns and "weight" not in paired.columns:
+        paired = paired.merge(obs_df[["site", "datetime", "weight"]],
+                              on=["site", "datetime"], how="left")
     unfilled = paired["simulated"].isna()
     if unfilled.any():
         d = paired[unfilled].rename(columns={"observed": "value"})[
@@ -531,14 +565,30 @@ def pest_setup_from_model(model_dir, obs, dest_dir, case: str = "iwfm_cal",
 
     # --- assemble the template
     spec = ObsFileSpec(list(paired["obsnme"]))
+    if "weight" in paired.columns:
+        row_weights = pd.to_numeric(paired["weight"], errors="coerce")
+        row_weights = row_weights.fillna(float(weight)).to_numpy(dtype=float)
+        if not np.isfinite(row_weights).all() or (row_weights < 0).any():
+            raise ValueError(
+                "observed_heads 'weight' column holds inf or negative "
+                "values -- weights must be finite and non-negative")
+    else:
+        row_weights = weight
     obs_data = spec.obs_data(
         values=pd.Series(paired["observed"].to_numpy(),
                          index=paired["obsnme"]),
-        weight=weight, group=obs_group)
+        weight=row_weights,
+        group=obs_group)
     output_file = f"{case}_heads.pout"
     py = python or sys.executable
 
-    s = PestSetup(case)
+    # the model copy each forward run modifies and runs — created first
+    # so a copy failure leaves no half-built template behind
+    dest.mkdir(parents=True, exist_ok=True)
+    create_scenario(model_dir, dest / "model",
+                    link_unchanged=link_model, overwrite=overwrite)
+
+    s = PestSetup(case, python=python)
     s.add_parameters(bundle, actions=actions)
     s.add_observations(obs_data, spec, output_file=output_file)
     s.add_run_step("run iwfm", f'"{py}" _run_step.py')
@@ -567,10 +617,6 @@ def pest_setup_from_model(model_dir, obs, dest_dir, case: str = "iwfm_cal",
     }
     replace_file_text(dest / CONFIG_FILE, json.dumps(config, indent=1))
 
-    # the model copy each forward run modifies and runs
-    create_scenario(model_dir, dest / "model",
-                    link_unchanged=link_model, overwrite=overwrite)
-
     stats = residual_stats(paired, by="site")
     result = QuickstartSetup(
         template=dest, case=case, paired=paired,
@@ -585,12 +631,18 @@ def pest_setup_from_model(model_dir, obs, dest_dir, case: str = "iwfm_cal",
 
 
 # ---------------------------------------------------------- forward run
-def run_forward(config: str = CONFIG_FILE) -> None:
+def run_forward(config: str = CONFIG_FILE, timeout=None) -> None:
     """Forward-run step: run the IWFM executables on the template's
-    model copy (invoked by the generated ``_run_step.py``)."""
+    model copy (invoked by the generated ``_run_step.py``).
+
+    ``timeout`` (seconds per step) falls back to the ``"timeout"`` entry
+    of the config; a killed step fails the forward run instead of
+    wedging the agent.
+    """
     from iwfm_io.run import run_model
     cfg = json.loads(Path(config).read_text())
-    run_model(cfg["model_dir"], steps=tuple(cfg["run_steps"]))
+    run_model(cfg["model_dir"], steps=tuple(cfg["run_steps"]),
+              timeout=timeout if timeout is not None else cfg.get("timeout"))
 
 
 def run_extract(config: str = CONFIG_FILE) -> None:

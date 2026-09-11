@@ -179,7 +179,6 @@ def demo_gw_bc(tmp: Path):
 
 def demo_strata(tmp: Path):
     from iwfm_io import read_strata, write_strata
-    import numpy as np
 
     print("\n=== Stratigraphy round-trip ===")
     original = read_strata(PP_DIR / "Strata.dat")

@@ -1,6 +1,5 @@
 """Tests for iwfm_io simulation and timeseries readers/writers."""
 
-from pathlib import Path
 
 import pandas as pd
 import pytest

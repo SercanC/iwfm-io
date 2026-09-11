@@ -88,7 +88,10 @@ scen = create_scenario(r"<base_root>", r"<new_root>", changes=[
     set_keyed_value("Simulation/<sim_main>.in", "EDT", "09/30/1995_24:00"),
 ])
 import iwfm_io
-iwfm_io.run_model(scen)   # Windows; exes from <model>/Bin or IWFM_BIN_DIR
+try:
+    iwfm_io.run_model(scen, timeout=3600)   # Windows; exes from <model>/Bin or IWFM_BIN_DIR
+except iwfm_io.RunError as e:               # e.results = steps that ran; .errors = FATAL lines
+    print(e)
 ```
 
 Runtime scales with model size (sample ≈ 40 s; C2VSimFG ≈ 8 h — run in
@@ -98,6 +101,21 @@ For many parallel copies of a large model, `link_unchanged=True`
 hardlinks unchanged inputs instead of copying (near-instant, ~zero
 marginal disk; changed files stay real copies). Same-volume only —
 falls back to copying otherwise.
+
+## Check a model's inputs for problems
+
+```python
+m = open_model(r"<model_root>")
+findings = m.validate_references()      # DataFrame: pointer columns out of range,
+print(findings)                         #   unknown entity ids, bad destination codes
+from iwfm_io import read_preprocessor, validate_preprocessor
+print(validate_preprocessor(read_preprocessor(r"<root>\Preprocessor\<main>.IN")))
+```
+
+A file that will not even parse raises `IWFMParseError` with the file,
+section and line — quote that to the user. `open_model(path,
+strict=False)` keeps whatever parsed (with warnings) if they want to
+look at the rest of the model anyway.
 
 ## Individual input files
 
@@ -274,7 +292,9 @@ with iwfm_io.dll.IWFMModel(
 ```
 
 In inquiry mode some getters are unavailable by design (supply/demand,
-tile drains, stream exchange…) — the adapter serves all of those from
-files instead, so prefer `open_model` unless the DLL is truly needed.
+tile drains, stream inflows/exchange…) — the adapter serves all of those
+from files instead, so prefer `open_model` unless the DLL is truly
+needed. Bad dates, intervals, layers or ids raise a Python `ValueError`
+before the DLL is called (the raw DLL would abort the whole process).
 First inquiry open of a model without `IW_ModelData_ForInquiry.bin`
 does a full instantiation (minutes on big models) and then caches.

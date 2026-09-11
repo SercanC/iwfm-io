@@ -8,15 +8,13 @@ defined in ``iwfm_io.plots.__init__``.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.collections import PolyCollection, LineCollection
-import matplotlib.colors as mcolors
+from matplotlib.collections import PolyCollection
 import matplotlib.patches as mpatches
 
 from . import (
     _has_df_methods,
     build_element_polygons,
     build_triangulation,
-    get_element_centroids,
     node_values_to_element,
     get_stream_segments,
     get_stream_node_xy,
@@ -115,7 +113,6 @@ def plot_grid_mesh(model, color_by="subregion", ax=None, figsize=(10, 8),
             legend_handles = handles
         else:
             # Legacy DLL path
-            sub_ids = model.get_subregion_ids()
             elem_subs = model.get_element_subregions()
             unique_subs = np.unique(elem_subs)
             n_unique = len(unique_subs)
@@ -433,8 +430,15 @@ def plot_gw_head_contour(model, layer=1, time_index=None,
         default_title = f"Layer {layer} Head  ({date_label})"
     else:
         from . import get_heads_snapshot
-        head_vals = get_heads_snapshot(model, layer)
-        default_title = f"Layer {layer} Head (last output)"
+        if time_index is None:
+            head_vals = get_heads_snapshot(model, layer)
+            default_title = f"Layer {layer} Head (last output)"
+        else:
+            # time_index without dates: index into the full head output
+            head_vals = get_heads_snapshot(model, layer, time_index)
+            default_title = f"Layer {layer} Head (output step {time_index})"
+        if factor != 1.0:
+            head_vals = np.asarray(head_vals, dtype=float) * factor
 
     if title is None:
         title = default_title
@@ -578,7 +582,7 @@ def plot_head_change(model, layer, heads_t1, heads_t2, ax=None,
     style_map_axes(ax)
     if title:
         ax.set_title(title)
-    cb = fig.colorbar(cs, ax=ax, label=label, shrink=0.8)
+    fig.colorbar(cs, ax=ax, label=label, shrink=0.8)
 
     if save_path:
         savefig(fig, save_path)
@@ -1051,95 +1055,3 @@ def plot_tile_drain_locations(model, ax=None, figsize=(10, 8),
 # ──────────────────────────────────────────────────────────────────
 # Example usage
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import sys
-    import os
-
-    # Add the project root to the path so the iwfm package resolves
-    # when running this module directly from a repo checkout.
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-
-    import iwfm_io
-
-    # --- Open the model in inquiry mode (read-only, no simulation) ---
-    # Adjust these paths to match your local sample-model layout.
-    preprocessor_file = os.path.join(
-        project_root, ".assets", "sample_model", "Preprocessor", "PreProcessor_Main.dat"
-    )
-    simulation_file = os.path.join(
-        project_root, ".assets", "sample_model", "Simulation", "Simulation_Main.dat"
-    )
-
-    model = iwfm_io.dll.IWFMModel(preprocessor_file, simulation_file, is_for_inquiry=True)
-
-    try:
-        # 1. Grid mesh colored by subregion
-        fig, ax = plot_grid_mesh(model, color_by="subregion",
-                                 save_path="grid_mesh.png")
-        plt.close(fig)
-
-        # 2. Ground surface elevation
-        fig, ax = plot_ground_surface_elevation(
-            model, show_streams=True, save_path="ground_surface.png"
-        )
-        plt.close(fig)
-
-        # 3. Layer 1 thickness
-        fig, ax = plot_layer_thickness(model, layer=1,
-                                       save_path="layer1_thickness.png")
-        plt.close(fig)
-
-        # 4. Horizontal hydraulic conductivity
-        fig, ax = plot_aquifer_parameter(model, parameter="Kh", layer=1,
-                                         log_scale=True,
-                                         save_path="layer1_kh.png")
-        plt.close(fig)
-
-        # 5. Initial head contour
-        fig, ax = plot_gw_head_contour(model, layer=1, show_streams=True,
-                                       save_path="initial_head.png")
-        plt.close(fig)
-
-        # 6. Depth to water
-        fig, ax = plot_depth_to_water(model, layer=1,
-                                      save_path="depth_to_water.png")
-        plt.close(fig)
-
-        # 7. Head change (example: last head vs. itself = zero map)
-        init = get_heads_snapshot(model, 1)
-        fig, ax = plot_head_change(model, layer=1, heads_t1=init,
-                                   heads_t2=init,
-                                   save_path="head_change_example.png")
-        plt.close(fig)
-
-        # 8. Stream network colored by reach
-        fig, ax = plot_stream_network(model, color_by="reach",
-                                      save_path="stream_network.png")
-        plt.close(fig)
-
-        # 9. Well locations
-        fig, ax = plot_well_locations(model, show_grid=True,
-                                      show_streams=True,
-                                      save_path="well_locations.png")
-        plt.close(fig)
-
-        # 10. Lakes and diversions
-        fig, ax = plot_lake_and_diversion_elements(
-            model, show_grid=True, show_streams=True,
-            save_path="lakes_diversions.png"
-        )
-        plt.close(fig)
-
-        # 11. Tile drain locations
-        fig, ax = plot_tile_drain_locations(model, show_grid=True,
-                                           show_streams=True,
-                                           save_path="tile_drains.png")
-        plt.close(fig)
-
-        print("All maps generated successfully.")
-
-    finally:
-        del model

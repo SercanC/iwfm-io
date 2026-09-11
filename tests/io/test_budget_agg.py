@@ -498,3 +498,75 @@ class TestSampleModel:
         for wy in range(1992, 2001):
             assert ann.loc[wy, "Beginning Storage (+)"] == \
                 ann.loc[wy - 1, "Ending Storage (-)"]
+
+
+class TestIwfmMonthArithmetic:
+    """Window ends follow IWFM's IncrementTimeStamp (end-of-month sticky)."""
+
+    def test_daily_run_beginning_on_the_30th(self):
+        import pandas as pd
+        from iwfm_io._budget_agg import window_end_labels
+        # first output stamp 01/30/1991_24:00 -> Jan 31 midnight
+        idx = pd.date_range("1991-01-31", periods=120, freq="D")
+        labels, complete = window_end_labels(idx, "1MON", "1DAY", 1440)
+        ends = sorted(set(labels))
+        # DLL: 02/28_24:00, 03/31_24:00, 04/30_24:00 -> Mar 1, Apr 1, May 1
+        assert ends[:3] == [pd.Timestamp("1991-03-01"),
+                            pd.Timestamp("1991-04-01"),
+                            pd.Timestamp("1991-05-01")]
+
+    def test_increment_rules(self):
+        import pandas as pd
+        from iwfm_io._budget_agg import iwfm_increment_months
+        inc = iwfm_increment_months
+        # 01/31_24:00 (Feb 1 midnight) + 1 month -> 02/28_24:00 (Mar 1)
+        assert inc(pd.Timestamp("1991-02-01"), 1) == pd.Timestamp("1991-03-01")
+        # 01/29_24:00 + 1 month -> 02/28_24:00 (February clamp)
+        assert inc(pd.Timestamp("1991-01-30"), 1) == pd.Timestamp("1991-03-01")
+        # 01/15_24:00 + 1 month -> 02/15_24:00 (day kept)
+        assert inc(pd.Timestamp("1991-01-16"), 1) == pd.Timestamp("1991-02-16")
+        # leap year February end
+        assert inc(pd.Timestamp("2000-02-01"), 1) == pd.Timestamp("2000-03-01")
+        # 12 months from 09/30_24:00 is the next water-year end
+        assert inc(pd.Timestamp("1990-10-01"), 12) == pd.Timestamp("1991-10-01")
+        # intraday stamps keep their time of day
+        assert inc(pd.Timestamp("1991-01-31 12:00"), 1) == \
+            pd.Timestamp("1991-02-28 12:00")
+
+    def test_unsorted_index_rejected(self):
+        import pandas as pd
+        import pytest
+        from iwfm_io._budget_agg import window_end_labels
+        idx = pd.DatetimeIndex(["1991-02-01", "1991-01-01"])
+        with pytest.raises(ValueError):
+            window_end_labels(idx, "1MON", "1MON")
+
+
+class TestCollectDateMask:
+    def test_owning_day_bounds(self):
+        import pandas as pd
+        from iwfm_io.collect import _date_mask
+        # daily stamps 09/30/1990_24:00 .. 10/02/1991_24:00 as stored
+        idx = pd.date_range("1990-10-01", "1991-10-03", freq="D")
+        m = _date_mask(idx, "1990-10-01", "1991-09-30")
+        kept = idx[m]
+        # 09/30/1990_24:00 (stored Oct 1 00:00) is WY1990 -> excluded
+        assert kept[0] == pd.Timestamp("1990-10-02")
+        # 09/30/1991_24:00 (stored Oct 1 00:00) is the WY end -> kept
+        assert kept[-1] == pd.Timestamp("1991-10-01")
+        assert len(kept) == 365
+
+    def test_iwfm_strings_are_instants(self):
+        import pandas as pd
+        from iwfm_io.collect import _date_mask
+        idx = pd.date_range("1990-10-01", periods=5, freq="D")
+        m = _date_mask(idx, "10/01/1990_24:00", "10/03/1990_24:00")
+        assert idx[m].tolist() == [pd.Timestamp("1990-10-02"),
+                                    pd.Timestamp("1990-10-03"),
+                                    pd.Timestamp("1990-10-04")]
+
+    def test_none_bounds_keep_everything(self):
+        import pandas as pd
+        from iwfm_io.collect import _date_mask
+        idx = pd.date_range("1990-10-01", periods=3, freq="D")
+        assert _date_mask(idx).all()

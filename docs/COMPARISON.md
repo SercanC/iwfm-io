@@ -17,7 +17,7 @@ tool; corrections are welcome via issues/PRs.
 | Writes / edits input files | ✅ full reader↔writer round-trip | ❌ | partial (targeted writers/generators) |
 | Scenario workflow | ✅ `create_scenario → run_model → compare_models` | ❌ (but can step a live simulation via DLL) | partial (new-file generators, land-use scenario tools) |
 | Live simulation control (step a run from Python) | via DLL wrapper | ✅ (its core strength; `simulate_all`, per-interval stepping) | via its DLL subpackage |
-| Plotting | 58 functions, 13 modules ([gallery](GALLERY.md)) | 2 (`plot_nodes`, `plot_elements`) | plot module (maps/hydrographs utilities) |
+| Plotting | 66 functions, 15 modules ([gallery](GALLERY.md)) | 2 (`plot_nodes`, `plot_elements`) | plot module (maps/hydrographs utilities) |
 | Calibration / PEST utilities | ✅ `iwfm_io.pest`: obs-name codec, PESTPP-IES ensemble loader + diagnostics, residual stats (RMSE/NSE/KGE/phi), SMP I/O, sim-to-obs matching, derived/budget observations, zone + pilot-point parameterization, `PestSetup` builder | ❌ | ✅ 15 CLI commands (obs `.smp`, sim-vs-obs stats) |
 | HEC-DSS / CalSim streamflows | ✅ `[dss]` extra: DSS-6/7 catalog + read, CalSim channel-arc linking, CFS/TAF extraction | ❌ | ❌ |
 | GIS export | ❌ (planned; GeoDataFrames via `[geo]` extra) | ❌ | ✅ (shapefiles, Surfer, webmaps) |

@@ -50,6 +50,7 @@ except Exception:  # not installed (e.g. running from a source checkout)
     __version__ = "0.0.0.dev0"
 
 from iwfm_io.run import (
+    RunError,
     RunResult,
     run_model,
     run_preprocessor,
@@ -65,7 +66,8 @@ from iwfm_io._tokens import (
     water_year,
     expand_recurring,
 )
-from iwfm_io._parser import IWFMFileReader
+from iwfm_io._parser import IWFMFileReader, IWFMParseError, IWFMReadWarning
+from iwfm_io._strict import strict_mode
 from iwfm_io._writer import IWFMFileWriter
 from iwfm_io.model_adapter import IOModelAdapter, open_model
 from iwfm_io.compare import (
@@ -237,7 +239,6 @@ from iwfm_io._validation import (
 )
 
 # Model adapter
-from iwfm_io.model_adapter import IOModelAdapter
 
 # Wells: metadata, hydrograph linking, mapping, compositing
 from iwfm_io.wells import (
@@ -330,6 +331,7 @@ __all__ = [
     "export_vtk",
     "export_vtk_timeseries",
     # Scenario runner
+    "RunError",
     "RunResult",
     "run_model",
     "run_preprocessor",
@@ -347,6 +349,9 @@ __all__ = [
     # Parser/writer engine
     "IWFMFileReader",
     "IWFMFileWriter",
+    "IWFMParseError",
+    "IWFMReadWarning",
+    "strict_mode",
     # Preprocessor readers
     "read_preprocessor",
     "read_nodes",

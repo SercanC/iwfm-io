@@ -1,4 +1,4 @@
-# iwfm_io.plots catalog — 58 functions by user intent
+# iwfm_io.plots catalog — 66 functions by user intent
 
 Every function accepts the `open_model()` adapter (no DLL needed),
 returns `(fig, ax)`, and takes `save_path=` to write a PNG.
@@ -85,3 +85,11 @@ from iwfm_io.plots import maps, timeseries, trends, seasonal, profiles, \
 
 ## Connectivity
 - `plot_diversion_network(m)` / `plot_bypass_flow_diagram(m)`
+
+## Calibration (PEST / PESTPP-IES results) — `iwfm_io.plots.calibration`
+- `plot_obs_vs_sim(paired)` — observed vs simulated scatter with 1:1 line and fit stats
+- `plot_residual_map(model, residuals)` — residuals at well locations on the mesh
+- `plot_residual_butterfly(residuals)` — signed residual distribution per well/group
+- `plot_phi_convergence(ies)` / `plot_phi_by_group(ies)` — objective function per iteration / per observation group
+- `plot_parameter_histograms(ies)` / `plot_parameter_railing(ies)` — ensemble parameter spread and bound-hugging
+- `plot_ensemble_hydrograph(ies, obs_name)` — prior/posterior ensemble bands vs observations

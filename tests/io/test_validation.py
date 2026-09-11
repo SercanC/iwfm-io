@@ -1,7 +1,5 @@
 """Tests for validation module."""
 
-import pytest
-from pathlib import Path
 
 from tests.io.conftest import PREPROCESSOR_DIR
 

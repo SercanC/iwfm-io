@@ -49,7 +49,6 @@ import logging
 from dataclasses import dataclass
 from typing import Mapping, Optional, Sequence
 
-import numpy as np
 import pandas as pd
 
 __all__ = ["Period", "PERIODS_QUARTERLY", "PERIODS_SPRING_FALL",

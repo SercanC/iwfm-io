@@ -250,7 +250,7 @@ def plot_stream_flow_hydrograph(
     ----------
     model : IWFMModel
     stream_node_indices : list[int]
-        Zero-based indices into the stream-node ID array.
+        Zero-based indices into the stream hydrograph ID list (``get_hydrograph_ids`` for the flow/stage hydrograph type).
     begin_date, end_date : str or None
     interval : str
     fact_lt, fact_vl : float
@@ -279,18 +279,22 @@ def plot_stream_flow_hydrograph(
     if flow_type is None:
         flow_type = hyd_types[0]["location_type"]
 
-    stream_ids = model.get_stream_node_ids()
+    hyd_ids = [int(h) for h in model.get_hydrograph_ids(flow_type)]
 
     series = []
     datetimes = None
     for sn_idx in stream_node_indices:
-        sn_id = int(stream_ids[sn_idx])
+        if not 0 <= sn_idx < len(hyd_ids):
+            raise IndexError(
+                f"stream hydrograph index {sn_idx} out of range "
+                f"[0, {len(hyd_ids) - 1}]")
+        hyd_id = hyd_ids[sn_idx]
         dates_arr, values = model.get_hydrograph(
-            flow_type, sn_idx, 1, begin_date, end_date, interval,
+            flow_type, hyd_id, 1, begin_date, end_date, interval,
             fact_lt=fact_lt, fact_vl=fact_vl,
         )
         datetimes = excel_date_to_datetime(dates_arr)
-        series.append((f"Stream Node {sn_id}", values))
+        series.append((f"Stream Hydrograph {hyd_id}", values))
 
     if engine == "plotly":
         from . import _plotly
@@ -330,7 +334,7 @@ def plot_stream_stage_hydrograph(
     ----------
     model : IWFMModel
     stream_node_indices : list[int]
-        Zero-based indices into the stream-node ID array.
+        Zero-based indices into the stream hydrograph ID list (``get_hydrograph_ids`` for the flow/stage hydrograph type).
     begin_date, end_date : str or None
     interval : str
     fact_lt, fact_vl : float
@@ -359,18 +363,22 @@ def plot_stream_stage_hydrograph(
         # Fallback: pick the second type if available, else the first
         stage_type = hyd_types[1]["location_type"] if len(hyd_types) > 1 else hyd_types[0]["location_type"]
 
-    stream_ids = model.get_stream_node_ids()
+    hyd_ids = [int(h) for h in model.get_hydrograph_ids(stage_type)]
 
     series = []
     datetimes = None
     for sn_idx in stream_node_indices:
-        sn_id = int(stream_ids[sn_idx])
+        if not 0 <= sn_idx < len(hyd_ids):
+            raise IndexError(
+                f"stream hydrograph index {sn_idx} out of range "
+                f"[0, {len(hyd_ids) - 1}]")
+        hyd_id = hyd_ids[sn_idx]
         dates_arr, values = model.get_hydrograph(
-            stage_type, sn_idx, 1, begin_date, end_date, interval,
+            stage_type, hyd_id, 1, begin_date, end_date, interval,
             fact_lt=fact_lt, fact_vl=fact_vl,
         )
         datetimes = excel_date_to_datetime(dates_arr)
-        series.append((f"Stream Node {sn_id}", values))
+        series.append((f"Stream Hydrograph {hyd_id}", values))
 
     if engine == "plotly":
         from . import _plotly
@@ -796,22 +804,28 @@ def plot_land_use_area_timeseries(
         # areas shape: (n_elements, n_times) -- sum across elements
         total_by_time = areas.sum(axis=0)
 
-        # Resolve datetimes from model time specs on first iteration
+        # Resolve datetimes from model time specs on first iteration:
+        # the returned steps start at begin_date, not at the simulation
+        # start
         if datetimes is None:
-            specs = model.get_time_specs()
-            all_dates = specs["dates"]
-            # Determine how many time steps were returned
+            from iwfm_io._tokens import parse_iwfm_date
+            all_dates = model.get_time_specs()["dates"]
             n_times = total_by_time.shape[0]
-            # Use last n_times dates from the period
-            date_strs = all_dates[:n_times] if n_times <= len(all_dates) else all_dates
-            from . import iwfm_datestr_to_datetime
-            datetimes = [iwfm_datestr_to_datetime(d) for d in date_strs]
+            begin_dt = parse_iwfm_date(begin_date)
+            i0 = next((i for i, d in enumerate(all_dates)
+                       if parse_iwfm_date(d) >= begin_dt), 0)
+            date_strs = all_dates[i0:i0 + n_times]
+            if len(date_strs) != n_times:
+                raise ValueError(
+                    f"land-use areas returned {n_times} steps but only "
+                    f"{len(date_strs)} simulation dates follow {begin_date}")
+            datetimes = [parse_iwfm_date(d) for d in date_strs]
 
         all_areas.append(total_by_time)
         labels.append(label)
 
     if all_areas:
-        stacked = np.row_stack(all_areas)
+        stacked = np.vstack(all_areas)
         ax.stackplot(datetimes, stacked, labels=labels, alpha=0.8)
 
     return _finalise(fig, ax, title, ylabel, save_path, dpi)
@@ -820,86 +834,3 @@ def plot_land_use_area_timeseries(
 # ──────────────────────────────────────────────────────────────────
 # Main block — example usage
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    print("IWFM Time-Series Plotting Examples")
-    print("=" * 50)
-    print()
-    print("This module is intended to be imported and used with an active")
-    print("IWFMModel instance.  Example usage:")
-    print()
-    print("    from iwfm_io import IWFMModel")
-    print("    from iwfm_io.plots.timeseries import (")
-    print("        plot_gw_head_hydrographs,")
-    print("        plot_stream_flow_hydrograph,")
-    print("        plot_stream_stage_hydrograph,")
-    print("        plot_budget_timeseries,")
-    print("        plot_zbudget_timeseries,")
-    print("        plot_cumulative_gw_storage_change,")
-    print("        plot_land_use_area_timeseries,")
-    print("    )")
-    print()
-    print("    model = IWFMModel(preprocessor_file='Preprocessor.in',")
-    print("                       simulation_file='Simulation.in')")
-    print()
-    print("    # 12. Groundwater head hydrographs at nodes 0, 5, 10")
-    print("    fig, ax = plot_gw_head_hydrographs(")
-    print("        model, node_indices=[0, 5, 10], layer=1,")
-    print("        begin_date='10/01/1990_24:00', end_date='09/30/2010_24:00',")
-    print("        save_path='gw_heads.png',")
-    print("    )")
-    print()
-    print("    # Multi-layer overlay for a single node")
-    print("    fig, ax = plot_gw_head_hydrographs(")
-    print("        model, node_indices=[0], layers=[1, 2, 3],")
-    print("        begin_date='10/01/1990_24:00', end_date='09/30/2010_24:00',")
-    print("    )")
-    print()
-    print("    # 13. Stream flow hydrograph")
-    print("    fig, ax = plot_stream_flow_hydrograph(")
-    print("        model, stream_node_indices=[0, 10],")
-    print("        begin_date='10/01/1990_24:00', end_date='09/30/2010_24:00',")
-    print("        save_path='stream_flow.png',")
-    print("    )")
-    print()
-    print("    # 14. Stream stage hydrograph")
-    print("    fig, ax = plot_stream_stage_hydrograph(")
-    print("        model, stream_node_indices=[0, 10],")
-    print("        begin_date='10/01/1990_24:00', end_date='09/30/2010_24:00',")
-    print("        save_path='stream_stage.png',")
-    print("    )")
-    print()
-    print("    # 15. Budget time series (stacked area)")
-    print("    budgets = model.get_budget_list()")
-    print("    fig, ax = plot_budget_timeseries(")
-    print("        model, budget_type=budgets[0]['name'], location=1,")
-    print("        begin_date='10/01/1990_24:00', end_date='09/30/2010_24:00',")
-    print("        stacked=True, save_path='budget.png',")
-    print("    )")
-    print()
-    print("    # 16. Zone budget time series")
-    print("    zbudgets = model.get_zbudget_list()")
-    print("    fig, ax = plot_zbudget_timeseries(")
-    print("        model, zbudget_type=zbudgets[0]['name'], zone_id=1,")
-    print("        columns=[0, 1, 2], zone_extent='Zone',")
-    print("        elements=None, layers=None, zone_ids=None,")
-    print("        begin_date='10/01/1990_24:00', end_date='09/30/2010_24:00',")
-    print("        save_path='zbudget.png',")
-    print("    )")
-    print()
-    print("    # 17. Cumulative GW storage change")
-    print("    sub_ids = model.get_subregion_ids()")
-    print("    fig, ax = plot_cumulative_gw_storage_change(")
-    print("        model, subregions=sub_ids[:3],")
-    print("        begin_date='10/01/1990_24:00', end_date='09/30/2010_24:00',")
-    print("        save_path='gw_storage_change.png',")
-    print("    )")
-    print()
-    print("    # 18. Land use area time series")
-    print("    fig, ax = plot_land_use_area_timeseries(")
-    print("        model,")
-    print("        begin_date='10/01/1990_24:00', end_date='09/30/2010_24:00',")
-    print("        save_path='land_use.png',")
-    print("    )")
-    print()
-    print("    model.kill()")

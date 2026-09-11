@@ -7,10 +7,31 @@ All functions return pandas DataFrames.
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 from typing import Union
 
+import numpy as np
 import pandas as pd
+
+from iwfm_io._parser import IWFMParseError, IWFMReadWarning
+from iwfm_io._tokens import is_iwfm_date
+
+#: Fortran fixed-width overflow markers (``*******``) in output files.
+_OVERFLOW_RE = re.compile(r"^\*+$")
+
+
+def _float_or_nan(tok: str, path, lineno: int, what: str) -> float:
+    """``float(tok)``; an all-asterisk overflow field is NaN, anything
+    else that is not a number raises ``IWFMParseError``."""
+    try:
+        return float(tok)
+    except ValueError:
+        if _OVERFLOW_RE.match(tok):
+            return float("nan")
+        raise IWFMParseError(
+            f"{what}: not a number: {tok!r}", path=path, lineno=lineno
+        ) from None
 
 
 def _parse_hydrograph_out(path: Union[str, Path]) -> dict:
@@ -48,19 +69,19 @@ def _parse_hydrograph_out(path: Union[str, Path]) -> dict:
 
         # Detect metadata rows (after banner)
         if stripped.startswith("*"):
-            # Check for known metadata labels
-            for label in ["HYDROGRAPH ID", "LAYER", "NODE", "NODES", "ELEMENT"]:
-                if label in stripped.upper():
-                    # Extract the values after the label
-                    # Format: "* LABEL    val1    val2    val3 ..."
-                    parts = stripped.lstrip("* ")
-                    # Remove the label text
-                    label_upper = label
-                    idx = parts.upper().find(label_upper)
-                    if idx >= 0:
-                        after = parts[idx + len(label_upper):]
-                        vals = after.split()
-                        metadata[label.lower()] = vals
+            # Known metadata labels, matched as whole words (longest
+            # first so "NODES" is not read as "NODE" + a stray "S").
+            # Format: "* LABEL    val1    val2    val3 ..."
+            parts = stripped.lstrip("* ")
+            for label in ("HYDROGRAPH ID", "ELEMENTS", "ELEMENT", "LAYERS",
+                          "LAYER", "NODES", "NODE"):
+                m = re.search(r"\b" + re.escape(label) + r"\b", parts.upper())
+                if m:
+                    vals = parts[m.end():].split()
+                    metadata[label.lower()] = vals
+                    if label in ("NODES", "ELEMENTS", "LAYERS"):
+                        # singular alias -- the key callers look up
+                        metadata.setdefault(label.lower()[:-1], vals)
                     break
 
     # Parse data rows
@@ -176,54 +197,86 @@ def read_head_all_out(path: Union[str, Path]) -> pd.DataFrame:
             data_start = i + 1
             break
 
-    # Parse data: group lines by timestep
+    # Parse data: group lines by timestep.  A record is one dated line
+    # (layer 1) plus one continuation line per additional layer; every
+    # line holds one value per node and every record the same width.
     dates: list[str] = []
     all_values: list[list[float]] = []
+    line_widths: set[int] = set()
 
     current_vals: list[float] = []
     current_date: str | None = None
+    current_lines = 0
+    lines_per_record: int | None = None
+
+    def _flush(lineno: int) -> None:
+        nonlocal lines_per_record
+        if current_date is None:
+            return
+        if lines_per_record is None:
+            lines_per_record = current_lines
+        elif current_lines != lines_per_record:
+            raise IWFMParseError(
+                f"record {current_date} spans {current_lines} lines but "
+                f"earlier records span {lines_per_record}",
+                path=path, lineno=lineno)
+        if all_values and len(current_vals) != len(all_values[0]):
+            raise IWFMParseError(
+                f"record {current_date} has {len(current_vals)} values "
+                f"but the first record has {len(all_values[0])}",
+                path=path, lineno=lineno)
+        dates.append(current_date)
+        all_values.append(current_vals)
 
     for i in range(data_start, len(lines)):
         line = lines[i].rstrip()
-        if not line.strip():
+        if not line.strip() or line.lstrip().startswith("*"):
             continue
         tokens = line.split()
         if not tokens:
             continue
 
-        # Check if line starts with a date
-        if "/" in tokens[0] and "_" in tokens[0]:
-            # Save previous record
-            if current_date is not None:
-                dates.append(current_date)
-                all_values.append(current_vals)
+        if is_iwfm_date(tokens[0]):
+            _flush(i)
             current_date = tokens[0]
-            current_vals = [float(t) for t in tokens[1:]]
+            current_vals = [_float_or_nan(t, path, i + 1, "head value")
+                            for t in tokens[1:]]
+            current_lines = 1
+            line_widths.add(len(tokens) - 1)
+        elif current_date is None:
+            raise IWFMParseError(
+                "data before the first dated record: "
+                f"{line.strip()[:60]!r}", path=path, lineno=i + 1)
         else:
             # Continuation line (next layer)
-            current_vals.extend(float(t) for t in tokens)
+            current_vals.extend(_float_or_nan(t, path, i + 1, "head value")
+                                for t in tokens)
+            current_lines += 1
+            line_widths.add(len(tokens))
 
-    # Save last record
-    if current_date is not None:
-        dates.append(current_date)
-        all_values.append(current_vals)
+    _flush(len(lines))
 
     if not dates:
         return pd.DataFrame()
 
-    n_cols = max(len(r) for r in all_values)
-    if node_ids and n_cols % len(node_ids) == 0:
-        n_layers = n_cols // len(node_ids)
+    n_cols = len(all_values[0])
+    n_nodes = len(node_ids)
+    if (node_ids and line_widths == {n_nodes}
+            and n_cols % n_nodes == 0):
+        n_layers = n_cols // n_nodes
         col_names = [
             f"node_{nid}_layer_{layer}"
             for layer in range(1, n_layers + 1)
             for nid in node_ids
         ]
     else:
+        if node_ids:
+            warnings.warn(
+                f"{path}: the header lists {n_nodes} node ids but data "
+                f"lines hold {sorted(line_widths)} values; columns are "
+                "labelled col_N instead of node_<id>_layer_<L>",
+                IWFMReadWarning, stacklevel=2)
         col_names = [f"col_{i + 1}" for i in range(n_cols)]
-    for r in all_values:
-        while len(r) < n_cols:
-            r.append(float("nan"))
 
     df = pd.DataFrame(all_values, columns=col_names)
     df.insert(0, "date", dates)
@@ -315,20 +368,23 @@ def read_final_state_out(path: Union[str, Path]) -> pd.DataFrame:
     rows: list[list] = []
     for i in range(data_start, len(lines)):
         line = lines[i].strip()
-        if not line or line.startswith("C") or line.startswith("c"):
+        if not line or lines[i][0] in "Cc*":
             continue
-        tokens = line.split()
+        tokens = line.split("/")[0].split()
         if not tokens:
             continue
         row: list = []
         for j, t in enumerate(tokens):
-            try:
-                if j == 0:
+            if j == 0:
+                try:
                     row.append(int(t))  # ID column
-                else:
-                    row.append(float(t) * scale_factor)
-            except ValueError:
-                row.append(t)
+                except ValueError:
+                    raise IWFMParseError(
+                        f"row id is not an integer: {t!r}",
+                        path=path, lineno=i + 1) from None
+            else:
+                row.append(_float_or_nan(t, path, i + 1, "state value")
+                           * scale_factor)
         rows.append(row)
 
     if not rows:
@@ -367,6 +423,10 @@ def read_flow_out(path: Union[str, Path]) -> pd.DataFrame:
 def read_velocity_out(path: Union[str, Path]) -> pd.DataFrame:
     """Read GWVelocities.out — element centroid velocities per timestep.
 
+    The file opens with a centroid coordinate table, then per-timestep
+    blocks: the block's first row carries the date, and every row holds
+    one element's ``VX VY VZ`` per layer.
+
     Parameters
     ----------
     path : str or Path
@@ -374,8 +434,197 @@ def read_velocity_out(path: Union[str, Path]) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
+        Long format, one row per element per timestep: ``date`` (str),
+        ``element_id``, then ``vx_layer_1, vy_layer_1, vz_layer_1, ...``
+        for each layer.  Fortran overflow fields (``*******``) are NaN.
     """
-    return read_hydrograph_out(path)
+    import io as _io
+
+    path = Path(path)
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        lines = fh.read().splitlines()
+
+    # The velocity header is the last "* TIME ..." line; the centroid
+    # table before it has its own "* ELEMENT X Y" header.
+    data_start = None
+    layer_tokens: list[str] = []
+    for i, line in enumerate(lines):
+        if not line.startswith("*"):
+            continue
+        upper = line.upper()
+        if "TIME" in upper and "ELEMENT" in upper:
+            data_start = i + 1
+        elif "LAYER" in upper:
+            layer_tokens = line.lstrip("* ").split()[1:]
+    if data_start is None:
+        raise IWFMParseError(
+            "no '* TIME ... ELEMENT ...' header found",
+            path=path, lineno=len(lines) or None)
+
+    body_idx = [i for i in range(data_start, len(lines))
+                if lines[i].strip() and not lines[i].lstrip().startswith("*")]
+    if not body_idx:
+        return pd.DataFrame(columns=["date", "element_id"])
+
+    s = pd.Series([lines[i] for i in body_idx]).str.lstrip()
+    first_tok = s.str.split(n=1, expand=True)[0]
+    is_date = first_tok.str.contains("/", regex=False)
+    if not is_date.iloc[0]:
+        raise IWFMParseError(
+            "first velocity row does not start with a date",
+            path=path, lineno=body_idx[0] + 1)
+    bad = [d for d in first_tok[is_date] if not is_iwfm_date(d)]
+    if bad:
+        raise IWFMParseError(
+            f"invalid IWFM date {bad[0]!r} in a velocity block",
+            path=path)
+    split = s[is_date].str.split(n=1, expand=True)
+    body = s.copy()
+    body[is_date] = split[1]
+    dates = pd.Series(np.nan, index=s.index, dtype=object)
+    dates[is_date] = split[0]
+
+    try:
+        df = pd.read_csv(_io.StringIO("\n".join(body)), sep=r"\s+",
+                         header=None)
+    except (ValueError, pd.errors.ParserError) as exc:
+        raise IWFMParseError(
+            f"velocity rows are not rectangular data ({exc})",
+            path=path) from None
+    if df.isna().any().any():
+        r = int(df.index[df.isna().any(axis=1)][0])
+        raise IWFMParseError(
+            "velocity row has fewer values than the others",
+            path=path, lineno=body_idx[r] + 1)
+    for c in df.columns:
+        if df[c].dtype == object:
+            col = pd.to_numeric(df[c], errors="coerce")
+            bad_mask = col.isna() & ~df[c].astype(str).str.match(r"^\*+$")
+            if bad_mask.any():
+                r = int(df.index[bad_mask][0])
+                raise IWFMParseError(
+                    f"velocity value is not a number: {df.at[r, c]!r}",
+                    path=path, lineno=body_idx[r] + 1)
+            df[c] = col
+
+    n_vals = len(df.columns) - 1
+    if n_vals % 3 != 0:
+        raise IWFMParseError(
+            f"velocity rows hold {n_vals} values, not a multiple of 3 "
+            "(VX VY VZ per layer)", path=path, lineno=body_idx[0] + 1)
+    n_layers = n_vals // 3
+    if layer_tokens and len(layer_tokens) != n_vals:
+        warnings.warn(
+            f"{path}: the LAYER header lists {len(layer_tokens)} columns "
+            f"but rows hold {n_vals} values", IWFMReadWarning,
+            stacklevel=2)
+    names = ["element_id"]
+    for layer in range(1, n_layers + 1):
+        names += [f"vx_layer_{layer}", f"vy_layer_{layer}",
+                  f"vz_layer_{layer}"]
+    df.columns = names
+    elem = df["element_id"]
+    if (elem != elem.round()).any():
+        r = int(elem.index[elem != elem.round()][0])
+        raise IWFMParseError(
+            f"element id is not an integer: {elem[r]!r}",
+            path=path, lineno=body_idx[r] + 1)
+    df["element_id"] = elem.astype(int)
+    df.insert(0, "date", dates.ffill().to_numpy())
+
+    # every timestep block must list the same elements
+    block_sizes = df.groupby("date", sort=False).size()
+    if block_sizes.nunique() > 1:
+        odd = block_sizes[block_sizes != block_sizes.iloc[0]].index[0]
+        raise IWFMParseError(
+            f"timestep {odd} lists {block_sizes[odd]} elements but the "
+            f"first block lists {block_sizes.iloc[0]}", path=path)
+    dup = df.duplicated(["date", "element_id"])
+    if dup.any():
+        r = int(df.index[dup][0])
+        raise IWFMParseError(
+            f"element {int(df.at[r, 'element_id'])} appears twice in the "
+            f"{df.at[r, 'date']} block", path=path,
+            lineno=body_idx[r] + 1)
+    return df
+
+
+def _budget_text_columns(header_lines: list, data_line: str) -> list:
+    """Column titles of a text budget, one per data column.
+
+    IWFM prints the titles right-aligned over fixed-width columns, over
+    as many lines as the longest title needs.  The column spans are
+    taken from the token ends of *data_line* (the first data row);
+    each title is the space-joined fragments of every header line
+    inside its span.  Duplicate names get a ``_2`` suffix so the frame
+    keeps one column per data column.
+    """
+    if not header_lines or not data_line:
+        return []
+    ends = [m.end() for m in re.finditer(r"\S+", data_line.rstrip("\n"))]
+    if not ends:
+        return []
+    spans = [(0 if i == 0 else ends[i - 1], e) for i, e in enumerate(ends)]
+    names = []
+    for lo, hi in spans:
+        frags = []
+        for ln in header_lines:
+            piece = ln[lo:hi].strip()
+            if piece:
+                frags.append(piece)
+        names.append(" ".join(frags))
+    if names and names[0].upper() == "TIME":
+        names[0] = "date"
+    seen: dict = {}
+    for i, n in enumerate(names):
+        if not n:
+            n = f"col_{i}"
+        if n in seen:
+            seen[n] += 1
+            n = f"{n}_{seen[n]}"
+        else:
+            seen[n] = 1
+        names[i] = n
+    return names
+
+
+def _budget_text_columns(header_lines: list, data_line: str) -> list:
+    """Column titles of a text budget, one per data column.
+
+    IWFM prints the titles right-aligned over fixed-width columns, over
+    as many lines as the longest title needs.  The column spans are
+    taken from the token ends of *data_line* (the first data row);
+    each title is the space-joined fragments of every header line
+    inside its span.  Duplicate names get a ``_2`` suffix so the frame
+    keeps one column per data column.
+    """
+    if not header_lines or not data_line:
+        return []
+    ends = [m.end() for m in re.finditer(r"\S+", data_line.rstrip("\n"))]
+    if not ends:
+        return []
+    spans = [(0 if i == 0 else ends[i - 1], e) for i, e in enumerate(ends)]
+    names = []
+    for lo, hi in spans:
+        frags = []
+        for ln in header_lines:
+            piece = ln[lo:hi].strip()
+            if piece:
+                frags.append(piece)
+        names.append(" ".join(frags))
+    if names and names[0].upper() == "TIME":
+        names[0] = "date"
+    seen: dict = {}
+    for i, n in enumerate(names):
+        if not n:
+            n = f"col_{i}"
+        if n in seen:
+            seen[n] += 1
+            n = f"{n}_{seen[n]}"
+        else:
+            seen[n] = 1
+        names[i] = n
+    return names
 
 
 def read_budget_text(path: Union[str, Path]) -> dict:
@@ -416,7 +665,7 @@ def read_budget_text(path: Union[str, Path]) -> dict:
 
         # Find section name from the BUDGET line
         section_name = ""
-        col_header_lines: list[str] = []
+        col_header_lines: list[str] = []   # raw (un-stripped) lines
         data_start = 0
         dash_count = 0
 
@@ -440,21 +689,15 @@ def read_budget_text(path: Union[str, Path]) -> dict:
                     data_start = i + 1
                     break
             elif dash_count == 1:
-                col_header_lines.append(stripped)
+                col_header_lines.append(line.rstrip())
 
         if not section_name:
             section_name = f"section_{len(sections) + 1}"
 
-        # Parse column headers (may span multiple lines)
-        # For simplicity, use the last header line as column names
-        if col_header_lines:
-            # Combine multi-line headers by taking tokens from each
-            # The last line typically has the most complete set
-            col_names = col_header_lines[-1].split()
-            if col_names and col_names[0].upper() == "TIME":
-                col_names[0] = "date"
-        else:
-            col_names = []
+        # Column titles span several header lines, right-aligned over
+        # their fixed-width data column; they are assembled per column
+        # from the spans of the first data row (see _budget_text_columns)
+        col_names: list[str] = []
 
         # Parse data rows
         dates: list[str] = []
@@ -482,6 +725,10 @@ def read_budget_text(path: Union[str, Path]) -> dict:
             continue
 
         n_data_cols = max(len(r) for r in rows) if rows else 0
+        first_data = next(
+            (lines[i] for i in range(data_start, len(lines))
+             if lines[i].strip() and "/" in lines[i].split()[0]), "")
+        col_names = _budget_text_columns(col_header_lines, first_data)
         # Use generic column names if header parsing didn't provide enough
         if len(col_names) < n_data_cols + 1:  # +1 for date
             data_col_names = [f"col_{i + 1}" for i in range(n_data_cols)]

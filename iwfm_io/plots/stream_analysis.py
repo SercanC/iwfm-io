@@ -6,7 +6,6 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 from . import (get_stream_segments, get_stream_node_xy, overlay_grid,
                plot_contour_map, _has_df_methods, savefig,
                style_map_axes, map_legend_outside)
@@ -144,6 +143,18 @@ def plot_stream_aquifer_exchange_map(model, layer=1, factor=1.0,
     else:
         gain_gw = model.get_stream_gain_from_gw(factor)
     sx, sy = get_stream_node_xy(model)
+    gain_gw = np.asarray(gain_gw, dtype=float)
+    if len(sx) == 0:
+        ax.set_aspect("equal")
+        style_map_axes(ax)
+        ax.set_title("Stream–Aquifer Exchange (model has no stream nodes)")
+        if save_path:
+            savefig(fig, save_path)
+        return fig, ax
+    if len(gain_gw) != len(sx):
+        raise ValueError(
+            f"stream gain/loss has {len(gain_gw)} values but the model "
+            f"has {len(sx)} stream nodes")
 
     # Normalize size
     abs_gain = np.abs(gain_gw)
@@ -180,14 +191,3 @@ def plot_stream_aquifer_exchange_map(model, layer=1, factor=1.0,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        plot_stream_aquifer_exchange_map(m, save_path="strm_aq_exchange.png")
-    plt.show()

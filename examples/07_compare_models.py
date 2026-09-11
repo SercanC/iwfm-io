@@ -28,7 +28,6 @@ from iwfm_io import (
     compare_models,
     diff_model_files,
     head_difference,
-    open_model,
 )
 
 SAMPLE_MODEL = Path(__file__).resolve().parent.parent / ".assets" / "sample_model"

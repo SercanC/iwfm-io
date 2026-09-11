@@ -245,7 +245,7 @@ class TestGroupSequenceScheme:
             "gwh020001_001031", "gwh100001_001031", "gwh100002_001031"]
 
     def test_dateless_and_errors(self):
-        from iwfm_io.pest import (GroupSequenceScheme, decode_obs_name,
+        from iwfm_io.pest import (decode_obs_name,
                                   encode_obs_name)
 
         assert encode_obs_name("gwh", "670001",

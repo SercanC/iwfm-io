@@ -11,7 +11,7 @@ import pandas as pd
 from iwfm_io._parser import IWFMFileReader
 import re
 
-from iwfm_io._tokens import split_keyed_line, tokenize_data_line
+from iwfm_io._tokens import tokenize_data_line
 from iwfm_io.models.lake import LakeMain
 from iwfm_io.models.timeseries import TimeSeriesFile
 
@@ -50,49 +50,64 @@ def read_lake_main(path: str | Path) -> LakeMain:
     # — one row per lake; the table ends at the initial-elevation FACT
     # keyed line.
     lake_rows: list[dict] = []
-    while True:
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        tokens = tokenize_data_line(line)
-        if len(tokens) < 6:
-            # the "1.0 / FACT" line opening the next section has a
-            # single value token
-            break
-        reader.next_data_line()
-        m = re.search(r"\s/(.+)$", line)
-        lake_rows.append({
-            "lake_id": int(tokens[0]),
-            "conductance": float(tokens[1]),
-            "bed_thickness": float(tokens[2]),
-            "max_elev_col": int(tokens[3]),
-            "et_col": int(tokens[4]),
-            "precip_col": int(tokens[5]),
-            "name": " ".join(tokens[6:]),
-            "notes": (m.group(1).strip().lstrip("/").strip()
-                      if m else ""),
-        })
-    lake_params = pd.DataFrame(lake_rows) if lake_rows else None
-
-    # Initial lake elevations: FACT, then one ILAKE HLAKE row per lake
-    init_elev_factor = 1.0
-    init_rows: list[dict] = []
-    if not reader.eof:
-        init_elev_factor, _ = reader.read_keyed_float()
+    what = "lake parameter row"
+    with reader.section("lake parameter table"):
         while True:
             line = reader.peek_data_line()
             if line is None:
                 break
             tokens = tokenize_data_line(line)
-            if len(tokens) < 2:
-                break
-            try:
-                row = {"lake_id": int(tokens[0]),
-                       "elevation": float(tokens[1])}
-            except ValueError:
+            if len(tokens) < 6:
+                # the "1.0 / FACT" line opening the next section has a
+                # single value token
                 break
             reader.next_data_line()
-            init_rows.append(row)
+            m = re.search(r"\s/(.+)$", line)
+            lake_id = reader.to_ints(tokens[:1], what)[0]
+            cond, thick = reader.to_floats(tokens[1:3], what)
+            cols = reader.to_ints(tokens[3:6], what)
+            lake_rows.append({
+                "lake_id": lake_id,
+                "conductance": cond,
+                "bed_thickness": thick,
+                "max_elev_col": cols[0],
+                "et_col": cols[1],
+                "precip_col": cols[2],
+                "name": " ".join(tokens[6:]),
+                "notes": (m.group(1).strip().lstrip("/").strip()
+                          if m else ""),
+            })
+    lake_params = pd.DataFrame(lake_rows) if lake_rows else None
+
+    # Initial lake elevations: FACT, then one ILAKE HLAKE row per lake
+    init_elev_factor = 1.0
+    init_rows: list[dict] = []
+    with reader.section("initial lake elevations"):
+        if reader.peek_data_line() is not None:
+            init_elev_factor, _ = reader.read_keyed_float()
+            while True:
+                line = reader.peek_data_line()
+                if line is None:
+                    break
+                tokens = tokenize_data_line(line)
+                if len(tokens) < 2:
+                    reader.next_data_line()
+                    reader.degrade(
+                        "initial lake elevation row: expected 2 values "
+                        f"(ILAKE HLAKE) but found {len(tokens)}: "
+                        f"{line.strip()!r}; the rest of the file was not "
+                        "read")
+                    break
+                reader.next_data_line()
+                lake_id = reader.to_ints(tokens[:1],
+                                         "initial lake elevation row")[0]
+                elev = reader.to_floats(tokens[1:2],
+                                        "initial lake elevation row")[0]
+                init_rows.append({"lake_id": lake_id, "elevation": elev})
+        if lake_rows and len(init_rows) != len(lake_rows):
+            reader.degrade(
+                f"{len(init_rows)} initial lake elevation rows for "
+                f"{len(lake_rows)} lakes")
     initial_elevations = pd.DataFrame(init_rows) if init_rows else None
 
     return LakeMain(
@@ -126,8 +141,6 @@ def read_max_lake_elev(path: str | Path) -> TimeSeriesFile:
     -------
     TimeSeriesFile
     """
-    from iwfm_io.readers.timeseries import _read_ts_data_to_eof
-
     reader = IWFMFileReader(path)
     header = reader.read_header()
     spec = reader.read_timeseries_spec()
@@ -136,5 +149,6 @@ def read_max_lake_elev(path: str | Path) -> TimeSeriesFile:
     if spec.dss_file:
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        result.data = _read_ts_data_to_eof(reader, spec.n_columns)
+        result.data = reader.read_ts_rows(spec.n_columns,
+                                          what="maximum lake elevations")
     return result

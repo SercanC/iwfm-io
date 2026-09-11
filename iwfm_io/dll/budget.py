@@ -1,10 +1,13 @@
 """Standalone IWFM budget file reader."""
 
-from ctypes import c_int, c_double, c_char, byref
+import os
+from ctypes import c_int, c_double, byref
 import numpy as np
 
 from ._dll import load_dll
-from ._errors import _check_status
+from ._errors import IWFMError, _check_status
+from ._proxy import GuardedDLL
+from ._validate import check_ids, check_interval, check_range, check_window
 from ._marshal import str_to_c, c_to_str, c_to_str_list, alloc_int, alloc_double, alloc_char
 
 
@@ -23,21 +26,49 @@ class IWFMBudget:
         *dll_version*.
     """
 
+    #: the file the DLL currently serves (process-global in the DLL)
+    _current_path = None
+
     def __init__(self, hdf_file, dll_version=None, dll_path=None):
-        self._dll = load_dll(version=dll_version, dll_path=dll_path)
-        c_len, c_name = str_to_c(hdf_file)
-        iStat = c_int(0)
-        self._dll.IW_Budget_OpenFile(c_name, c_len, byref(iStat))
-        _check_status(iStat, self._dll)
+        self._open = False
+        self._path = os.path.abspath(str(hdf_file))
+        if not os.path.isfile(self._path):
+            raise FileNotFoundError(f"budget file not found: {self._path}")
+        raw = load_dll(version=dll_version, dll_path=dll_path)
+        self._dll = GuardedDLL(raw, before=self._before_call)
+        self._reopen()
         self._open = True
+
+    _LIFECYCLE = frozenset({"IW_Budget_OpenFile", "IW_Budget_CloseFile", "IW_GetLastMessage"})
+
+    def _before_call(self, name):
+        if name in self._LIFECYCLE:
+            return
+        if not self._open:
+            raise IWFMError("IWFMBudget is closed", -1)
+        if IWFMBudget._current_path != self._path:
+            # another instance took the DLL's single file slot: reopen
+            # ours transparently (the DLL closes the other one)
+            self._reopen()
+
+    def _reopen(self):
+        c_len, c_name = str_to_c(self._path)
+        iStat = c_int(0)
+        self._dll.raw.IW_Budget_OpenFile(c_name, c_len, byref(iStat))
+        _check_status(iStat, self._dll.raw)
+        IWFMBudget._current_path = self._path
 
     def close(self):
         """Close the budget file."""
         if self._open:
-            iStat = c_int(0)
-            self._dll.IW_Budget_CloseFile(byref(iStat))
-            _check_status(iStat, self._dll)
-            self._open = False
+            try:
+                if IWFMBudget._current_path == self._path:
+                    iStat = c_int(0)
+                    self._dll.IW_Budget_CloseFile(byref(iStat))
+                    _check_status(iStat, self._dll)
+                    IWFMBudget._current_path = None
+            finally:
+                self._open = False
 
     def __enter__(self):
         return self
@@ -135,6 +166,7 @@ class IWFMBudget:
                         length_unit="FT", area_unit="SQ FT",
                         volume_unit="CU FT", alt_loc_name=""):
         """Return title lines for a location."""
+        location = check_range("location", location, self.n_locations)
         n_titles = self.n_title_lines
         title_len = self.title_length
         total_len = n_titles * title_len
@@ -160,6 +192,7 @@ class IWFMBudget:
 
     def get_n_columns(self, location):
         """Return the number of data columns for a location."""
+        location = check_range("location", location, self.n_locations)
         c_loc = c_int(location)
         n = c_int(0)
         iStat = c_int(0)
@@ -170,6 +203,7 @@ class IWFMBudget:
     def get_column_headers(self, location, length_unit="FT",
                            area_unit="SQ FT", volume_unit="CU FT"):
         """Return column header strings for a location."""
+        location = check_range("location", location, self.n_locations)
         n_cols = self.get_n_columns(location)
         buf_len = n_cols * 200
         c_loc = c_int(location)
@@ -209,6 +243,11 @@ class IWFMBudget:
         np.ndarray
             Shape ``(n_times, n_columns+1)`` — first column is time.
         """
+        location = check_range("location", location, self.n_locations)
+        n_cols = int(self.get_n_columns(location))
+        columns = list(check_ids("columns", columns, n_cols))
+        check_window(begin_date, end_date)
+        interval = check_interval(interval)
         n_cols = len(columns)
         n_times = self.n_timesteps
         c_loc = c_int(location)
@@ -247,6 +286,7 @@ class IWFMBudget:
         dates : np.ndarray
         values : np.ndarray
         """
+        location = check_range("location", location, self.n_locations)
         n_times = self.n_timesteps
         c_loc = c_int(location)
         c_col = c_int(column)

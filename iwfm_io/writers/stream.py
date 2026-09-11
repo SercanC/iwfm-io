@@ -10,12 +10,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from iwfm_io._writer import IWFMFileWriter
+from iwfm_io._writer import IWFMFileWriter, format_cell
 from iwfm_io.writers._param_blocks import (
     check_count,
+    fmt_int,
+    fmt_name,
     fmt_num,
     write_element_groups,
 )
+from iwfm_io.writers._timeseries import write_ts_body
 from iwfm_io.models.stream import (
     BypassSpecsFile,
     DiverSpecsFile,
@@ -72,7 +75,8 @@ def write_stream_main(
                 "Stream main: NOUTR")
     for spec in sm.hydrograph_specs:
         w.write_data_line(
-            [spec["node_id"], spec["name"]],
+            [fmt_int(spec["node_id"], "stream hydrograph node_id"),
+             fmt_name(spec["name"], "stream hydrograph name")],
             widths=[8, 12],
         )
 
@@ -83,7 +87,8 @@ def write_stream_main(
     w.write_keyed_path(cfg.get("node_bud_file"),      "STNDBUDFL", base_dir=base_dir)
 
     for node_id in sm.node_budget_nodes:
-        w.write_data_line([node_id], widths=[8])
+        w.write_data_line([fmt_int(node_id, "stream budget node")],
+                          widths=[8])
 
     # ---- Stream bed parameters ----
     w.write_keyed_value(cfg.get("factk", 1.0),   "FACTK")
@@ -107,19 +112,18 @@ def write_stream_main(
                       and c not in base_cols]
         prev_node = None
         for _, row in rp.iterrows():
-            node = int(row["stream_node_id"])
+            node_cell = fmt_int(row["stream_node_id"], "stream_node_id")
+            node = int(node_cell)
             cells: list = []
             widths: list = []
             if not (_ver >= 4.2 and node == prev_node):
-                cells.append(str(node))
+                cells.append(node_cell)
                 widths.append(6)
             for c in base_cols + extra_cols:
-                v = fmt_num(row[c])
-                if v == "":
-                    raise ValueError(
-                        f"NaN in stream bed table column {c!r} for "
-                        f"stream node {node} — fill or drop it first")
-                cells.append(v)
+                cells.append(format_cell(
+                    row[c], what=f"stream bed table column {c!r} for "
+                                 f"stream node {node}",
+                    integer=(c == "gw_node_id")))
                 widths.append(12)
             note = row.get("notes")
             w.write_data_line(cells, widths,
@@ -140,8 +144,9 @@ def write_stream_main(
     if sm.evaporation is not None and len(sm.evaporation) > 0:
         for _, row in sm.evaporation.iterrows():
             w.write_data_line(
-                [int(row["stream_node"]), int(row["icetst"]),
-                 int(row["icarst"])],
+                [fmt_int(row["stream_node"], "evaporation stream_node"),
+                 fmt_int(row["icetst"], "evaporation icetst"),
+                 fmt_int(row["icarst"], "evaporation icarst")],
                 widths=[10, 8, 8])
 
     w.flush()
@@ -158,23 +163,25 @@ def write_stream_inflow(sf: StreamInflowFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(sf.header)
 
-    w.write_timeseries_spec(
-        sf.spec,
-        keywords=["NCOLSTRM", "FACTSTRM", "NSPSTRM", "NFQSTRM", "DSSFL"],
-    )
+    def _node_assignments(w: IWFMFileWriter) -> None:
+        # Column-to-node assignments
+        for col_id, node_id in sf.node_assignments:
+            w.write_data_line(
+                [fmt_int(col_id, "inflow column"),
+                 fmt_int(node_id, "inflow stream node")],
+                widths=[6, 8])
+        # Load-bearing comment terminating the node list -- like the
+        # spec block, IWFM otherwise consumes the first data line
+        # (verified against the executables)
+        w.write_comment("C  end of inflow node list")
 
-    # Column-to-node assignments
-    for col_id, node_id in sf.node_assignments:
-        w.write_data_line([col_id, node_id], widths=[6, 8])
-    # Load-bearing comment terminating the node list — like the spec
-    # block, IWFM otherwise consumes the first data line (verified
-    # against the executables)
-    w.write_comment("C  end of inflow node list")
-
-    if sf.dss_pathnames:
-        w.write_dss_pathnames(sf.dss_pathnames)
-    elif sf.data is not None:
-        w.write_timeseries_data(sf.data)
+    spec = sf.spec
+    fields = list(zip(
+        [spec.n_columns, spec.factor, spec.n_steps_update,
+         spec.repeat_freq, spec.dss_file],
+        ["NCOLSTRM", "FACTSTRM", "NSPSTRM", "NFQSTRM", "DSSFL"]))
+    write_ts_body(w, fields, sf.data, sf.dss_pathnames,
+                  n_columns=spec.n_columns, between=_node_assignments)
 
     w.flush()
 
@@ -205,32 +212,39 @@ def write_diver_specs(ds: DiverSpecsFile, path: str | Path) -> None:
 
     if ds.data is not None:
         for _, row in ds.data.iterrows():
+            what = "diversion spec"
+
+            def _i(col):
+                return fmt_int(row[col], f"{what} {col}")
+
+            def _f(col):
+                return fmt_num(row[col], what=f"{what} {col}")
+
             tokens = [
-                int(row["diversion_id"]), int(row["export_node"]),
-                int(row["max_col"]), fmt_num(row["max_frac"]),
-                int(row["recov_loss_col"]), fmt_num(row["recov_loss_frac"]),
-                int(row["nonrecov_loss_col"]),
-                fmt_num(row["nonrecov_loss_frac"]),
+                _i("diversion_id"), _i("export_node"),
+                _i("max_col"), _f("max_frac"),
+                _i("recov_loss_col"), _f("recov_loss_frac"),
+                _i("nonrecov_loss_col"), _f("nonrecov_loss_frac"),
             ]
             if row.get("spill_col") is not None and not pd.isna(
                     row.get("spill_col")):
-                tokens += [int(row["spill_col"]), fmt_num(row["spill_frac"])]
+                tokens += [_i("spill_col"), _f("spill_frac")]
             tokens += [
-                int(row["dest_type"]), int(row["dest_id"]),
-                int(row["delivery_col"]), fmt_num(row["delivery_frac"]),
-                int(row["irig_frac_col"]), int(row["adjust_col"]),
+                _i("dest_type"), _i("dest_id"),
+                _i("delivery_col"), _f("delivery_frac"),
+                _i("irig_frac_col"), _i("adjust_col"),
             ]
-            line = "".join(str(t).rjust(wd) for t, wd in zip(
-                tokens, [8] + [10] * (len(tokens) - 1)))
+            widths = [8] + [10] * (len(tokens) - 1)
             # NAME is a positional field the model reads; a "/" would
-            # blank it for IWFM
-            name = row.get("name") or ""
-            if isinstance(name, str) and name:
-                line += f"    {name}"
-            notes = row.get("notes") or ""
-            if isinstance(notes, str) and notes:
-                line += f"    / {notes}"
-            w.write_raw(line)
+            # blank it for IWFM -- it is the trailing token, separated
+            # by four spaces
+            name = fmt_name(row.get("name"), f"{what} name")
+            if name:
+                tokens.append(name)
+                widths.append(len(name) + 4)
+            w.write_data_line(tokens, widths,
+                              note=fmt_name(row.get("notes"),
+                                            f"{what} notes"))
 
     w.write_comment("C  Delivery Element Groups")
     check_count(ds.n_groups, len(ds.delivery_groups),
@@ -274,18 +288,18 @@ def write_bypass_specs(bs: BypassSpecsFile, path: str | Path) -> None:
     # ---- Bypass spec lines ----
     if bs.bypass_data is not None and not bs.bypass_data.empty:
         for _, row in bs.bypass_data.iterrows():
-            bid = int(row["bypass_id"])
+            bid = int(fmt_int(row["bypass_id"], "bypass_id"))
             note = row.get("notes")
             w.write_data_line(
                 [
                     bid,
-                    int(row["stream_node"]),
-                    int(row["dest_type"]),
-                    int(row["dest"]),
-                    int(row["idivc"]),
-                    fmt_num(row["divrl"]),
-                    fmt_num(row["divnl"]),
-                    row["name"],
+                    fmt_int(row["stream_node"], "bypass stream_node"),
+                    fmt_int(row["dest_type"], "bypass dest_type"),
+                    fmt_int(row["dest"], "bypass dest"),
+                    fmt_int(row["idivc"], "bypass idivc"),
+                    fmt_num(row["divrl"], what="bypass divrl"),
+                    fmt_num(row["divnl"], what="bypass divnl"),
+                    fmt_name(row["name"], "bypass name"),
                 ],
                 widths=[4, 6, 10, 7, 7, 7, 8, 12],
                 note=note if isinstance(note, str) else "",
@@ -296,7 +310,8 @@ def write_bypass_specs(bs: BypassSpecsFile, path: str | Path) -> None:
                 rt = bs.rating_tables[bid]
                 for _, rt_row in rt.iterrows():
                     w.write_data_line(
-                        [fmt_num(rt_row["divx"]), fmt_num(rt_row["divy"])],
+                        [fmt_num(rt_row["divx"], what="bypass rating divx"),
+                         fmt_num(rt_row["divy"], what="bypass rating divy")],
                         widths=[28, 12],
                     )
 
@@ -308,21 +323,26 @@ def write_bypass_specs(bs: BypassSpecsFile, path: str | Path) -> None:
         name = zone.get("name") or ""
 
         if n_elem == 0 or not elements:
-            w.write_data_line([bid, 0, 0, 0.0], widths=[4, 14, 12, 10],
-                              note=name)
+            w.write_data_line([fmt_int(bid, "seepage zone bypass_id"),
+                               "0", "0", "0.0"],
+                              widths=[4, 14, 12, 10], note=name)
         else:
             check_count(n_elem, len(elements),
                         f"Bypass specs: seepage zone {bid} NERELS")
             first = elements[0]
             w.write_data_line(
-                [bid, n_elem, first["element_id"],
-                 fmt_num(first["fraction"])],
+                [fmt_int(bid, "seepage zone bypass_id"),
+                 fmt_int(n_elem, "seepage zone NERELS"),
+                 fmt_int(first["element_id"], "seepage zone element_id"),
+                 fmt_num(first["fraction"], what="seepage zone fraction")],
                 widths=[4, 14, 12, 10],
                 note=name,
             )
             for elem in elements[1:]:
                 w.write_data_line(
-                    ["", "", elem["element_id"], fmt_num(elem["fraction"])],
+                    ["", "",
+                     fmt_int(elem["element_id"], "seepage zone element_id"),
+                     fmt_num(elem["fraction"], what="seepage zone fraction")],
                     widths=[4, 14, 12, 10],
                 )
 
@@ -340,14 +360,12 @@ def write_diversions(dv: DiversionsFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(dv.header)
 
-    w.write_timeseries_spec(
-        dv.spec,
-        keywords=["NCOLDV", "FACTDV", "NSPDV", "NFQDV", "DSSFL"],
-    )
-
-    if dv.dss_pathnames:
-        w.write_dss_pathnames(dv.dss_pathnames)
-    elif dv.data is not None:
-        w.write_timeseries_data(dv.data)
+    spec = dv.spec
+    fields = list(zip(
+        [spec.n_columns, spec.factor, spec.n_steps_update,
+         spec.repeat_freq, spec.dss_file],
+        ["NCOLDV", "FACTDV", "NSPDV", "NFQDV", "DSSFL"]))
+    write_ts_body(w, fields, dv.data, dv.dss_pathnames,
+                  n_columns=spec.n_columns)
 
     w.flush()

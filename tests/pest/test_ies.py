@@ -1,6 +1,5 @@
 """Tests for the PESTPP-IES results loader (iwfm_io.pest.ies)."""
 
-import pandas as pd
 import pytest
 
 from tests.pest.conftest import CASE  # noqa: F401

@@ -1,6 +1,6 @@
 # Plot Gallery
 
-66 visualization functions across 14 modules. All accept either an `IWFMModel` or `IOModelAdapter` instance and return `(fig, ax)`. Most accept an optional `save_path` parameter.
+66 visualization functions across 15 modules. All accept either an `IWFMModel` or `IOModelAdapter` instance and return `(fig, ax)`. Most accept an optional `save_path` parameter.
 
 ```python
 from iwfm_io.plots import maps, timeseries, water_balance  # etc.
@@ -148,10 +148,10 @@ PEST(++) calibration figures built on the `iwfm_io.pest` data structures
 ## Running the Test Suite
 
 ```bash
-# Run all 58 plots against the sample model
+# Run the 58-case DLL plot test suite against the sample model
 python examples/test_plots.py
 
 # Output PNGs saved to test_output/
 ```
 
-See [TEST_PLOTS_RESULTS.md](TEST_PLOTS_RESULTS.md) for pass/fail details. 42 of 58 pass on the sample model; the 16 failures are all due to sample model defects or DLL limitations (not code bugs).
+See [TEST_PLOTS_RESULTS.md](TEST_PLOTS_RESULTS.md) for pass/fail details. 48 of the 58 DLL test cases pass on the sample model; the 10 failures are DLL inquiry-mode limitations (not code bugs), and every one of those functions renders DLL-free through `IOModelAdapter` (`tests/io/test_plots_smoke.py` covers all 66 functions in CI).

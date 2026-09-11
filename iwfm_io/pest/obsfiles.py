@@ -24,10 +24,8 @@ Two layouts:
 
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -173,7 +171,6 @@ class ObsFileSpec:
                 np.linspace(-1.0, 1.0, len(self.names)) * 1234.5678,
                 index=self.names)
         buf_lines = self._format_lines(values)
-        tmp = io.StringIO("\n".join(buf_lines))
         aligned = self._align(values)
         if self.layout == "fixed":
             start, end = self._value_span

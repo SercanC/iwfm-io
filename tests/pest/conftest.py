@@ -1,6 +1,5 @@
 """Shared fixtures for iwfm_io.pest tests."""
 
-import pandas as pd
 import pytest
 
 CASE = "demo_ies"

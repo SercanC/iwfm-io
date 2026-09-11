@@ -1,6 +1,5 @@
 """Tests for typical (cluster-average) hydrographs (iwfm_io.pest.typhyd)."""
 
-import numpy as np
 import pandas as pd
 import pytest
 

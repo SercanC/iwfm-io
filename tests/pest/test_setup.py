@@ -75,7 +75,7 @@ class TestWrite:
         assert out.values == pytest.approx([2.0, 3.0, 4.0])
 
     def test_validation_errors(self, tmp_path):
-        from iwfm_io.pest import ObsFileSpec, PestSetup
+        from iwfm_io.pest import PestSetup
 
         s, spec = _toy_setup()
         with pytest.raises(ValueError, match="mismatch"):

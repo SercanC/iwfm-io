@@ -1,12 +1,26 @@
 """Fortran <-> Python data conversion helpers."""
 
+import sys
 from ctypes import c_int, c_double, c_char
+
 import numpy as np
+
+
+#: The DLL copies raw bytes and opens files through the ANSI code page.
+_ENC = "mbcs" if sys.platform == "win32" else "utf-8"
 
 
 def str_to_c(s):
     """Convert Python str to (c_int length, c_char_Array) for Fortran input."""
-    encoded = s.encode("ascii")
+    if not isinstance(s, str):
+        raise TypeError(f"expected a string for the DLL, got {type(s).__name__}")
+    try:
+        encoded = s.encode(_ENC)
+    except UnicodeEncodeError as exc:
+        from iwfm_io.dll._errors import IWFMError
+        raise IWFMError(
+            f"cannot pass {s!r} to the IWFM DLL: {exc.reason} (the DLL "
+            f"accepts only {_ENC}-encodable text)", -1) from None
     length = c_int(len(encoded))
     buf = (c_char * len(encoded))(*encoded)
     return length, buf
@@ -14,7 +28,7 @@ def str_to_c(s):
 
 def c_to_str(buf, length):
     """Convert c_char buffer to Python str, stripping null bytes and whitespace."""
-    return bytes(buf[:length]).decode("ascii", errors="replace").rstrip("\x00 ")
+    return bytes(buf[:length]).decode(_ENC, errors="replace").rstrip("\x00 ")
 
 
 def c_to_str_list(buf, loc_array, count):
@@ -32,7 +46,7 @@ def c_to_str_list(buf, loc_array, count):
             end = loc_array[i + 1] - 1
         else:
             end = len(raw)
-        s = raw[start:end].decode("ascii", errors="replace").rstrip("\x00 ")
+        s = raw[start:end].decode(_ENC, errors="replace").rstrip("\x00 ")
         result.append(s)
     return result
 

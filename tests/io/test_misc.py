@@ -1,7 +1,5 @@
 """Tests for miscellaneous IWFM file readers and writers."""
 
-import pytest
-from pathlib import Path
 
 from tests.io.conftest import SIMULATION_DIR
 

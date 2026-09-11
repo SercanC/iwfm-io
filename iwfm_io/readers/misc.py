@@ -8,11 +8,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from iwfm_io._parser import IWFMFileReader
+from iwfm_io._parser import IWFMFileReader, IWFMParseError
 from iwfm_io._tokens import tokenize_data_line
 from iwfm_io.models.misc import SWShedFile, UnsatZoneFile
 from iwfm_io.readers._param_blocks import (
-    LineCursor,
     expand_node_range,
     parse_node_layer_table,
 )
@@ -53,16 +52,15 @@ def read_swshed(path: str | Path) -> SWShedFile:
     config = {"facta": facta, "factq": factq, "tunitq": tunitq}
 
     # Remaining sections
-    raw_lines = reader.skip_to_end()
+    cursor = reader.tail_cursor()
 
     watershed_data = None
     watershed_nodes = None
     rootzone_params = None
     aquifer_params = None
     initial_conditions = None
+    section = "watershed definitions"
     try:
-        cursor = LineCursor(raw_lines)
-
         # ---- Watershed definitions ----
         # ID AREAS IWBTS NWB IWB QMAXWB, then NWB-1 continuation rows
         # of IWB QMAXWB.  QMAXWB < 0 encodes the receiving layer number.
@@ -95,6 +93,7 @@ def read_swshed(path: str | Path) -> SWShedFile:
         watershed_nodes = pd.DataFrame(node_rows)
 
         # ---- Root zone parameters ----
+        section = "root zone parameters"
         for kw, cast in (("TOLER", float), ("ITERMAX", int),
                          ("FACTL", float), ("FACTCN", float),
                          ("FACTK", float), ("TUNITK", str)):
@@ -115,6 +114,7 @@ def read_swshed(path: str | Path) -> SWShedFile:
             rootzone_params[c] = rootzone_params[c].astype(int)
 
         # ---- Aquifer parameters ----
+        section = "aquifer parameters"
         for kw, cast in (("FACTGW", float), ("FACTT", float),
                          ("TUNITT", str)):
             if cursor.peek_keyword() == kw:
@@ -133,6 +133,7 @@ def read_swshed(path: str | Path) -> SWShedFile:
         aquifer_params["id"] = aquifer_params["id"].astype(int)
 
         # ---- Initial conditions ----
+        section = "initial conditions"
         if cursor.peek_keyword() == "FACT":
             config["fact_ic"] = float(cursor.read_keyed_value()[0])
         ic_cols = ["id", "soil_moisture", "gw_storage"]
@@ -146,11 +147,13 @@ def read_swshed(path: str | Path) -> SWShedFile:
             ic_rows.append({c: float(t) for c, t in zip(ic_cols, toks)})
         initial_conditions = pd.DataFrame(ic_rows, columns=ic_cols)
         initial_conditions["id"] = initial_conditions["id"].astype(int)
-    except (StopIteration, ValueError, IndexError) as exc:
-        import warnings
-        warnings.warn(
-            f"SWShed file only partially parsed ({exc}); unparsed "
-            "sections will be missing from written output")
+    except (ValueError, IndexError) as exc:
+        if isinstance(exc, IWFMParseError) and cursor.strict:
+            raise
+        with cursor.section(section):
+            cursor.degrade(
+                f"SWShed file only partially parsed ({exc}); unparsed "
+                "sections will be missing from written output")
 
     return SWShedFile(
         header=header,
@@ -201,7 +204,7 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
     }
 
     # Remaining sections
-    raw_lines = reader.skip_to_end()
+    cursor = reader.tail_cursor()
 
     config: dict = {}
     ngroup = None
@@ -209,8 +212,8 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
     parametric_grids: list = []
     initial_moisture = None
     param_names = ["thickness", "porosity", "pore_size_index", "k", "rhc"]
+    section = "unsaturated zone parameters"
     try:
-        cursor = LineCursor(raw_lines)
         ngroup = int(cursor.read_keyed_value()[0])
 
         factor_vals = tokenize_data_line(cursor.next())
@@ -284,6 +287,7 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
 
         # Initial moisture: IE + one value per unsaturated layer
         # (IE = 0 applies the values to all elements).
+        section = "initial moisture"
         ic_rows = []
         while not cursor.eof:
             toks = tokenize_data_line(cursor.peek())
@@ -300,11 +304,20 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
             ic_rows.append(row)
         if ic_rows:
             initial_moisture = pd.DataFrame(ic_rows)
-    except (StopIteration, ValueError, IndexError) as exc:
-        import warnings
-        warnings.warn(
-            f"UnsatZone file only partially parsed ({exc}); unparsed "
-            "sections will be missing from written output")
+        if not cursor.eof:
+            cursor.next()
+            with cursor.section(section):
+                cursor.degrade(
+                    "UnsatZone: unrecognized content after the parsed "
+                    "sections was not understood and will be missing from "
+                    "written output")
+    except (ValueError, IndexError) as exc:
+        if isinstance(exc, IWFMParseError) and cursor.strict:
+            raise
+        with cursor.section(section):
+            cursor.degrade(
+                f"UnsatZone file only partially parsed ({exc}); unparsed "
+                "sections will be missing from written output")
 
     return UnsatZoneFile(
         header=header,

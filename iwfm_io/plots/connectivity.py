@@ -7,9 +7,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.collections import LineCollection
 from . import (get_stream_node_xy, get_element_centroids, overlay_grid,
-               overlay_streams, _id_to_index_map, _has_df_methods, savefig,
+               overlay_streams, _has_df_methods, savefig,
                style_map_axes, map_legend_outside)
 
 
@@ -228,10 +227,9 @@ def plot_bypass_flow_diagram(model, ax=None, figsize=(12, 10),
         if _has_df_methods(model):
             row = bp_df[bp_df["bypass_id"] == int(bid)].iloc[0]
             dest_node = int(row["dest"])
-            dest_type = int(row["dest_type"])
+            int(row["dest_type"])
         else:
             dest_node = int(dest_data["destinations"][i])
-            dest_type = int(dest_data["dest_types"][i])
 
         if dest_node > 0 and dest_node in sn_map:
             dx, dy = sx[sn_map[dest_node]], sy[sn_map[dest_node]]
@@ -263,15 +261,3 @@ def plot_bypass_flow_diagram(model, ax=None, figsize=(12, 10),
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        plot_diversion_network(m, save_path="div_network.png")
-        plot_bypass_flow_diagram(m, save_path="bypass_flow.png")
-    plt.show()

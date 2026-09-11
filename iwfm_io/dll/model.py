@@ -1,7 +1,7 @@
 """IWFM Model wrapper."""
 
 import os
-from ctypes import c_int, c_double, c_char, byref
+from ctypes import c_int, c_double, byref
 import numpy as np
 import pandas as pd
 
@@ -14,6 +14,10 @@ except ImportError:
 
 from ._dll import load_dll
 from ._errors import IWFMError, _check_status
+from ._proxy import GuardedDLL
+from ._validate import (check_date, check_ids, check_int,
+                        check_interval, check_range,
+                        check_same_length, check_window)
 from ._marshal import str_to_c, c_to_str, c_to_str_list, alloc_int, alloc_double, alloc_char
 
 
@@ -50,17 +54,42 @@ class IWFMModel:
         simulation main's folder (or the preprocessor main's when no
         simulation file is given) by default, restoring the previous
         CWD afterwards.  Pass *run_dir* to override for exotic layouts.
+    
+    Concurrency: the IWFM DLL keeps one active model and is not
+    reentrant. Every call is serialised by a process-wide lock and
+    re-activates this model first, so several instances can coexist
+    (baseline vs. scenario), but Fortran work never overlaps -- use
+    processes, not threads, for parallelism. Arguments (dates,
+    intervals, layers, locations, ids) are validated in Python before
+    reaching the DLL.
     """
+
+    #: id of the model the DLL currently serves (multi-model builds)
+    _current_id = None
+    _active_sim_file = None       # simulation main of the DLL's active model
+    #: the open instance on single-model (2015-line) builds
+    _open_single = None
+    #: thread policy: one model per process; calls are serialised by a
+    #: process-wide lock (see ``iwfm_io.dll._proxy``)
+
 
     def __init__(self, preprocessor_file, simulation_file="",
                  wsa_file="", is_routed_streams=True,
                  is_for_inquiry=False, dll_version=None, dll_path=None,
                  run_dir=None):
-        self._dll = load_dll(version=dll_version, dll_path=dll_path)
+        raw = load_dll(version=dll_version, dll_path=dll_path)
         self._model_id = None
         self._open = False
         self._cache = {}
         self._is_for_inquiry = bool(is_for_inquiry)
+        self._multi = bool(getattr(raw, "_iwfm_multi_model", True))
+        if not self._multi and IWFMModel._open_single is not None:
+            raise IWFMError(
+                "this DLL build (2015 line) holds a single model per "
+                "process; close the open IWFMModel first", -1)
+        # every DLL call goes through the guard: process-wide lock,
+        # model activation, closed check, working-directory anchor
+        self._dll = GuardedDLL(raw, before=self._before_call)
 
         # Absolute main-file paths stay valid across the chdir below.
         preprocessor_file = os.path.abspath(preprocessor_file)
@@ -78,6 +107,12 @@ class IWFMModel:
         model_id = c_int(0)
         iStat = c_int(0)
 
+        if not os.path.isdir(run_dir):
+            raise FileNotFoundError(f"run_dir does not exist: {run_dir}")
+        if wsa_file and not os.path.isfile(wsa_file):
+            raise FileNotFoundError(f"wsa_file does not exist: {wsa_file}")
+        self._run_dir = os.path.abspath(run_dir)
+        object.__setattr__(self._dll, "_run_dir", self._run_dir)
         prev_cwd = os.getcwd()
         os.chdir(run_dir)
         try:
@@ -101,17 +136,75 @@ class IWFMModel:
             _check_status(iStat, self._dll)
         finally:
             os.chdir(prev_cwd)
-        self._model_id = model_id.value
+        self._model_id = model_id.value if self._multi else 0
         self._open = True
+        self._simulation_file = simulation_file or None
+        IWFMModel._current_id = self._model_id
+        IWFMModel._active_sim_file = self._simulation_file
+        if not self._multi:
+            IWFMModel._open_single = self
+
+    # calls that must not trigger activation / closed checks
+    _LIFECYCLE = frozenset({"IW_Model_New", "IW_Model_WSA_New",
+                            "IW_Model_Switch", "IW_Model_GetCurrentModelID",
+                            "IW_Model_Kill", "IW_GetLastMessage"})
+
+    def _before_call(self, name):
+        if name in self._LIFECYCLE:
+            return
+        if not self._open:
+            raise IWFMError("IWFMModel is closed", -1)
+        self._activate()
+
+    def _activate(self):
+        """Make this model the DLL's current one (multi-model builds
+        keep a single active model; every getter reads it)."""
+        if not self._multi or self._model_id is None:
+            return
+        if IWFMModel._current_id == self._model_id:
+            return
+        raw = self._dll.raw
+        iStat = c_int(0)
+        raw.IW_Model_Switch(c_int(self._model_id), byref(iStat))
+        _check_status(iStat, raw)
+        IWFMModel._current_id = self._model_id
+        IWFMModel._active_sim_file = getattr(self, "_simulation_file", None)
+
+    @classmethod
+    def switch_to(cls, dll, model_id):
+        """Make *model_id* the DLL's active model.
+
+        Activation is automatic since 2.13.0 (every call re-activates
+        its own model), so this is only needed for hand-driven DLL use.
+        The id is validated against the ids of the open instances.
+        """
+        check_int("model_id", model_id)
+        raw = getattr(dll, "raw", dll)
+        if not getattr(raw, "_iwfm_multi_model", True):
+            raise IWFMError("this DLL build holds a single model", -1)
+        if int(model_id) < 1:
+            raise IWFMError(f"model_id {model_id} is not a loaded model", -1)
+        iStat = c_int(0)
+        raw.IW_Model_Switch(c_int(int(model_id)), byref(iStat))
+        _check_status(iStat, raw)
+        cls._current_id = int(model_id)
 
     def close(self):
         """Kill the model and free resources."""
         if self._open:
-            iStat = c_int(0)
-            self._dll.IW_Model_Kill(byref(iStat))
-            _check_status(iStat, self._dll)
-            self._open = False
-            self._cache.clear()
+            try:
+                self._activate()
+                iStat = c_int(0)
+                self._dll.IW_Model_Kill(byref(iStat))
+                _check_status(iStat, self._dll)
+            finally:
+                self._open = False
+                self._cache.clear()
+                if IWFMModel._current_id == self._model_id:
+                    IWFMModel._current_id = None
+                    IWFMModel._active_sim_file = None
+                if IWFMModel._open_single is self:
+                    IWFMModel._open_single = None
 
     def __enter__(self):
         return self
@@ -125,31 +218,31 @@ class IWFMModel:
         except Exception:
             pass
 
-    @classmethod
-    def switch_to(cls, dll, model_id):
-        """Switch the active model (when multiple are loaded)."""
-        iStat = c_int(0)
-        dll.IW_Model_Switch(c_int(model_id), byref(iStat))
-        _check_status(iStat, dll)
-
     # ==================================================================
     # Simulation control
     # ==================================================================
 
     def simulate(self):
         """Run the entire simulation."""
+        self._cache.pop("time_specs", None)
+        self._require_full_instantiation("simulate")
         iStat = c_int(0)
         self._dll.IW_Model_SimulateAll(byref(iStat))
         _check_status(iStat, self._dll)
 
     def simulate_timestep(self):
         """Advance one time step."""
+        self._cache.pop("time_specs", None)
+        self._require_full_instantiation("simulate_timestep")
         iStat = c_int(0)
         self._dll.IW_Model_SimulateForOneTimeStep(byref(iStat))
         _check_status(iStat, self._dll)
 
     def simulate_interval(self, interval):
         """Simulate for a specified interval (e.g. '1MON')."""
+        self._cache.pop("time_specs", None)
+        self._require_full_instantiation("simulate_interval")
+        interval = check_interval(interval)
         iv_len, c_iv = str_to_c(interval)
         iStat = c_int(0)
         self._dll.IW_Model_SimulateForAnInterval(iv_len, c_iv, byref(iStat))
@@ -157,12 +250,15 @@ class IWFMModel:
 
     def advance_time(self):
         """Advance the simulation clock by one time step."""
+        self._cache.pop("time_specs", None)
+        self._require_full_instantiation("advance_time")
         iStat = c_int(0)
         self._dll.IW_Model_AdvanceTime(byref(iStat))
         _check_status(iStat, self._dll)
 
     def read_timeseries_data(self):
         """Read time-series input data for the current time step."""
+        self._require_full_instantiation("read_timeseries_data")
         iStat = c_int(0)
         self._dll.IW_Model_ReadTSData(byref(iStat))
         _check_status(iStat, self._dll)
@@ -171,6 +267,7 @@ class IWFMModel:
                                        diversions_val, inflows_idx, inflows_val,
                                        bypasses_idx, bypasses_val):
         """Read time-series data with user-supplied overrides."""
+        self._require_full_instantiation("read_timeseries_data_overwrite")
         region_lu = np.asarray(region_lu_areas, dtype=np.float64)
         n_sub, n_lu = region_lu.shape
         n_div = len(diversions_idx)
@@ -197,12 +294,14 @@ class IWFMModel:
 
     def print_results(self):
         """Write simulation results for the current time step."""
+        self._require_full_instantiation("print_results")
         iStat = c_int(0)
         self._dll.IW_Model_PrintResults(byref(iStat))
         _check_status(iStat, self._dll)
 
     def advance_state(self):
         """Advance the model state in time."""
+        self._require_full_instantiation("advance_state")
         iStat = c_int(0)
         self._dll.IW_Model_AdvanceState(byref(iStat))
         _check_status(iStat, self._dll)
@@ -237,6 +336,8 @@ class IWFMModel:
 
     def compute_future_water_demands(self, end_date):
         """Compute future water demands up to end_date."""
+        self._require_full_instantiation("compute_future_water_demands")
+        end_date = check_date("end_date", end_date)
         d_len, c_date = str_to_c(end_date)
         iStat = c_int(0)
         self._dll.IW_Model_ComputeFutureWaterDemands(d_len, c_date, byref(iStat))
@@ -244,7 +345,25 @@ class IWFMModel:
 
     @staticmethod
     def delete_inquiry_data_file(dll, sim_filename):
-        """Delete the inquiry data file for a simulation."""
+        """Delete the inquiry data file (``IW_ModelData_ForInquiry.bin``)
+        of a simulation.
+
+        The DLL export ignores its argument and deletes the file of the
+        model currently active in the DLL, so *sim_filename* must be an
+        existing simulation main and, while a model is open, must be that
+        model's simulation main -- anything else raises before the call.
+        """
+        sim_path = os.path.abspath(str(sim_filename))
+        if not os.path.isfile(sim_path):
+            raise FileNotFoundError(
+                f"simulation main not found: {sim_filename} (the DLL would "
+                "delete the ACTIVE model's inquiry file regardless)")
+        active = IWFMModel._active_sim_file
+        if IWFMModel._current_id is not None and active is not None                 and os.path.normcase(active) != os.path.normcase(sim_path):
+            raise ValueError(
+                f"the DLL deletes the inquiry file of its active model "
+                f"({active}), not of {sim_filename}; close that model first "
+                "or pass its simulation main")
         s_len, c_sim = str_to_c(sim_filename)
         iStat = c_int(0)
         dll.IW_Model_DeleteInquiryDataFile(s_len, c_sim, byref(iStat))
@@ -284,7 +403,12 @@ class IWFMModel:
         return val.value != 0
 
     def get_time_specs(self):
-        """Return dict with 'dates', 'interval'."""
+        """Return dict with 'dates', 'interval' (cached; the clock does
+        not move in inquiry mode, and simulate/advance calls clear it)."""
+        cached = self._cache.get("time_specs")
+        if cached is not None:
+            return {"dates": list(cached["dates"]),
+                    "interval": cached["interval"]}
         n_data = self.n_timesteps
         date_buf_len = n_data * 32
         intv_buf_len = 32
@@ -299,7 +423,22 @@ class IWFMModel:
         _check_status(iStat, self._dll)
         dates = c_to_str_list(date_buf, loc_arr, n_data)
         interval = c_to_str(intv_buf, intv_buf_len)
-        return {"dates": dates, "interval": interval}
+        self._cache["time_specs"] = {"dates": dates, "interval": interval}
+        return {"dates": list(dates), "interval": interval}
+
+    def _sim_window(self):
+        d = self.get_time_specs()["dates"]
+        return (d[0], d[-1]) if d else None
+
+    def _check_interval(self, interval):
+        allowed = self._cache.get("output_intervals")
+        if allowed is None:
+            allowed = list(self.get_output_intervals())
+            native = self.get_time_specs()["interval"]
+            if native and native not in allowed:
+                allowed.append(native)
+            self._cache["output_intervals"] = allowed
+        return check_interval(interval, allowed)
 
     def get_output_intervals(self):
         """Return list of available output interval strings."""
@@ -336,6 +475,9 @@ class IWFMModel:
             Keys: ``source``, ``grid``, ``streams``, ``lakes``,
             ``simulation``, ``budgets``.
         """
+
+        if not self._open:
+            raise IWFMError("IWFMModel is closed", -1)
 
         def _try(fn):
             try:
@@ -449,6 +591,7 @@ class IWFMModel:
 
     def get_element_config(self, element):
         """Return vertex node indices for an element (4 values; 0 = triangle)."""
+        element = check_range("element", element, self.n_elements)
         nodes = alloc_int(4)
         iStat = c_int(0)
         self._dll.IW_Model_GetElementConfigData(
@@ -466,6 +609,7 @@ class IWFMModel:
         return np.array(ids, dtype=np.int32)
 
     def get_subregion_name(self, subregion):
+        subregion = check_range("subregion", subregion, self.n_subregions)
         buf_len = 100
         buf = alloc_char(buf_len)
         iStat = c_int(0)
@@ -577,6 +721,14 @@ class IWFMModel:
 
     def get_stratigraphy_at_xy(self, x, y):
         """Return stratigraphy at a coordinate."""
+        try:
+            x, y = float(x), float(y)
+        except (TypeError, ValueError):
+            raise TypeError(f"x, y must be numbers, got {x!r}, {y!r}")
+        if not (np.isfinite(x) and np.isfinite(y)):
+            raise ValueError(
+                f"x, y must be finite coordinates, got ({x}, {y}) -- the "
+                "DLL interpolates a stratigraphy for NaN instead of failing")
         nl = self.n_layers
         gs = c_double(0.0)
         tops = alloc_double(nl)
@@ -680,10 +832,15 @@ class IWFMModel:
 
         dates: 1D array, heads: shape (n_nodes, n_times).
         """
+        layer = check_range("layer", layer, self.n_layers)
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         nn = self.n_nodes
         nt = self.n_timesteps
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         dates = alloc_double(nt)
         heads = alloc_double(nn * nt)
         iStat = c_int(0)
@@ -699,6 +856,7 @@ class IWFMModel:
 
     def get_gw_heads_all(self, previous=False, factor=1.0):
         """Current timestep heads, shape (n_nodes, n_layers)."""
+        self._require_full_instantiation("GWHeads_All")
         nn, nl = self.n_nodes, self.n_layers
         buf = alloc_double(nn * nl)
         iStat = c_int(0)
@@ -711,6 +869,7 @@ class IWFMModel:
 
     def get_subsidence_all(self, factor=1.0):
         """Current timestep subsidence, shape (n_nodes, n_layers)."""
+        self._require_full_instantiation("Subsidence_All")
         nn, nl = self.n_nodes, self.n_layers
         buf = alloc_double(nn * nl)
         iStat = c_int(0)
@@ -757,6 +916,7 @@ class IWFMModel:
         return np.array(ids, dtype=np.int32)
 
     def get_reaches_for_stream_nodes(self, node_indices):
+        node_indices = list(check_ids("node_indices", node_indices, self.n_stream_nodes))
         n = len(node_indices)
         nodes = (c_int * n)(*node_indices)
         reaches = alloc_int(n)
@@ -800,6 +960,7 @@ class IWFMModel:
         return np.array(dt, dtype=np.int32)
 
     def get_reach_n_nodes(self, reach):
+        reach = check_range("reach", reach, self.n_reaches)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetReachNNodes(c_int(reach), byref(n), byref(iStat))
@@ -807,6 +968,7 @@ class IWFMModel:
         return n.value
 
     def get_reach_stream_nodes(self, reach):
+        reach = check_range("reach", reach, self.n_reaches)
         n = self.get_reach_n_nodes(reach)
         nodes = alloc_int(n)
         iStat = c_int(0)
@@ -815,6 +977,7 @@ class IWFMModel:
         return np.array(nodes, dtype=np.int32)
 
     def get_reach_gw_nodes(self, reach):
+        reach = check_range("reach", reach, self.n_reaches)
         n = self.get_reach_n_nodes(reach)
         nodes = alloc_int(n)
         iStat = c_int(0)
@@ -831,6 +994,7 @@ class IWFMModel:
         return np.array(elevs, dtype=np.float64)
 
     def get_n_rating_table_points(self, stream_node):
+        stream_node = check_range("stream_node", stream_node, self.n_stream_nodes)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetNStrmRatingTablePoints(
@@ -840,6 +1004,7 @@ class IWFMModel:
         return n.value
 
     def get_stream_rating_table(self, stream_node):
+        stream_node = check_range("stream_node", stream_node, self.n_stream_nodes)
         n = self.get_n_rating_table_points(stream_node)
         stage = alloc_double(n)
         flow = alloc_double(n)
@@ -851,6 +1016,7 @@ class IWFMModel:
         return np.array(stage, dtype=np.float64), np.array(flow, dtype=np.float64)
 
     def get_stream_n_upstream_nodes(self, node):
+        node = check_range("node", node, self.n_stream_nodes)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetStrmNUpstrmNodes(c_int(node), byref(n), byref(iStat))
@@ -858,6 +1024,7 @@ class IWFMModel:
         return n.value
 
     def get_stream_upstream_nodes(self, node):
+        node = check_range("node", node, self.n_stream_nodes)
         n = self.get_stream_n_upstream_nodes(node)
         nodes = alloc_int(n)
         iStat = c_int(0)
@@ -875,6 +1042,7 @@ class IWFMModel:
         return result.value == 1
 
     def get_reach_n_upstream_reaches(self, reach):
+        reach = check_range("reach", reach, self.n_reaches)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetReachNUpstrmReaches(c_int(reach), byref(n), byref(iStat))
@@ -882,6 +1050,7 @@ class IWFMModel:
         return n.value
 
     def get_reach_upstream_reaches(self, reach):
+        reach = check_range("reach", reach, self.n_reaches)
         n = self.get_reach_n_upstream_reaches(reach)
         reaches = alloc_int(n)
         iStat = c_int(0)
@@ -990,6 +1159,7 @@ class IWFMModel:
     # ==================================================================
 
     def get_n_stream_inflows(self):
+        self._require_full_instantiation("stream inflows")
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetStrmNInflows(byref(n), byref(iStat))
@@ -1013,6 +1183,8 @@ class IWFMModel:
         return np.array(ids, dtype=np.int32)
 
     def get_stream_inflows_at(self, inflow_indices, factor=1.0):
+        self._require_full_instantiation("stream inflows")
+        inflow_indices = list(check_ids("inflow_indices", inflow_indices, 10**9))
         n = len(inflow_indices)
         idx = (c_int * n)(*inflow_indices)
         vals = alloc_double(n)
@@ -1044,6 +1216,7 @@ class IWFMModel:
         return np.array(ids, dtype=np.int32)
 
     def get_required_diversions(self, div_indices, factor=1.0):
+        self._require_full_instantiation("RequiredDiversions")
         n = len(div_indices)
         idx = (c_int * n)(*div_indices)
         vals = alloc_double(n)
@@ -1055,6 +1228,7 @@ class IWFMModel:
         return np.array(vals, dtype=np.float64)
 
     def get_actual_diversions(self, div_indices, factor=1.0):
+        self._require_full_instantiation("ActualDiversions")
         n = len(div_indices)
         idx = (c_int * n)(*div_indices)
         vals = alloc_double(n)
@@ -1066,6 +1240,7 @@ class IWFMModel:
         return np.array(vals, dtype=np.float64)
 
     def get_diversion_export_nodes(self, div_indices):
+        div_indices = list(check_ids("div_indices", div_indices, self.n_diversions))
         n = len(div_indices)
         idx = (c_int * n)(*div_indices)
         nodes = alloc_int(n)
@@ -1077,6 +1252,7 @@ class IWFMModel:
         return np.array(nodes, dtype=np.int32)
 
     def get_diversion_n_elements(self, div):
+        div = check_range("diversion", div, self.n_diversions)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetStrmDiversionNElems(c_int(div), byref(n), byref(iStat))
@@ -1084,6 +1260,7 @@ class IWFMModel:
         return n.value
 
     def get_diversion_elements(self, div):
+        div = check_range("diversion", div, self.n_diversions)
         n = self.get_diversion_n_elements(div)
         elems = alloc_int(n)
         iStat = c_int(0)
@@ -1092,6 +1269,7 @@ class IWFMModel:
         return np.array(elems, dtype=np.int32)
 
     def get_diversion_n_recharge_zone_elements(self, div):
+        div = check_range("diversion", div, self.n_diversions)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetStrmDiversionNRechargeZoneElems(
@@ -1101,6 +1279,7 @@ class IWFMModel:
         return n.value
 
     def get_diversion_recharge_zone_elements(self, div):
+        div = check_range("diversion", div, self.n_diversions)
         n = self.get_diversion_n_recharge_zone_elements(div)
         elems = alloc_int(n)
         fracs = alloc_double(n)
@@ -1132,6 +1311,7 @@ class IWFMModel:
         return np.array(ids, dtype=np.int32)
 
     def get_bypass_export_nodes(self, bypass_indices):
+        bypass_indices = list(check_ids("bypass_indices", bypass_indices, self.n_bypasses))
         n = len(bypass_indices)
         idx = (c_int * n)(*bypass_indices)
         nodes = alloc_int(n)
@@ -1143,6 +1323,7 @@ class IWFMModel:
         return np.array(nodes, dtype=np.int32)
 
     def get_bypass_export_dest_data(self, bypass_indices):
+        bypass_indices = list(check_ids("bypass_indices", bypass_indices, self.n_bypasses))
         n = len(bypass_indices)
         idx = (c_int * n)(*bypass_indices)
         exp_nodes = alloc_int(n)
@@ -1160,6 +1341,7 @@ class IWFMModel:
         }
 
     def get_bypass_outflows(self, factor=1.0):
+        self._require_full_instantiation("BypassOutflows")
         n = self.n_bypasses
         buf = alloc_double(n)
         iStat = c_int(0)
@@ -1170,6 +1352,7 @@ class IWFMModel:
         return np.array(buf, dtype=np.float64)
 
     def get_bypass_recoverable_loss_factor(self, bypass):
+        bypass = check_range("bypass", bypass, self.n_bypasses)
         val = c_double(0.0)
         iStat = c_int(0)
         self._dll.IW_Model_GetBypassRecoverableLossFactor(
@@ -1179,6 +1362,7 @@ class IWFMModel:
         return val.value
 
     def get_bypass_non_recoverable_loss_factor(self, bypass):
+        bypass = check_range("bypass", bypass, self.n_bypasses)
         val = c_double(0.0)
         iStat = c_int(0)
         self._dll.IW_Model_GetBypassNonRecoverableLossFactor(
@@ -1208,6 +1392,7 @@ class IWFMModel:
         return np.array(ids, dtype=np.int32)
 
     def get_n_elements_in_lake(self, lake):
+        lake = check_range("lake", lake, self.n_lakes)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetNElementsInLake(c_int(lake), byref(n), byref(iStat))
@@ -1215,6 +1400,7 @@ class IWFMModel:
         return n.value
 
     def get_elements_in_lake(self, lake):
+        lake = check_range("lake", lake, self.n_lakes)
         n = self.get_n_elements_in_lake(lake)
         elems = alloc_int(n)
         iStat = c_int(0)
@@ -1269,6 +1455,7 @@ class IWFMModel:
         return np.array(top, dtype=np.float64), np.array(bot, dtype=np.float64)
 
     def get_well_n_elements(self, well):
+        well = check_range("well", well, self.n_wells)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetWellNElems(c_int(well), byref(n), byref(iStat))
@@ -1276,6 +1463,7 @@ class IWFMModel:
         return n.value
 
     def get_well_elements(self, well):
+        well = check_range("well", well, self.n_wells)
         n = self.get_well_n_elements(well)
         elems = alloc_int(n)
         iStat = c_int(0)
@@ -1345,7 +1533,24 @@ class IWFMModel:
         return [{"name": names[i], "location_type": loc_types[i]}
                 for i in range(n)]
 
+    def _check_hydrograph_type(self, location_type):
+        """A hydrograph location type must be one the model reports
+        (``get_hydrograph_type_list``); the Fortran answers an unknown
+        type with garbage counts instead of an error."""
+        lt = check_int("location_type", location_type)
+        known = getattr(self, "_hyd_type_ids", None)
+        if known is None:
+            known = {int(t["location_type"])
+                     for t in self.get_hydrograph_type_list()}
+            self._hyd_type_ids = known
+        if lt not in known:
+            raise ValueError(
+                f"location_type {lt} is not a hydrograph type of this "
+                f"model; available: {sorted(known)}")
+        return lt
+
     def get_n_hydrographs(self, location_type):
+        location_type = self._check_hydrograph_type(location_type)
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetNHydrographs(c_int(location_type), byref(n), byref(iStat))
@@ -1353,6 +1558,7 @@ class IWFMModel:
         return n.value
 
     def get_hydrograph_ids(self, location_type):
+        location_type = self._check_hydrograph_type(location_type)
         n = self.get_n_hydrographs(location_type)
         ids = alloc_int(n)
         iStat = c_int(0)
@@ -1361,6 +1567,7 @@ class IWFMModel:
         return np.array(ids, dtype=np.int32)
 
     def get_hydrograph_coordinates(self, location_type):
+        location_type = self._check_hydrograph_type(location_type)
         n = self.get_n_hydrographs(location_type)
         x = alloc_double(n)
         y = alloc_double(n)
@@ -1374,9 +1581,24 @@ class IWFMModel:
     def get_hydrograph(self, hyd_type, index, layer, begin_date, end_date,
                        interval, fact_lt=1.0, fact_vl=1.0):
         """Return (dates, values) for a hydrograph."""
+        check_int("hyd_type", hyd_type)
+        index = check_range("hydrograph index", index,
+                            max(int(self.get_n_hydrographs(hyd_type)), 0))
+        layer = check_range("layer", layer, self.n_layers, lo=0)
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
+        interval = self._check_interval(interval)
+        native = self.get_time_specs()["interval"].strip().upper()
+        if native and interval != native:
+            raise ValueError(
+                f"hydrographs are served at the native interval ({native}); "
+                "the DLL's re-sampling uses fixed-day strides -- resample the "
+                "returned series in pandas instead")
         nt = self.n_timesteps
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         iv_len, c_intv = str_to_c(interval)
         dates = alloc_double(nt)
         vals = alloc_double(nt)
@@ -1431,7 +1653,27 @@ class IWFMModel:
         return [{"name": names[i], "budget_type": btypes[i],
                  "location_type": ltypes[i]} for i in range(n)]
 
+    def _budget_n_locations(self, budget_type):
+        """Number of locations a budget type is reported for (cached
+        from the budget list) -- bounds the ``location`` argument."""
+        table = self._cache.get("budget_loc_types")
+        if table is None:
+            table = {int(b["budget_type"]): int(b["location_type"])
+                     for b in self.get_budget_list()}
+            self._cache["budget_loc_types"] = table
+        loc_type = table.get(int(budget_type))
+        if loc_type is None:
+            raise IWFMError(
+                f"budget type {budget_type} is not available in this model; "
+                f"available: {sorted(table)}", -1)
+        key = ("budget_n_loc", loc_type)
+        if key not in self._cache:
+            self._cache[key] = int(self.get_n_locations(loc_type))
+        return self._cache[key]
+
     def get_budget_n_columns(self, budget_type, location):
+        check_int("budget_type", budget_type)
+        location = check_range("location", location, self._budget_n_locations(budget_type))
         n = c_int(0)
         iStat = c_int(0)
         self._dll.IW_Model_GetBudget_NColumns(
@@ -1443,6 +1685,8 @@ class IWFMModel:
     def get_budget_column_titles(self, budget_type, location,
                                  length_unit="FT", area_unit="SQ FT",
                                  volume_unit="CU FT"):
+        check_int("budget_type", budget_type)
+        location = check_range("location", location, self._budget_n_locations(budget_type))
         n = self.get_budget_n_columns(budget_type, location)
         buf_len = n * 200
         u_len, c_lu = str_to_c(length_unit)
@@ -1483,10 +1727,19 @@ class IWFMModel:
             ``dates``: np.ndarray, ``values``: np.ndarray shape (n_times, n_cols),
             ``data_types``: np.ndarray of int.
         """
+        check_int("budget_type", budget_type)
+        location = check_range("location", location, self._budget_n_locations(budget_type))
+        n_cols = int(self.get_budget_n_columns(budget_type, location))
+        columns = list(check_ids("columns", columns, n_cols))
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
+        interval = self._check_interval(interval)
         n_cols = len(columns)
         nt = self.n_timesteps
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         iv_len, c_intv = str_to_c(interval)
         c_cols = (c_int * n_cols)(*columns)
         dates = alloc_double(nt)
@@ -1516,9 +1769,15 @@ class IWFMModel:
                                    begin_date, end_date,
                                    fact_vl=1.0, lu_type=0, swshed_comp=0):
         """Return monthly average flows."""
+        check_int("budget_type", budget_type)
+        location = check_range("location", location, self._budget_n_locations(budget_type))
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         max_flows = 200
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         flows = alloc_double(max_flows * 12)
         sd_flows = alloc_double(max_flows * 12)
         n_flows_out = c_int(0)
@@ -1549,10 +1808,16 @@ class IWFMModel:
     def get_budget_annual(self, budget_type, location, begin_date, end_date,
                           fact_vl=1.0, lu_type=0, swshed_comp=0):
         """Return annual flows (water year)."""
+        check_int("budget_type", budget_type)
+        location = check_range("location", location, self._budget_n_locations(budget_type))
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         max_flows = 200
         max_times = 200
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         flows = alloc_double(max_flows * max_times)
         n_flows_out = c_int(0)
         n_times_out = c_int(0)
@@ -1583,10 +1848,16 @@ class IWFMModel:
                              fact_vl=1.0, lu_type=0, swshed_comp=0,
                              calendar_year=False):
         """Return annual flows with calendar/water year option."""
+        check_int("budget_type", budget_type)
+        location = check_range("location", location, self._budget_n_locations(budget_type))
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         max_flows = 200
         max_times = 200
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         flows = alloc_double(max_flows * max_times)
         n_flows_out = c_int(0)
         n_times_out = c_int(0)
@@ -1616,9 +1887,15 @@ class IWFMModel:
 
     def get_budget_cum_gw_storage_change(self, subregion, begin_date, end_date,
                                           interval, fact_vl=1.0):
+        subregion = check_range("subregion", subregion, self.n_subregions)
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
+        interval = self._check_interval(interval)
         max_times = self.n_timesteps
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         iv_len, c_intv = str_to_c(interval)
         dates = alloc_double(max_times)
         vals = alloc_double(max_times)
@@ -1637,7 +1914,10 @@ class IWFMModel:
                                                  end_date, fact_vl=1.0):
         max_times = 200
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         vals = alloc_double(max_times)
         years = alloc_int(max_times)
         nt_out = c_int(0)
@@ -1656,7 +1936,10 @@ class IWFMModel:
                                                     calendar_year=False):
         max_times = 200
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         vals = alloc_double(max_times)
         years = alloc_int(max_times)
         nt_out = c_int(0)
@@ -1700,6 +1983,8 @@ class IWFMModel:
 
     def get_zbudget_n_columns(self, zbudget_type, zone_id, zone_extent,
                                elements, layers, zone_ids):
+        check_int("zbudget_type", zbudget_type)
+        check_same_length(elements=elements, layers=layers, zone_ids=zone_ids)
         elements = np.asarray(elements, dtype=np.int32)
         layers = np.asarray(layers, dtype=np.int32)
         zone_ids_arr = np.asarray(zone_ids, dtype=np.int32)
@@ -1720,6 +2005,8 @@ class IWFMModel:
     def get_zbudget_column_titles(self, zbudget_type, zone_id, zone_extent,
                                    elements, layers, zone_ids,
                                    area_unit="SQ FT", volume_unit="CU FT"):
+        check_int("zbudget_type", zbudget_type)
+        check_same_length(elements=elements, layers=layers, zone_ids=zone_ids)
         elements = np.asarray(elements, dtype=np.int32)
         layers = np.asarray(layers, dtype=np.int32)
         zone_ids_arr = np.asarray(zone_ids, dtype=np.int32)
@@ -1774,6 +2061,11 @@ class IWFMModel:
             ``dates``: np.ndarray, ``values``: np.ndarray shape (n_times, n_cols),
             ``data_types``: np.ndarray of int.
         """
+        check_int("zbudget_type", zbudget_type)
+        check_same_length(elements=elements, layers=layers, zone_ids=zone_ids)
+        columns = list(check_ids("columns", columns, 10**9))
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
+        interval = self._check_interval(interval)
         elements = np.asarray(elements, dtype=np.int32)
         layers = np.asarray(layers, dtype=np.int32)
         zone_ids_arr = np.asarray(zone_ids, dtype=np.int32)
@@ -1781,7 +2073,10 @@ class IWFMModel:
         n_cols = len(columns)
         nt = self.n_timesteps
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         iv_len, c_intv = str_to_c(interval)
         c_cols = (c_int * n_cols)(*columns)
         dates = alloc_double(nt)
@@ -1816,6 +2111,9 @@ class IWFMModel:
     # ==================================================================
 
     def get_future_water_demand_for_diversion(self, div, date, factor=1.0):
+        self._require_full_instantiation("FutureWaterDemand")
+        div = check_range("diversion", div, self.n_diversions)
+        date = check_date("date", date)
         d_len, c_date = str_to_c(date)
         demand = c_double(0.0)
         iStat = c_int(0)
@@ -1827,6 +2125,8 @@ class IWFMModel:
         return demand.value
 
     def get_supply_purpose(self, supply_type, supplies):
+        self._require_full_instantiation("SupplyPurpose")
+        supplies = list(check_ids("supplies", supplies, 10**9))
         n = len(supplies)
         idx = (c_int * n)(*supplies)
         result = alloc_int(n)
@@ -1838,6 +2138,7 @@ class IWFMModel:
         return np.array(result, dtype=np.int32)
 
     def _get_supply_req_or_short(self, func_name, loc_type, locations, factor):
+        self._require_full_instantiation("SupplyRequirement/Shortage")
         n = len(locations)
         idx = (c_int * n)(*locations)
         vals = alloc_double(n)
@@ -1869,6 +2170,7 @@ class IWFMModel:
         )
 
     def get_subregion_ag_pumping_avg_depth_to_gw(self):
+        self._require_full_instantiation("SubregionAgPumpingAvgDepthToGW")
         n = self.n_subregions
         buf = alloc_double(n)
         iStat = c_int(0)
@@ -1879,6 +2181,8 @@ class IWFMModel:
         return np.array(buf, dtype=np.float64)
 
     def get_zone_ag_pumping_avg_depth_to_gw(self, elements, zones, n_zones):
+        self._require_full_instantiation("ZoneAgPumpingAvgDepthToGW")
+        check_same_length(elements=elements, zones=zones)
         elements = np.asarray(elements, dtype=np.int32)
         zones_arr = np.asarray(zones, dtype=np.int32)
         n_elems = len(elements)
@@ -1903,11 +2207,16 @@ class IWFMModel:
     def get_land_use_areas(self, begin_date, end_date, lu_type, lu,
                            n_elements=None, fact_area=1.0):
         """Return land use areas, shape (n_elements, n_times)."""
+        self._require_full_instantiation("LandUseAreas")
+        begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         if n_elements is None:
             n_elements = self.n_elements
         n_times = self.n_timesteps
         d_len, c_begin = str_to_c(begin_date)
-        _, c_end = str_to_c(end_date)
+        e_len, c_end = str_to_c(end_date)
+        if e_len.value != d_len.value:
+            raise ValueError("begin_date and end_date must have the same "
+                             "length (MM/DD/YYYY_HH:MM)")
         buf = alloc_double(n_elements * n_times)
         iStat = c_int(0)
         self._dll.IW_Model_GetLandUseAreasForTimePeriod(

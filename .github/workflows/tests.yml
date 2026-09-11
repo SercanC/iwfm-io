@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+# The sample model is a GitHub release asset (sample_model.zip, ~188 MB),
+# not tracked in git. Every job restores it from the Actions cache or
+# downloads it from the fixed release tag below, so the data-dependent
+# tests (readers, writers, HDF, links, quickstart, ...) run in CI instead
+# of skipping. Bump SAMPLE_MODEL_TAG when the asset is rebuilt.
+env:
+  SAMPLE_MODEL_TAG: v2.12.0
+
 jobs:
   test:
     strategy:
@@ -18,10 +26,60 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Restore sample model
+        id: sample
+        uses: actions/cache@v4
+        with:
+          path: .assets/sample_model
+          key: sample-model-${{ env.SAMPLE_MODEL_TAG }}
+      - name: Fetch sample model (release asset)
+        if: steps.sample.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .assets
+          gh release download "$SAMPLE_MODEL_TAG" -R SercanC/iwfm-io -p sample_model.zip -D .assets
+          python -c "import zipfile; zipfile.ZipFile('.assets/sample_model.zip').extractall('.assets')"
+          rm .assets/sample_model.zip
+          test -f .assets/sample_model/Preprocessor/PreProcessor_MAIN.IN
+      - name: Install package and test dependencies
+        run: pip install -e .[geo] pytest ruff
+      - name: Lint (pyflakes-class checks)
+        run: ruff check --select F iwfm_io tests examples
+      - name: Run test suite
+        run: pytest tests/ -q --junitxml=report.xml
+      - name: Assert the data-dependent tests ran
+        run: python tests/_ci/min_passed.py report.xml 700
+
+  dll:
+    # The ctypes wrapper only loads on Windows x64. The DLL is a release
+    # asset too (sha256-pinned in iwfm_io/dll/download.py).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Restore sample model
+        id: sample
+        uses: actions/cache@v4
+        with:
+          path: .assets/sample_model
+          key: sample-model-${{ env.SAMPLE_MODEL_TAG }}
+      - name: Fetch sample model (release asset)
+        if: steps.sample.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .assets
+          gh release download "$SAMPLE_MODEL_TAG" -R SercanC/iwfm-io -p sample_model.zip -D .assets
+          python -c "import zipfile; zipfile.ZipFile('.assets/sample_model.zip').extractall('.assets')"
+          rm .assets/sample_model.zip
       - name: Install package and test dependencies
         run: pip install -e .[geo] pytest
-      # The sample model is a release asset, not in git — data-dependent
-      # tests skip automatically; this still exercises imports, parser
-      # primitives, and all data-independent tests.
-      - name: Run test suite
-        run: pytest tests/ -q
+      - name: Install the IWFM DLL
+        run: python -c "from iwfm_io.dll import download_dll; print(download_dll('2025.0.1747', dest_dir='dlls/2025.0.1747'))"
+      - name: DLL tests
+        run: pytest tests/test_dll_generations.py tests/io/test_dll_agg_parity.py tests/regression/dll -q

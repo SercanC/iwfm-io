@@ -14,8 +14,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from iwfm_io._parser import IWFMFileReader
-from iwfm_io._tokens import split_keyed_line, tokenize_data_line
+import warnings
+
+from iwfm_io._parser import IWFMFileReader, IWFMReadWarning
+from iwfm_io._tokens import (
+    is_comment,
+    is_iwfm_date,
+    split_keyed_line,
+    tokenize_data_line,
+)
 from iwfm_io.models.rootzone import (
     LandUseAreaFile,
     NativeVegFile,
@@ -119,29 +126,36 @@ def read_rootzone_main(path: str | Path) -> RootZoneMain:
             break
 
     # Per-element soil parameter table (runs to EOF)
-    raw_lines = reader.skip_to_end()
-
     element_params = None
-    from iwfm_io._tokens import is_comment
     rows = []
     columns: list[str] | None = None
-    for line in raw_lines:
-        if is_comment(line):
-            continue
-        toks = tokenize_data_line(line)
-        if columns is None:
-            if len(toks) >= len(_SOIL_COLS_V412):
-                columns = _SOIL_COLS_V412
-            elif len(toks) >= len(_SOIL_COLS_V411) - 1:
-                columns = _SOIL_COLS_V411
-            else:
+    with reader.section("soil parameter table"):
+        while True:
+            line = reader.peek_data_line()
+            if line is None:
                 break
-        try:
-            vals = [float(t) for t in toks[: len(columns)]]
-        except ValueError:
-            break
-        vals += [float("nan")] * (len(columns) - len(vals))
-        rows.append(vals)
+            toks = tokenize_data_line(line)
+            if columns is None:
+                if len(toks) >= len(_SOIL_COLS_V412):
+                    columns = _SOIL_COLS_V412
+                elif len(toks) >= len(_SOIL_COLS_V411) - 1:
+                    columns = _SOIL_COLS_V411
+                else:
+                    reader.next_data_line()
+                    reader.degrade(
+                        "soil parameter row: expected at least "
+                        f"{len(_SOIL_COLS_V411) - 1} values but found "
+                        f"{len(toks)}: {line.strip()!r}")
+                    break
+            reader.next_data_line()
+            vals = reader.to_floats(toks[: len(columns)],
+                                    "soil parameter row")
+            if len(vals) < len(columns):
+                reader.degrade(
+                    f"soil parameter row has {len(vals)} of "
+                    f"{len(columns)} values (missing values read as NaN)")
+            vals += [float("nan")] * (len(columns) - len(vals))
+            rows.append(vals)
     if rows and columns is not None:
         element_params = pd.DataFrame(rows, columns=columns)
         for col in _SOIL_INT_COLS & set(columns):
@@ -189,46 +203,102 @@ def _read_element_table(
     reader: IWFMFileReader,
     value_names: list[str],
     as_int: bool = False,
+    what: str | None = None,
+    n_rows: int | None = None,
 ) -> pd.DataFrame | None:
     """Read an IWFM per-element table: ``IE  v1 .. vn`` rows.
 
-    An element id of 0 means the values apply to all elements and ends
-    the table.  Otherwise rows continue while the element ids are
-    strictly increasing and the token count matches — consecutive
-    tables of the same shape are split where the id sequence resets.
-    Extra trailing tokens on a row are ignored, matching Fortran
-    list-directed reads (C2VSimFG pads some rows with extra zeros).
+    IWFM reads exactly ``NE`` rows (in any order) unless the first row's
+    element id is 0, which means "all elements" and is the whole table.
+    When *n_rows* (the model's element count) is known that is what is
+    read — a short table raises. Without it the table end is inferred:
+    rows continue while the element ids are strictly increasing and the
+    token count matches (consecutive tables of the same shape are split
+    where the id sequence resets), which is only right for decks that
+    list elements in ascending order. Extra trailing tokens on a row are
+    ignored, matching Fortran list-directed reads (C2VSimFG pads some
+    rows with extra zeros).
     """
     n_cols = 1 + len(value_names)
     rows: list[list[float]] = []
     prev_id: int | None = None
-    while True:
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        toks = tokenize_data_line(line)
-        if len(toks) < n_cols:
-            break
-        try:
-            vals = [float(t) for t in toks[:n_cols]]
-        except ValueError:
-            break
-        elem = int(vals[0])
-        if prev_id is not None and elem <= prev_id:
-            break
-        reader.next_data_line()
-        rows.append([elem] + vals[1:])
-        if elem == 0:
-            break
-        prev_id = elem
+    what = f"{what or 'element table'} row"
+    with reader.section(what[:-4]):
+        while True:
+            if n_rows is not None and len(rows) >= n_rows:
+                break
+            line = reader.peek_data_line()
+            if line is None:
+                if n_rows is not None and rows:
+                    raise reader.error(
+                        f"{what}s: file ended after {len(rows)} of "
+                        f"{n_rows} element rows")
+                break
+            toks = tokenize_data_line(line)
+            if len(toks) < n_cols:
+                if n_rows is not None and rows:
+                    raise reader.error(
+                        f"{what} {len(rows) + 1}: expected {n_cols} "
+                        f"values, got {len(toks)}: {line.strip()!r}")
+                break
+            if not _is_int_token(toks[0]):
+                if n_rows is not None and rows:
+                    raise reader.error(
+                        f"{what} {len(rows) + 1}: element id is not an "
+                        f"integer: {toks[0]!r}")
+                # not an element row: the next keyed line / section
+                break
+            elem = int(float(toks[0]))
+            if n_rows is None and prev_id is not None and elem <= prev_id:
+                break
+            reader.next_data_line()
+            vals: list = []
+            for i, t in enumerate(toks[1:n_cols], start=2):
+                try:
+                    vals.append(float(t))
+                except ValueError:
+                    reader.degrade(
+                        f"{what}: column {i} is not a number: {t!r} "
+                        "(kept as text; validate_references reports it)")
+                    vals.append(t)
+            rows.append([elem] + vals)
+            if elem == 0:
+                break
+            prev_id = elem
     if not rows:
         return None
     df = pd.DataFrame(rows, columns=["element_id"] + value_names)
     df["element_id"] = df["element_id"].astype(int)
     if as_int:
-        for col in value_names:
-            df[col] = df[col].astype(int)
+        _int_columns(reader, df, value_names, what[:-4])
     return df
+
+
+def _is_int_token(tok: str) -> bool:
+    try:
+        return float(tok) == int(float(tok))
+    except (ValueError, OverflowError):
+        return False
+
+
+def _int_columns(reader: IWFMFileReader, df: pd.DataFrame, cols, what: str):
+    """Cast pointer *cols* of *df* to int in place; non-integral values
+    are kept as floats with a warning (``validate_references`` reports
+    them), NaN placeholders (lenient mode) stay float."""
+    for col in cols:
+        vals = df[col]
+        num = pd.to_numeric(vals, errors="coerce")
+        if num.isna().any():
+            continue  # lenient-mode text placeholders stay as read
+        if (num != num.round()).any():
+            warnings.warn(
+                f"{reader.path} [{what}]: column {col!r} holds "
+                "non-integral pointer values; kept as floats "
+                "(validate_references reports them)",
+                IWFMReadWarning, stacklevel=3)
+            df[col] = num
+            continue
+        df[col] = num.astype(int)
 
 
 # Some decks repeat the variable tag inside the inline comment
@@ -257,7 +327,7 @@ def _read_keyed_codes(
 # Non-ponded agricultural crops main
 # ------------------------------------------------------------------
 
-def read_nonponded_ag_main(path: str | Path) -> NonPondedAgFile:
+def read_nonponded_ag_main(path: str | Path, n_elements: int | None = None) -> NonPondedAgFile:
     """Read the non-ponded agricultural crops main file (AGNPFL).
 
     All per-element/crop pointer tables reference data columns in other
@@ -293,40 +363,55 @@ def read_nonponded_ag_main(path: str | Path) -> NonPondedAgFile:
     root_depth_fracs, _ = reader.read_keyed_value()
     root_depth_factor, _ = reader.read_keyed_float()
     rd_rows = []
-    for _ in range(n_crops):
-        toks = tokenize_data_line(reader.next_data_line())
-        rd_rows.append({
-            "crop": crop_codes[int(float(toks[0])) - 1],
-            "root_depth": float(toks[1]),
-            "icroot": int(float(toks[2])),
-        })
+    with reader.section("root depths"):
+        for _ in range(n_crops):
+            toks = reader.read_row(3, "root depth row")
+            icrop = reader.to_ints(toks[:1], "root depth row")[0]
+            if not 1 <= icrop <= n_crops:
+                raise reader.error(
+                    f"root depth row: crop index {icrop} is outside "
+                    f"1..{n_crops}")
+            rd_rows.append({
+                "crop": crop_codes[icrop - 1],
+                "root_depth": reader.to_floats(toks[1:2],
+                                               "root depth row")[0],
+                "icroot": reader.to_ints(toks[2:3], "root depth row")[0],
+            })
     root_depths = pd.DataFrame(rd_rows)
 
     crop_cols = list(crop_codes)
-    curve_numbers = _read_element_table(reader, crop_cols)
-    et_columns = _read_element_table(reader, crop_cols, as_int=True)
-    supply_req_columns = _read_element_table(reader, crop_cols, as_int=True)
-    irig_period_columns = _read_element_table(reader, crop_cols, as_int=True)
+    curve_numbers = _read_element_table(reader, crop_cols,
+                                        what="curve numbers", n_rows=n_elements)
+    et_columns = _read_element_table(reader, crop_cols, as_int=True,
+                                     what="ET column pointers", n_rows=n_elements)
+    supply_req_columns = _read_element_table(
+        reader, crop_cols, as_int=True, what="supply requirement pointers", n_rows=n_elements)
+    irig_period_columns = _read_element_table(
+        reader, crop_cols, as_int=True, what="irrigation period pointers", n_rows=n_elements)
 
     min_soil_moisture, _ = reader.read_keyed_value()
-    min_moisture_columns = _read_element_table(reader, crop_cols, as_int=True)
+    min_moisture_columns = _read_element_table(
+        reader, crop_cols, as_int=True, what="minimum moisture pointers", n_rows=n_elements)
 
     target_soil_moisture, _ = reader.read_keyed_value()
     target_moisture_columns = None
     if target_soil_moisture and target_soil_moisture != "*":
         target_moisture_columns = _read_element_table(
-            reader, crop_cols, as_int=True)
+            reader, crop_cols, as_int=True, what="target moisture pointers", n_rows=n_elements)
 
-    return_flow_columns = _read_element_table(reader, crop_cols, as_int=True)
-    reuse_columns = _read_element_table(reader, crop_cols, as_int=True)
+    return_flow_columns = _read_element_table(
+        reader, crop_cols, as_int=True, what="return flow pointers", n_rows=n_elements)
+    reuse_columns = _read_element_table(
+        reader, crop_cols, as_int=True, what="reuse pointers", n_rows=n_elements)
 
     min_perc, _ = reader.read_keyed_value()
     min_perc_columns = None
     if min_perc and min_perc != "*":
-        min_perc_columns = _read_element_table(reader, crop_cols, as_int=True)
+        min_perc_columns = _read_element_table(
+            reader, crop_cols, as_int=True, what="minimum percolation pointers", n_rows=n_elements)
 
     initial_conditions = _read_element_table(
-        reader, ["fsoilmp"] + crop_cols)
+        reader, ["fsoilmp"] + crop_cols, what="initial conditions", n_rows=n_elements)
 
     return NonPondedAgFile(
         header=header,
@@ -369,7 +454,7 @@ PONDED_CROP_TYPES = ["rice_fl", "rice_nfl", "rice_ndc",
                      "refuge_sl", "refuge_pr"]
 
 
-def read_ponded_ag_main(path: str | Path) -> PondedAgFile:
+def read_ponded_ag_main(path: str | Path, n_elements: int | None = None) -> PondedAgFile:
     """Read the ponded agricultural crops main file (PFL).
 
     Parameters
@@ -402,22 +487,30 @@ def read_ponded_ag_main(path: str | Path) -> PondedAgFile:
         root_depths[root_key.get(kw, kw.lower())] = float(value)
 
     type_cols = list(PONDED_CROP_TYPES)
-    curve_numbers = _read_element_table(reader, type_cols)
-    et_columns = _read_element_table(reader, type_cols, as_int=True)
-    supply_req_columns = _read_element_table(reader, type_cols, as_int=True)
-    irig_period_columns = _read_element_table(reader, type_cols, as_int=True)
+    curve_numbers = _read_element_table(reader, type_cols,
+                                        what="curve numbers", n_rows=n_elements)
+    et_columns = _read_element_table(reader, type_cols, as_int=True,
+                                     what="ET column pointers", n_rows=n_elements)
+    supply_req_columns = _read_element_table(
+        reader, type_cols, as_int=True, what="supply requirement pointers", n_rows=n_elements)
+    irig_period_columns = _read_element_table(
+        reader, type_cols, as_int=True, what="irrigation period pointers", n_rows=n_elements)
 
     ponding_depth, _ = reader.read_keyed_value()
     rice_refuge_ops, _ = reader.read_keyed_value()
 
-    ponding_depth_columns = _read_element_table(reader, type_cols, as_int=True)
+    ponding_depth_columns = _read_element_table(
+        reader, type_cols, as_int=True, what="ponding depth pointers", n_rows=n_elements)
     app_depth_columns = _read_element_table(
-        reader, ["icdwri_nfl"], as_int=True)
-    return_flow_columns = _read_element_table(reader, type_cols, as_int=True)
-    reuse_columns = _read_element_table(reader, type_cols, as_int=True)
+        reader, ["icdwri_nfl"], as_int=True,
+        what="application depth pointers", n_rows=n_elements)
+    return_flow_columns = _read_element_table(
+        reader, type_cols, as_int=True, what="return flow pointers", n_rows=n_elements)
+    reuse_columns = _read_element_table(
+        reader, type_cols, as_int=True, what="reuse pointers", n_rows=n_elements)
 
     initial_conditions = _read_element_table(
-        reader, ["fsoilmp"] + type_cols)
+        reader, ["fsoilmp"] + type_cols, what="initial conditions", n_rows=n_elements)
 
     return PondedAgFile(
         header=header,
@@ -448,7 +541,7 @@ def read_ponded_ag_main(path: str | Path) -> PondedAgFile:
 # Urban lands main
 # ------------------------------------------------------------------
 
-def read_urban_main(path: str | Path) -> UrbanFile:
+def read_urban_main(path: str | Path, n_elements: int | None = None) -> UrbanFile:
     """Read the urban lands main file (URBFL).
 
     Parameters
@@ -473,14 +566,15 @@ def read_urban_main(path: str | Path) -> UrbanFile:
     element_params = _read_element_table(
         reader,
         ["perv_fraction", "cn", "icpopul", "icwtruse", "fracdm",
-         "iceturb", "icrtfurb", "icrufurb", "icurbspec"])
+         "iceturb", "icrtfurb", "icrufurb", "icurbspec"],
+        what="urban element parameters", n_rows=n_elements)
     if element_params is not None:
-        for col in ("icpopul", "icwtruse", "iceturb", "icrtfurb",
-                    "icrufurb", "icurbspec"):
-            element_params[col] = element_params[col].astype(int)
+        _int_columns(reader, element_params,
+                     ("icpopul", "icwtruse", "iceturb", "icrtfurb",
+                      "icrufurb", "icurbspec"), "urban element parameters")
 
     initial_conditions = _read_element_table(
-        reader, ["fsoilmp", "soil_moisture"])
+        reader, ["fsoilmp", "soil_moisture"], what="initial conditions", n_rows=n_elements)
 
     return UrbanFile(
         header=header,
@@ -563,8 +657,10 @@ def read_land_use_area(
         keywords=keywords,
     )
 
-    from iwfm_io._tokens import is_comment
-    raw = [line for line in reader.skip_to_end() if not is_comment(line)]
+    lineno0 = reader.lineno
+    tail = reader.skip_to_end()
+    raw_idx = [i for i, line in enumerate(tail) if not is_comment(line)]
+    raw = [tail[i] for i in raw_idx]
 
     if dss_file:
         # DSS input: IE  LUTYPE  PATH rows instead of inline data.
@@ -591,17 +687,35 @@ def read_land_use_area(
     s = pd.Series(raw).str.lstrip()
     is_date = s.str.match(_LU_DATE_RE)
     if not is_date.iloc[0]:
-        raise ValueError(
-            f"{path}: first land use data row does not start with an "
-            "IWFM date")
+        raise reader.error(
+            "first land use data row does not start with an IWFM date",
+            lineno=lineno0 + raw_idx[0] + 1)
     split = s[is_date].str.split(n=1, expand=True)
+    bad = [d for d in split[0] if not is_iwfm_date(d)]
+    if bad:
+        raise reader.error(
+            f"land use block date {bad[0]!r} is not a valid IWFM date "
+            "(MM/DD/YYYY_HH:MM)")
     body = s.copy()
     body[is_date] = split[1]
     dates = pd.Series(np.nan, index=s.index, dtype=object)
     dates[is_date] = split[0]
 
-    df = pd.read_csv(_io.StringIO("\n".join(body)), sep=r"\s+",
-                     header=None)
+    try:
+        df = pd.read_csv(_io.StringIO("\n".join(body)), sep=r"\s+",
+                         header=None)
+    except (ValueError, pd.errors.ParserError) as exc:
+        raise reader.error(
+            f"land use rows are not rectangular numeric data ({exc})"
+        ) from None
+    bad_cols = [c for c in df.columns if df[c].dtype == object]
+    if bad_cols:
+        col = bad_cols[0]
+        bad_rows = df.index[pd.to_numeric(df[col], errors="coerce").isna()]
+        r = int(bad_rows[0])
+        raise reader.error(
+            f"land use row column {col + 1} is not a number: "
+            f"{df.at[r, col]!r}", lineno=lineno0 + raw_idx[r] + 1)
     n_areas = len(df.columns) - 1
     if columns is not None:
         if len(columns) != n_areas:
@@ -612,9 +726,23 @@ def read_land_use_area(
     else:
         names = [f"area_{i + 1}" for i in range(n_areas)]
     df.columns = ["element_id"] + names
-    df["element_id"] = df["element_id"].astype(int)
+    elem = df["element_id"]
+    if (elem != elem.round()).any():
+        r = int(elem.index[elem != elem.round()][0])
+        raise reader.error(
+            f"land use row element id is not an integer: {elem[r]!r}",
+            lineno=lineno0 + raw_idx[r] + 1)
+    df["element_id"] = elem.astype(int)
     df[names] = df[names].astype(float)
     df.insert(0, "date", dates.ffill().to_numpy())
+
+    dup = df.duplicated(["date", "element_id"])
+    if dup.any():
+        r = int(df.index[dup][0])
+        raise reader.error(
+            f"element {int(df.at[r, 'element_id'])} appears twice in the "
+            f"{df.at[r, 'date']} block — a block is missing its date or "
+            "repeats an element", lineno=lineno0 + raw_idx[r] + 1)
 
     result.data = df
     return result
@@ -779,7 +907,7 @@ def read_all_land_use_areas(
 # Native and riparian vegetation main
 # ------------------------------------------------------------------
 
-def read_native_veg_main(path: str | Path) -> NativeVegFile:
+def read_native_veg_main(path: str | Path, n_elements: int | None = None) -> NativeVegFile:
     """Read the native and riparian vegetation main file (NVRVFL).
 
     Parameters
@@ -801,13 +929,16 @@ def read_native_veg_main(path: str | Path) -> NativeVegFile:
 
     element_params = _read_element_table(
         reader,
-        ["cn_native", "cn_riparian", "icetnv", "icetrv", "istrmrv"])
+        ["cn_native", "cn_riparian", "icetnv", "icetrv", "istrmrv"],
+        what="native/riparian element parameters", n_rows=n_elements)
     if element_params is not None:
-        for col in ("icetnv", "icetrv", "istrmrv"):
-            element_params[col] = element_params[col].astype(int)
+        _int_columns(reader, element_params,
+                     ("icetnv", "icetrv", "istrmrv"),
+                     "native/riparian element parameters")
 
     initial_conditions = _read_element_table(
-        reader, ["moisture_native", "moisture_riparian"])
+        reader, ["moisture_native", "moisture_riparian"],
+        what="initial conditions", n_rows=n_elements)
 
     return NativeVegFile(
         header=header,
@@ -848,30 +979,37 @@ def read_surface_flow_dest(path: str | Path) -> SurfaceFlowDestFile:
     reader = IWFMFileReader(path)
     header = reader.read_header()
 
-    n_columns, _ = reader.read_keyed_int()
-    n_steps_update, _ = reader.read_keyed_int()
-    repeat_freq, _ = reader.read_keyed_int()
+    with reader.section("time-series spec"):
+        n_columns, _ = reader.read_keyed_int()
+        n_steps_update, _ = reader.read_keyed_int()
+        repeat_freq, _ = reader.read_keyed_int()
 
     rows: list[dict] = []
-    while True:
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        toks = tokenize_data_line(line)
-        if not toks or "/" not in toks[0] or "_" not in toks[0]:
-            break
-        reader.next_data_line()
-        row: dict = {"date": toks[0]}
-        body = re.split(r"\s+/", line, maxsplit=1)[0]
-        pairs = _DEST_TUPLE_RE.findall(body)
-        if len(pairs) < n_columns:
-            raise ValueError(
-                f"SurfaceFlowDest row {toks[0]} has {len(pairs)} of "
-                f"{n_columns} expected (type,dest) tuples")
-        for i, (typ, dest) in enumerate(pairs[:n_columns], start=1):
-            row[f"type_{i}"] = int(typ)
-            row[f"dest_{i}"] = int(dest)
-        rows.append(row)
+    with reader.section("surface flow destinations"):
+        while True:
+            line = reader.peek_data_line()
+            if line is None:
+                break
+            toks = tokenize_data_line(line)
+            if not toks or not is_iwfm_date(toks[0]):
+                reader.next_data_line()
+                reader.degrade(
+                    "expected a data row starting with an IWFM date "
+                    f"(MM/DD/YYYY_HH:MM) but found {line.strip()[:60]!r}; "
+                    "data after this line was not read")
+                break
+            reader.next_data_line()
+            row: dict = {"date": toks[0]}
+            body = re.split(r"\s+/", line, maxsplit=1)[0]
+            pairs = _DEST_TUPLE_RE.findall(body)
+            if len(pairs) < n_columns:
+                raise reader.error(
+                    f"SurfaceFlowDest row {toks[0]} has {len(pairs)} of "
+                    f"{n_columns} expected (type,dest) tuples")
+            for i, (typ, dest) in enumerate(pairs[:n_columns], start=1):
+                row[f"type_{i}"] = int(typ)
+                row[f"dest_{i}"] = int(dest)
+            rows.append(row)
 
     columns = ["date"]
     for i in range(1, n_columns + 1):

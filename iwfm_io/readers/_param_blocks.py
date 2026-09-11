@@ -23,22 +23,78 @@ conversion factors for model units.
 
 from __future__ import annotations
 
+import warnings
+from contextlib import contextmanager
+
 import pandas as pd
 
+from iwfm_io._parser import IWFMParseError, IWFMReadWarning
+from iwfm_io._strict import current_strict
 from iwfm_io._tokens import is_comment, split_keyed_line, tokenize_data_line
 
 
 class LineCursor:
-    """Minimal data-line cursor over a list of raw file lines."""
+    """Minimal data-line cursor over a list of raw file lines.
 
-    def __init__(self, lines: list[str]) -> None:
+    Parameters
+    ----------
+    lines : list[str]
+        Raw lines (comments included) — typically the remainder of a
+        file from :meth:`IWFMFileReader.skip_to_end`.
+    path : str or Path, optional
+        The file the lines came from, for error messages.
+    lineno0 : int
+        Number of file lines preceding *lines* (so ``lineno`` reports
+        real file line numbers).
+    strict : bool, optional
+        Reader mode; ``None`` snapshots the mode in effect.
+    """
+
+    def __init__(self, lines: list[str], path=None, lineno0: int = 0,
+                 strict: bool | None = None) -> None:
         self._lines = lines
         self._pos = 0
+        self.path = path
+        self.lineno0 = lineno0
+        self.strict = current_strict() if strict is None else bool(strict)
+        self._sections: list[str] = []
 
     @property
     def eof(self) -> bool:
         self._skip_comments()
         return self._pos >= len(self._lines)
+
+    @property
+    def lineno(self) -> int:
+        """1-based file line number of the most recently consumed line."""
+        return self.lineno0 + self._pos
+
+    @property
+    def section_name(self) -> str:
+        return " > ".join(self._sections)
+
+    @contextmanager
+    def section(self, name: str):
+        """Name the section being read, for error messages."""
+        self._sections.append(name)
+        try:
+            yield self
+        finally:
+            self._sections.pop()
+
+    def error(self, msg: str, lineno: int | None = None) -> IWFMParseError:
+        """Build an :class:`IWFMParseError` carrying file, line and section."""
+        if lineno is None:
+            lineno = self.lineno if self.lineno else None
+        return IWFMParseError(msg, path=self.path, lineno=lineno,
+                              section=self.section_name)
+
+    def degrade(self, msg: str, lineno: int | None = None) -> None:
+        """Raise :meth:`error` in strict mode, warn in lenient mode."""
+        err = self.error(msg, lineno)
+        if self.strict:
+            raise err
+        warnings.warn(str(err), IWFMReadWarning, stacklevel=2)
 
     def _skip_comments(self) -> None:
         while self._pos < len(self._lines) and is_comment(self._lines[self._pos]):
@@ -54,7 +110,10 @@ class LineCursor:
     def next(self) -> str:
         line = self.peek()
         if line is None:
-            raise StopIteration("End of data lines")
+            raise self.error(
+                "end of file reached while a data line was still expected "
+                "— the file may be truncated or a section is missing",
+                lineno=self.lineno0 + len(self._lines) or None)
         self._pos += 1
         return line
 
@@ -190,9 +249,16 @@ def parse_param_block(
     Option 1: node_range, nodes, ndp, nep, elements, params).
     """
     value, _ = cursor.read_keyed_value()
-    ngroup = int(value)
+    try:
+        ngroup = int(value)
+    except ValueError:
+        raise cursor.error(
+            f"expected an integer for NGROUP but found {value!r}") from None
 
-    factor_vals = _numeric_tokens(cursor.next()) or []
+    factor_vals = _numeric_tokens(cursor.next())
+    if factor_vals is None:
+        raise cursor.error(
+            "conversion-factor line after NGROUP is not numeric")
     factors = {
         name: (factor_vals[i] if i < len(factor_vals) else 1.0)
         for i, name in enumerate(factor_names)
@@ -217,12 +283,20 @@ def parse_param_block(
             cursor.next()
             ndp_val, _ = cursor.read_keyed_value()
             nep_val, _ = cursor.read_keyed_value()
-            ndp = int(ndp_val)
-            nep = int(nep_val)
+            try:
+                ndp = int(ndp_val)
+                nep = int(nep_val)
+            except ValueError:
+                raise cursor.error(
+                    "expected integers for NDP/NEP but found "
+                    f"{ndp_val!r}/{nep_val!r}") from None
 
             element_rows = []
             for _ in range(nep):
-                vals = _numeric_tokens(cursor.next()) or []
+                vals = _numeric_tokens(cursor.next())
+                if not vals:
+                    raise cursor.error(
+                        "parametric element row is not numeric")
                 row = {"element_id": int(vals[0])}
                 for i, v in enumerate(vals[1:5], start=1):
                     row[f"node_{i}"] = int(v)

@@ -8,10 +8,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from . import (build_triangulation, overlay_streams, overlay_grid,
-               get_stream_segments, get_stream_node_xy,
-               excel_date_to_datetime, _has_df_methods, savefig,
-               style_map_axes)
+from . import (frame_interval_ms, fixed_levels, build_triangulation, overlay_streams, overlay_grid,
+               get_stream_segments, excel_date_to_datetime, _has_df_methods, style_map_axes)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -52,15 +50,16 @@ def animate_gw_heads(model, layer, begin_date, end_date,
     tri = build_triangulation(model)
 
     frame_idx = list(range(0, n_times, max(interval_frames, 1)))
-    vmin = np.nanpercentile(heads, 2)
-    vmax = np.nanpercentile(heads, 98)
+    if not frame_idx:
+        raise ValueError("no head output between begin_date and end_date")
+    levels = fixed_levels(heads, levels)   # same scale in every frame
 
     fig, ax = plt.subplots(figsize=figsize)
     overlay_grid(model, ax, alpha=0.15)
 
     cs = ax.tricontourf(tri, heads[:, frame_idx[0]], levels=levels,
-                        cmap=cmap, vmin=vmin, vmax=vmax)
-    cb = fig.colorbar(cs, ax=ax, label="Head elevation", shrink=0.8)
+                        cmap=cmap, extend="both")
+    fig.colorbar(cs, ax=ax, label="Head elevation", shrink=0.8)
     overlay_streams(model, ax, color="black", linewidth=1)
     title = ax.set_title("")
     ax.set_aspect("equal")
@@ -71,14 +70,14 @@ def animate_gw_heads(model, layer, begin_date, end_date,
             c.remove()
         overlay_grid(model, ax, alpha=0.15)
         ax.tricontourf(tri, heads[:, frame], levels=levels,
-                       cmap=cmap, vmin=vmin, vmax=vmax)
+                       cmap=cmap, extend="both")
         overlay_streams(model, ax, color="black", linewidth=1)
         title.set_text(f"GW Head — Layer {layer} — "
                        f"{dt_objs[frame].strftime('%Y-%m')}")
         return []
 
     anim = FuncAnimation(fig, update, frames=frame_idx,
-                         interval=1000 // fps, blit=False)
+                         interval=frame_interval_ms(fps), blit=False)
 
     if save_path:
         anim.save(save_path, fps=fps, dpi=120)
@@ -122,16 +121,17 @@ def animate_stream_flows(model, layer, begin_date, end_date,
     segments, reach_ids = get_stream_segments(model)
 
     frame_idx = list(range(0, n_times, max(interval_frames, 1)))
-    vmin = np.nanpercentile(heads, 2)
-    vmax = np.nanpercentile(heads, 98)
+    if not frame_idx:
+        raise ValueError("no head output between begin_date and end_date")
+    levels = fixed_levels(heads, 15)
 
     fig, ax = plt.subplots(figsize=figsize)
     ax.set_aspect("equal")
     style_map_axes(ax)
 
     overlay_grid(model, ax, alpha=0.15)
-    cs = ax.tricontourf(tri, heads[:, frame_idx[0]], levels=15,
-                        cmap="Blues", alpha=0.5, vmin=vmin, vmax=vmax)
+    cs = ax.tricontourf(tri, heads[:, frame_idx[0]], levels=levels,
+                        cmap="Blues", alpha=0.5, extend="both")
     fig.colorbar(cs, ax=ax, label="Head", shrink=0.8)
 
     # Draw stream segments with fixed width
@@ -149,7 +149,7 @@ def animate_stream_flows(model, layer, begin_date, end_date,
             c.remove()
         overlay_grid(model, ax, alpha=0.15)
         ax.tricontourf(tri, heads[:, frame], levels=15,
-                       cmap="Blues", alpha=0.5, vmin=vmin, vmax=vmax)
+                       cmap="Blues", alpha=0.5, extend="both")
         for seg, line in zip(segments, stream_lines):
             if len(seg) >= 2:
                 line.set_data(seg[:, 0], seg[:, 1])
@@ -157,7 +157,7 @@ def animate_stream_flows(model, layer, begin_date, end_date,
         return []
 
     anim = FuncAnimation(fig, update, frames=frame_idx,
-                         interval=1000 // fps, blit=False)
+                         interval=frame_interval_ms(fps), blit=False)
 
     if save_path:
         anim.save(save_path, fps=fps, dpi=120)
@@ -197,14 +197,13 @@ def animate_depth_to_water(model, layer, begin_date, end_date,
     dtw = gs[:, np.newaxis] - heads  # (n_nodes, n_times)
 
     frame_idx = list(range(0, n_times, max(interval_frames, 1)))
-    vmin = max(np.nanpercentile(dtw, 2), 0)
-    vmax = np.nanpercentile(dtw, 98)
+    levels = fixed_levels(dtw, levels, vmin=max(np.nanpercentile(dtw, 2), 0))
 
     fig, ax = plt.subplots(figsize=figsize)
     overlay_grid(model, ax, alpha=0.15)
     cs = ax.tricontourf(tri, dtw[:, frame_idx[0]], levels=levels,
-                        cmap=cmap, vmin=vmin, vmax=vmax)
-    cb = fig.colorbar(cs, ax=ax, label="Depth to water", shrink=0.8)
+                        cmap=cmap, extend="both")
+    fig.colorbar(cs, ax=ax, label="Depth to water", shrink=0.8)
     overlay_streams(model, ax, color="blue", linewidth=1)
     title = ax.set_title("")
     ax.set_aspect("equal")
@@ -215,14 +214,14 @@ def animate_depth_to_water(model, layer, begin_date, end_date,
             c.remove()
         overlay_grid(model, ax, alpha=0.15)
         ax.tricontourf(tri, dtw[:, frame], levels=levels,
-                       cmap=cmap, vmin=vmin, vmax=vmax)
+                       cmap=cmap, extend="both")
         overlay_streams(model, ax, color="blue", linewidth=1)
         title.set_text(f"Depth to Water — Layer {layer} — "
                        f"{dt_objs[frame].strftime('%Y-%m')}")
         return []
 
     anim = FuncAnimation(fig, update, frames=frame_idx,
-                         interval=1000 // fps, blit=False)
+                         interval=frame_interval_ms(fps), blit=False)
 
     if save_path:
         anim.save(save_path, fps=fps, dpi=120)
@@ -232,17 +231,3 @@ def animate_depth_to_water(model, layer, begin_date, end_date,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        anim = animate_gw_heads(m, 1, "10/01/1990_24:00",
-                                "09/30/2000_24:00",
-                                interval_frames=6,
-                                save_path="gw_heads.gif")
-    plt.show()

@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence
 
 import pandas as pd
 
@@ -168,6 +168,9 @@ def budget_observations(source, budget: Optional[str] = None,
         long = _tidy(_budget_frames(source, budget))
 
     long = _filter(long, locations, components)
+    # labels compare as text: location 1 and "1" are the same subregion
+    long["location"] = long["location"].astype(str)
+    long["component"] = long["component"].astype(str)
     long["datetime"] = pd.to_datetime(long["datetime"])
     long["value"] = pd.to_numeric(long["value"], errors="coerce")
     loc_slug = long["location"].map(slugify_label)
@@ -210,4 +213,12 @@ def budget_observations(source, budget: Optional[str] = None,
             obs_type, out["_site"], out["datetime"], scheme=scheme).values
 
     out = out[["obsnme", "location", "component", "datetime", "value"]]
+    dup = out["obsnme"].duplicated(keep=False)
+    if dup.any():
+        rows = out.loc[dup, ["obsnme", "location", "component"]]
+        ex = rows.drop_duplicates().head(4).to_dict("records")
+        raise ValueError(
+            f"{int(dup.sum())} observation rows share a name (location/"
+            f"component labels collapse to the same slug or repeat a "
+            f"date), e.g. {ex} -- rename the locations or de-duplicate")
     return out.sort_values("obsnme").reset_index(drop=True)

@@ -2,7 +2,7 @@
 
 **Date**: July 8, 2026
 **Test Script**: `examples/test_plots.py`
-**DLL Build**: repo-root `IWFM_C_x64.dll` (IWFM 2025.0)
+**DLL Build**: `dlls/2025.0.1747/IWFM_C_x64.dll` (IWFM 2025.0.1747, resolved via `dlls/default_version.txt`)
 **Model**: `.assets/sample_model/` opened with `is_for_inquiry=True`
 **Total Functions Tested**: 58
 **Passed**: 48 (83%)
@@ -35,7 +35,7 @@
 
 ## Executive Summary
 
-All 58 plot functions across 13 modules are exercised against the sample
+The 58 DLL test cases (covering the plot functions across the plotting modules) are exercised against the sample
 model through the DLL wrapper in inquiry mode. **Every failure is a DLL or
 inquiry-mode limitation, not a bug in the plotting library or the sample
 model** — the same functions work with a fully instantiated model (a

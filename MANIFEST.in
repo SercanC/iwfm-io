@@ -1,0 +1,5 @@
+# sdist contents beyond the package: ship the whole test tree so
+# downstream packagers can run it (tests skip when the sample model,
+# DLL, or executables are absent)
+recursive-include tests *.py
+include LICENSE NOTICE LICENSE-DLLS.md README.md

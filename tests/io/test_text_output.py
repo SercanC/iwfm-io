@@ -1,7 +1,5 @@
 """Tests for text output file readers."""
 
-import pytest
-from pathlib import Path
 
 from tests.io.conftest import RESULTS_DIR, BUDGET_DIR
 

@@ -38,6 +38,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+from xml.sax.saxutils import quoteattr
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -190,7 +191,6 @@ def _expand_cell_array(mesh, values, name):
 
 def _default_arrays(mesh):
     """Built-in point and cell arrays every export carries."""
-    n = mesh["n_nodes"]
     layer_pos = {k: i for i, k in enumerate(mesh["layer_ids"])}
     tops = mesh["tops"][:, [k - 1 for k in mesh["layer_ids"]]]
     bottoms = mesh["bottoms"][:, [k - 1 for k in mesh["layer_ids"]]]
@@ -247,8 +247,8 @@ def _data_array(name, arr, indent="        "):
     vtype = {"u": "UInt8", "i": "Int64", "f": "Float64"}[kind]
     ncomp = "" if np.asarray(arr).ndim == 1 else \
         f' NumberOfComponents="{np.asarray(arr).shape[1]}"'
-    head = (f'{indent}<DataArray type="{vtype}" Name="{name}"{ncomp} '
-            f'format="ascii">')
+    head = (f'{indent}<DataArray type="{vtype}" Name={quoteattr(str(name))}'
+            f'{ncomp} format="ascii">')
     return f"{head}\n{_fmt(arr)}\n{indent}</DataArray>"
 
 

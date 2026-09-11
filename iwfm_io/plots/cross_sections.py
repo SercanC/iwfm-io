@@ -7,7 +7,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from . import (build_triangulation, excel_date_to_datetime,
+from . import (frame_interval_ms, build_triangulation, excel_date_to_datetime,
                _has_df_methods, savefig)
 
 
@@ -132,7 +132,7 @@ def animate_cross_section(model, points, layer, begin_date, end_date,
         return [wt_line]
 
     anim = FuncAnimation(fig, update, frames=frame_idx,
-                         interval=1000 // fps, blit=False)
+                         interval=frame_interval_ms(fps), blit=False)
 
     if save_path:
         anim.save(save_path, fps=fps, dpi=120)
@@ -222,19 +222,3 @@ def plot_multi_layer_head_panel(model, points, begin_date, end_date,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        x, y = m.get_node_coordinates()
-        p1 = (x.min(), y.mean())
-        p2 = (x.max(), y.mean())
-        bd, ed = "10/01/1990_24:00", "09/30/2000_24:00"
-        plot_multi_layer_head_panel(m, [p1, p2], bd, ed,
-                                     save_path="multi_layer.png")
-    plt.show()

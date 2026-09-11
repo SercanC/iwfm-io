@@ -8,17 +8,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from iwfm_io._writer import IWFMFileWriter
+from iwfm_io._writer import IWFMFileWriter, format_cell, numbered_columns
 from iwfm_io.models.misc import SWShedFile, UnsatZoneFile
 from iwfm_io.writers._param_blocks import (
     check_count,
+    check_layers_complete,
+    fmt_int,
     fmt_num,
     write_node_layer_table,
     write_table_rows,
 )
 
 
-def write_swshed(sw: SWShedFile, path: str | Path) -> None:
+def write_swshed(sw: SWShedFile, path: str | Path,
+                 base_dir: str | Path | None = None) -> None:
     """Write the IWFM small watershed file (e.g. ``SWShed.dat``).
 
     Parameters
@@ -29,7 +32,10 @@ def write_swshed(sw: SWShedFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(sw.header)
 
-    base_dir = Path(path).parent
+    # referenced paths are relative to the simulation working directory
+    # (IWFM prefixes ".\"), which is the output folder only for the
+    # sample layout -- pass base_dir for subfoldered decks
+    base_dir = Path(base_dir) if base_dir is not None else Path(path).parent
 
     # Output file paths
     w.write_keyed_path(sw.file_paths.get("budget"), "SWBUDFL", base_dir=base_dir)
@@ -49,6 +55,13 @@ def write_swshed(sw: SWShedFile, path: str | Path) -> None:
         for _, ws in sw.watershed_data.iterrows():
             check_count(ws["n_gw_nodes"], sizes.get(int(ws["id"]), 0),
                         f"SWShed: watershed {int(ws['id'])} NWB")
+        orphans = sorted(set(sizes.index.astype(int))
+                         - set(sw.watershed_data["id"].astype(int)))
+        if orphans:
+            raise ValueError(
+                f"SWShed: watershed_nodes lists watershed id(s) {orphans} "
+                "that are not in watershed_data -- their node rows would "
+                "be silently dropped")
     w.write_keyed_value(sw.n_watersheds, "NSW")
     cfg = sw.config
     w.write_keyed_value(fmt_num(cfg.get("facta", 1.0)), "FACTA")
@@ -61,21 +74,26 @@ def write_swshed(sw: SWShedFile, path: str | Path) -> None:
     if sw.watershed_data is not None:
         nodes = sw.watershed_nodes
         for _, ws in sw.watershed_data.iterrows():
-            ws_id = int(ws["id"])
+            ws_id = int(fmt_int(ws["id"], "watershed id"))
+            what = f"watershed {ws_id}"
             ws_nodes = (nodes[nodes["watershed_id"] == ws_id]
                         if nodes is not None else None)
-            head = [ws_id, fmt_num(ws["area"]), int(ws["stream_node"]),
-                    int(ws["n_gw_nodes"])]
+            head = [ws_id, fmt_num(ws["area"], what=f"{what} area"),
+                    fmt_int(ws["stream_node"], f"{what} stream_node"),
+                    fmt_int(ws["n_gw_nodes"], f"{what} n_gw_nodes")]
             widths = [8, 14, 8, 8]
             if ws_nodes is not None and len(ws_nodes) > 0:
-                head += [int(ws_nodes["gw_node"].iloc[0]),
-                         fmt_num(ws_nodes["qmax"].iloc[0])]
+                head += [fmt_int(ws_nodes["gw_node"].iloc[0],
+                                 f"{what} gw_node"),
+                         fmt_num(ws_nodes["qmax"].iloc[0],
+                                 what=f"{what} qmax")]
                 widths += [10, 12]
             w.write_data_line(head, widths)
             if ws_nodes is not None:
                 for _, nrow in ws_nodes.iloc[1:].iterrows():
                     w.write_data_line(
-                        [int(nrow["gw_node"]), fmt_num(nrow["qmax"])],
+                        [fmt_int(nrow["gw_node"], f"{what} gw_node"),
+                         fmt_num(nrow["qmax"], what=f"{what} qmax")],
                         widths=[48, 12])
 
     # Root zone parameters
@@ -117,7 +135,8 @@ def write_swshed(sw: SWShedFile, path: str | Path) -> None:
     w.flush()
 
 
-def write_unsatzone(uz: UnsatZoneFile, path: str | Path) -> None:
+def write_unsatzone(uz: UnsatZoneFile, path: str | Path,
+                    base_dir: str | Path | None = None) -> None:
     """Write the IWFM unsaturated zone file (e.g. ``UnsatZone.dat``).
 
     Parameters
@@ -128,7 +147,7 @@ def write_unsatzone(uz: UnsatZoneFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(uz.header)
 
-    base_dir = Path(path).parent
+    base_dir = Path(base_dir) if base_dir is not None else Path(path).parent
 
     # Main parameters
     w.write_keyed_value(uz.n_unsat_layers, "NUNSAT")
@@ -144,10 +163,14 @@ def write_unsatzone(uz: UnsatZoneFile, path: str | Path) -> None:
         check_count(uz.n_unsat_layers,
                     int(uz.element_params["layer"].max()),
                     "UnsatZone: NUNSAT vs element parameter layers")
+        check_layers_complete(uz.element_params, "element_id",
+                              uz.n_unsat_layers,
+                              what="UnsatZone element parameters")
+    moisture_cols: list[str] = []
     if uz.initial_moisture is not None:
-        n_moist = sum(1 for c in uz.initial_moisture.columns
-                      if c.startswith("moisture_layer_"))
-        check_count(uz.n_unsat_layers, n_moist,
+        moisture_cols = numbered_columns(uz.initial_moisture,
+                                         "moisture_layer_")
+        check_count(uz.n_unsat_layers, len(moisture_cols),
                     "UnsatZone: NUNSAT vs initial moisture columns")
     if uz.ngroup:
         check_count(uz.ngroup, len(uz.parametric_grids),
@@ -165,9 +188,11 @@ def write_unsatzone(uz: UnsatZoneFile, path: str | Path) -> None:
     # Option 1 (NGROUP>0): parametric grid groups
     param_cols = ["thickness", "porosity", "pore_size_index", "k", "rhc"]
     for grid in uz.parametric_grids:
-        w.write_raw(f"   {grid['node_range']}")
+        w.write_data_line([format_cell(grid["node_range"],
+                                       what="UnsatZone element range")],
+                          widths=[len(str(grid["node_range"])) + 3])
         # IWFM reads the element-range list with READCH, which keeps
-        # consuming data lines until a comment terminates the list —
+        # consuming data lines until a comment terminates the list --
         # this comment is load-bearing, not decoration.
         w.write_comment("C  end of element list")
         w.write_keyed_value(grid["ndp"], "NDP")
@@ -189,18 +214,19 @@ def write_unsatzone(uz: UnsatZoneFile, path: str | Path) -> None:
         for elem_id, group in uz.element_params.groupby("element_id",
                                                         sort=True):
             group = group.sort_values("layer")
-            tokens: list = [int(elem_id)]
+            tokens: list = [fmt_int(elem_id, "UnsatZone element_id")]
             for _, row in group.iterrows():
-                tokens.extend(fmt_num(row[c]) for c in param_cols)
+                tokens.extend(
+                    fmt_num(row[c], what=f"UnsatZone element {elem_id} "
+                                         f"layer {row['layer']} {c}")
+                    for c in param_cols)
             w.write_data_line(
                 tokens, widths=[8] + [12] * (len(tokens) - 1))
 
     # Initial moisture: IE + one value per layer (IE 0 = all elements)
     w.write_comment("C  Initial Moisture Condition")
     if uz.initial_moisture is not None:
-        cols = ["element_id"] + [
-            c for c in uz.initial_moisture.columns
-            if c.startswith("moisture_layer_")]
+        cols = ["element_id"] + moisture_cols
         write_table_rows(w, uz.initial_moisture, cols,
                          widths=[8] + [12] * (len(cols) - 1))
 

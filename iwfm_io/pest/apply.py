@@ -30,7 +30,9 @@ Example::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+import shutil
+import warnings
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
@@ -172,8 +174,20 @@ def _apply_one(df, action: ApplyAction, values: "pd.DataFrame"):
                 raise KeyError(
                     f"key column {k!r} missing from "
                     f"{'table' if k not in df.columns else 'values file'}")
-        merged = df[list(action.key_cols)].merge(
-            values, on=list(action.key_cols), how="left")
+        keys = list(action.key_cols)
+        if len(values) == 0:
+            raise ValueError(
+                f"{action.values_file}: no value rows (header only)")
+        dup = values.duplicated(keys)
+        if dup.any():
+            raise ValueError(
+                f"{action.values_file}: {int(dup.sum())} duplicate key "
+                f"row(s), e.g. {values.loc[dup, keys].head(3).to_dict('records')}")
+        merged = df[keys].merge(values, on=keys, how="left")
+        if len(merged) != len(df):
+            raise ValueError(
+                f"{action.table}: key columns {keys} are not unique in the "
+                "table — cannot apply values by key")
         unmatched = values.merge(
             df[list(action.key_cols)].drop_duplicates(),
             on=list(action.key_cols), how="left", indicator=True)
@@ -186,6 +200,12 @@ def _apply_one(df, action: ApplyAction, values: "pd.DataFrame"):
         applied = pd.Series(merged["value"].values, index=df.index)
         mask = applied.notna()
 
+    finite = np.isfinite(pd.to_numeric(values["value"], errors="coerce")
+                         .to_numpy(dtype=float))
+    if not finite.all():
+        raise ValueError(
+            f"{action.values_file}: {int((~finite).sum())} non-numeric, NaN "
+            "or infinite value(s) — a PEST value file must be complete")
     base = pd.to_numeric(df[col], errors="coerce")
     if action.op == "multiply":
         new = base.where(~mask, base * applied)
@@ -205,13 +225,48 @@ def _apply_one(df, action: ApplyAction, values: "pd.DataFrame"):
     return df, int(mask.sum())
 
 
+PRISTINE_SUFFIX = ".base"
+
+
+def pristine_path(target) -> Path:
+    """The pristine snapshot a target file is parameterised from
+    (``<file>.base`` next to it)."""
+    target = Path(target)
+    return target.with_name(target.name + PRISTINE_SUFFIX)
+
+
+def ensure_pristine(target, *, warn: bool = True) -> Path:
+    """Create ``<file>.base`` from *target* if it does not exist yet.
+
+    :class:`~iwfm_io.pest.setup.PestSetup` creates the snapshots at
+    template time; creating one lazily here means the first apply in
+    this directory defines "pristine" — fine on a fresh template, and
+    warned about because on a directory that has already been
+    parameterised it would freeze the current values as the base.
+    """
+    target = Path(target)
+    base = pristine_path(target)
+    if not base.exists():
+        if not target.is_file():
+            raise FileNotFoundError(f"apply target not found: {target}")
+        shutil.copy2(target, base)
+        if warn:
+            warnings.warn(
+                f"created pristine snapshot {base.name} from the current "
+                f"{target.name}; run PestSetup.write on a fresh model copy "
+                "to snapshot at template time", stacklevel=3)
+    return base
+
+
 def apply_parameters(run_dir, actions: Sequence[ApplyAction],
                      log_path: str = "apply_parameters_log.csv") -> "pd.DataFrame":
     """Apply all value files onto the model inputs (forward-run step).
 
-    Reads each target file once (actions sharing a file are batched),
-    applies every action, rewrites the file atomically through the
-    package writer, and writes a bookkeeping CSV recording what was
+    Reads each target's **pristine snapshot** (``<file>.base``, created
+    by :meth:`PestSetup.write` or on first use) once, applies every
+    action to it, and rewrites the live file atomically through the
+    package writer — so repeated forward runs in the same directory
+    never compound multipliers. A bookkeeping CSV records what was
     applied where.
 
     Parameters
@@ -244,7 +299,12 @@ def apply_parameters(run_dir, actions: Sequence[ApplyAction],
                 f"actions targeting {rel} disagree on base_dir: "
                 f"{sorted(str(b) for b in bases)}")
         base_dir = bases.pop()
-        obj = read_fn(target)
+        if base_dir is None:
+            raise ValueError(
+                f"actions targeting {rel} need base_dir (the simulation "
+                "working directory, relative to the run directory) — "
+                "without it the writer emits absolute paths IWFM rejects")
+        obj = read_fn(ensure_pristine(target))
         for a in acts:
             df = _resolve_table(obj, a.table)
             if not isinstance(df, pd.DataFrame):
@@ -263,10 +323,7 @@ def apply_parameters(run_dir, actions: Sequence[ApplyAction],
                 "min_value": float(values["value"].min()),
                 "max_value": float(values["value"].max()),
             })
-        if base_dir is not None:
-            write_fn(obj, target, base_dir=run_dir / base_dir)
-        else:
-            write_fn(obj, target)
+        write_fn(obj, target, base_dir=run_dir / base_dir)
     log = pd.DataFrame(log_rows)
     if log_path is not None:
         replace_file_text(run_dir / log_path, log.to_csv(index=False))

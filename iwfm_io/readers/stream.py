@@ -9,13 +9,11 @@ from __future__ import annotations
 import re
 
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
 from iwfm_io._parser import IWFMFileReader
 from iwfm_io._tokens import tokenize_data_line
-from iwfm_io.models.base import TimeSeriesSpec
 from iwfm_io.models.stream import (
     BypassSpecsFile,
     DiverSpecsFile,
@@ -23,61 +21,6 @@ from iwfm_io.models.stream import (
     StreamInflowFile,
     StreamMain,
 )
-
-
-# ------------------------------------------------------------------
-# Internal helper: read timeseries rows storing dates as strings
-# ------------------------------------------------------------------
-
-def _read_ts_data_to_eof(
-    reader: IWFMFileReader,
-    n_columns: int,
-    col_names: list[str] | None = None,
-) -> pd.DataFrame:
-    """Read time-series data rows until EOF, storing dates as strings.
-
-    IWFM files use special years such as 4000 or 2500 for cyclic data
-    that fall outside the pandas Timestamp range.  Dates are therefore
-    kept as raw IWFM date strings in a ``date`` column.
-
-    Parameters
-    ----------
-    reader : IWFMFileReader
-    n_columns : int
-    col_names : list[str], optional
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: ``date`` (str), then one per data column.
-    """
-    if col_names is None:
-        col_names = [f"col_{i + 1}" for i in range(n_columns)]
-
-    date_strs: list[str] = []
-    values: list[list[float]] = []
-
-    while not reader.eof:
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        tokens = tokenize_data_line(line)
-        if not tokens:
-            break
-        # First token must look like an IWFM date MM/DD/YYYY_HH:MM
-        if "/" not in tokens[0] or "_" not in tokens[0]:
-            break
-        reader.next_data_line()
-        row_vals = [float(v) for v in tokens[1 : n_columns + 1]]
-        date_strs.append(tokens[0])
-        values.append(row_vals)
-
-    if not date_strs:
-        return pd.DataFrame(columns=["date"] + col_names)
-
-    df = pd.DataFrame(values, columns=col_names)
-    df.insert(0, "date", date_strs)
-    return df
 
 
 # ------------------------------------------------------------------
@@ -141,13 +84,16 @@ def read_stream_main(path: str | Path) -> StreamMain:
     # ---- Hydrograph spec lines: IOUTR  NAME (may be multi-word;
     # internal spacing preserved) ----
     hydrograph_specs: list[dict] = []
-    for _ in range(n_hydrographs):
-        line = reader.next_data_line()
-        body = re.split(r"\s+/", line, maxsplit=1)[0]
-        parts = body.split(None, 1)
-        node_id = int(parts[0])
-        name = parts[1].rstrip() if len(parts) > 1 else ""
-        hydrograph_specs.append({"node_id": node_id, "name": name})
+    with reader.section("hydrograph specs"):
+        for _ in range(n_hydrographs):
+            line = reader.next_data_line()
+            body = re.split(r"\s+/", line, maxsplit=1)[0]
+            parts = body.split(None, 1)
+            if not parts:
+                raise reader.error("hydrograph spec row is empty")
+            node_id = reader.to_ints(parts[:1], "hydrograph spec")[0]
+            name = parts[1].rstrip() if len(parts) > 1 else ""
+            hydrograph_specs.append({"node_id": node_id, "name": name})
 
     # ---- Node budget settings ----
     n_node_budgets, _ = reader.read_keyed_int()
@@ -157,9 +103,9 @@ def read_stream_main(path: str | Path) -> StreamMain:
     config["node_bud_file"] = node_bud_file
 
     node_budget_nodes: list[int] = []
-    for _ in range(n_node_budgets):
-        line = reader.next_data_line()
-        node_budget_nodes.append(int(tokenize_data_line(line)[0]))
+    with reader.section("node budget list"):
+        for _ in range(n_node_budgets):
+            node_budget_nodes.append(reader.read_ints(1, "node budget")[0])
 
     # ---- Stream bed parameters ----
     factk, _ = reader.read_keyed_float()
@@ -185,52 +131,62 @@ def read_stream_main(path: str | Path) -> StreamMain:
         _stream_ver = 4.0
     reach_rows: list[dict] = []
     _cur_node = None
-    while not reader.eof:
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        tokens = tokenize_data_line(line)
-        m = re.search(r"\s/(.+)$", line)
-        note = m.group(1).strip().lstrip("/").strip() if m else ""
-        if _stream_ver >= 4.2:
-            if len(tokens) >= 5:
-                _cur_node = int(tokens[0])
+    what = "stream bed row"
+    with reader.section("stream bed parameters"):
+        while not reader.eof:
+            line = reader.peek_data_line()
+            if line is None:
+                break
+            tokens = tokenize_data_line(line)
+            m = re.search(r"\s/(.+)$", line)
+            note = m.group(1).strip().lstrip("/").strip() if m else ""
+            if _stream_ver >= 4.2:
+                if len(tokens) >= 5:
+                    reader.next_data_line()
+                    _cur_node = reader.to_ints(tokens[:1], what)[0]
+                    vals = reader.to_floats(tokens[1:5], what)
+                    gw_node = reader.to_ints(tokens[2:3], what)[0]
+                    row = {
+                        "stream_node_id": _cur_node,
+                        "wetted_perimeter": vals[0],
+                        "gw_node_id": gw_node,
+                        "conductance": vals[2],
+                        "bed_thickness": vals[3],
+                    }
+                    extra_start = 5
+                elif len(tokens) == 4 and _cur_node is not None:
+                    # continuation row: extra GW node of a wide stream node
+                    reader.next_data_line()
+                    vals = reader.to_floats(tokens[:4], what)
+                    gw_node = reader.to_ints(tokens[1:2], what)[0]
+                    row = {
+                        "stream_node_id": _cur_node,
+                        "wetted_perimeter": vals[0],
+                        "gw_node_id": gw_node,
+                        "conductance": vals[2],
+                        "bed_thickness": vals[3],
+                    }
+                    extra_start = 4
+                else:
+                    break
+            else:
+                if len(tokens) < 4:
+                    break
+                reader.next_data_line()
+                sn = reader.to_ints(tokens[:1], what)[0]
+                vals = reader.to_floats(tokens[1:4], what)
                 row = {
-                    "stream_node_id": _cur_node,
-                    "wetted_perimeter": float(tokens[1]),
-                    "gw_node_id": int(float(tokens[2])),
-                    "conductance": float(tokens[3]),
-                    "bed_thickness": float(tokens[4]),
-                }
-                extra_start = 5
-            elif len(tokens) == 4 and _cur_node is not None:
-                # continuation row: extra GW node of a wide stream node
-                row = {
-                    "stream_node_id": _cur_node,
-                    "wetted_perimeter": float(tokens[0]),
-                    "gw_node_id": int(float(tokens[1])),
-                    "conductance": float(tokens[2]),
-                    "bed_thickness": float(tokens[3]),
+                    "stream_node_id": sn,
+                    "conductance": vals[0],
+                    "bed_thickness": vals[1],
+                    "wetted_perimeter": vals[2],
                 }
                 extra_start = 4
-            else:
-                break
-        else:
-            if len(tokens) < 4:
-                break
-            row = {
-                "stream_node_id": int(tokens[0]),
-                "conductance": float(tokens[1]),
-                "bed_thickness": float(tokens[2]),
-                "wetted_perimeter": float(tokens[3]),
-            }
-            extra_start = 4
-        reader.next_data_line()
-        for i, extra in enumerate(tokens[extra_start:],
-                                  start=len(row) + 1):
-            row[f"col_{i}"] = float(extra)
-        row["notes"] = note
-        reach_rows.append(row)
+            extras = reader.to_floats(tokens[extra_start:], what)
+            for i, extra in enumerate(extras, start=len(row) + 1):
+                row[f"col_{i}"] = extra
+            row["notes"] = note
+            reach_rows.append(row)
 
     reach_params = pd.DataFrame(reach_rows)
 
@@ -265,23 +221,26 @@ def read_stream_main(path: str | Path) -> StreamMain:
     # evaporation), ICARST (column in STARFL; 0 = computed from wetted
     # perimeter x stream length).
     evap_rows: list[dict] = []
-    while not reader.eof:
-        line = reader.peek_data_line()
-        if line is None:
-            break
-        tokens = tokenize_data_line(line)
-        if len(tokens) < 3:
-            break
-        try:
-            row = {
-                "stream_node": int(float(tokens[0])),
-                "icetst": int(float(tokens[1])),
-                "icarst": int(float(tokens[2])),
-            }
-        except ValueError:
-            break
-        reader.next_data_line()
-        evap_rows.append(row)
+    with reader.section("stream evaporation table"):
+        while not reader.eof:
+            line = reader.peek_data_line()
+            if line is None:
+                break
+            tokens = tokenize_data_line(line)
+            if len(tokens) < 3:
+                reader.next_data_line()
+                reader.degrade(
+                    "stream evaporation row: expected 3 values (IR ICETST "
+                    f"ICARST) but found {len(tokens)}: {line.strip()!r}; "
+                    "the rest of the file was not read")
+                break
+            reader.next_data_line()
+            ids = reader.to_ints(tokens[:3], "stream evaporation row")
+            evap_rows.append({
+                "stream_node": ids[0],
+                "icetst": ids[1],
+                "icarst": ids[2],
+            })
     evaporation = pd.DataFrame(evap_rows) if evap_rows else None
 
     return StreamMain(
@@ -320,13 +279,16 @@ def read_stream_inflow(path: str | Path) -> StreamInflowFile:
     #   ID  IRST   (explicit column id + stream node)
     #   IRST       (stream node only, column id implicit — e.g. C2VSimFG)
     node_assignments: list[tuple[int, int]] = []
-    for i in range(spec.n_columns):
-        line = reader.next_data_line()
-        tokens = tokenize_data_line(line)
-        if len(tokens) >= 2:
-            node_assignments.append((int(tokens[0]), int(tokens[1])))
-        else:
-            node_assignments.append((i + 1, int(tokens[0])))
+    with reader.section("inflow node assignments"):
+        for i in range(spec.n_columns):
+            tokens = reader.read_row(1, "inflow node assignment")
+            if len(tokens) >= 2:
+                a, b = reader.to_ints(tokens[:2], "inflow node assignment")
+                node_assignments.append((a, b))
+            else:
+                node_assignments.append(
+                    (i + 1, reader.to_ints(tokens[:1],
+                                           "inflow node assignment")[0]))
 
     result = StreamInflowFile(
         header=header,
@@ -337,8 +299,8 @@ def read_stream_inflow(path: str | Path) -> StreamInflowFile:
     if spec.dss_file:
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        col_names = [f"col_{i + 1}" for i in range(spec.n_columns)]
-        result.data = _read_ts_data_to_eof(reader, spec.n_columns, col_names)
+        result.data = reader.read_ts_rows(spec.n_columns,
+                                          what="stream inflows")
 
     return result
 
@@ -400,14 +362,26 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
             if not _is_number(t):
                 break
             n_numeric += 1
-        if n_numeric >= 16 and _is_dest_type(toks[10]):
-            n_slots = 16  # spill layout
-        elif n_numeric >= 14 and _is_dest_type(toks[8]):
+        if n_numeric >= 16:
+            n_slots = 16  # spill layout (v4.x)
+        elif n_numeric >= 14:
             n_slots = 14  # no-spill layout
-        elif n_numeric >= 16:
-            n_slots = 16
         else:
             break  # not a spec row — end of the table
+        # The numeric-token count decides the layout (IWFM reads the
+        # row positionally); an out-of-range TYPDSTDL is kept as written
+        # for validate_references to report.  Re-interpreting the row
+        # under the other layout would silently shift every later field.
+        typ_slot = 10 if n_slots == 16 else 8
+        if not _is_dest_type(toks[typ_slot]):
+            other = toks[8] if n_slots == 16 else (toks[10] if len(toks) > 10 else "")
+            hint = (" (the other layout's slot holds a valid code -- if "
+                    "this is a no-spill row its NAME starts with numbers)"
+                    if _is_dest_type(other) else "")
+            warnings.warn(
+                f"diversion spec row {len(rows) + 1}: TYPDSTDL "
+                f"{toks[typ_slot]!r} is not 0, 2, 4 or 6{hint}",
+                stacklevel=2)
         nums = toks[:n_slots]
         # NAME is a real positional field (IWFM reads it); a trailing
         # "/" annotation is kept separately as "notes"
@@ -565,15 +539,16 @@ def read_bypass_specs(path: str | Path) -> BypassSpecsFile:
     rating_tables: dict[int, pd.DataFrame] = {}
 
     for _ in range(n_bypasses):
-        line = reader.next_data_line()
-        tokens = tokenize_data_line(line)
-        bypass_id = int(tokens[0])
-        stream_node = int(tokens[1])
-        dest_type = int(tokens[2])
-        dest = int(tokens[3])
-        idivc = int(tokens[4])
-        divrl = float(tokens[5])
-        divnl = float(tokens[6])
+        with reader.section("bypass table"):
+            line = reader.next_data_line()
+            tokens = tokenize_data_line(line)
+            if len(tokens) < 7:
+                raise reader.error(
+                    f"bypass row: expected 7 values but found {len(tokens)}: "
+                    f"{line.strip()!r}")
+            ids = reader.to_ints(tokens[:5], "bypass row")
+            bypass_id, stream_node, dest_type, dest, idivc = ids
+            divrl, divnl = reader.to_floats(tokens[5:7], "bypass row")
         body = re.split(r"\s+/", line, maxsplit=1)[0]
         parts = body.split(None, 7)
         name = parts[7].rstrip() if len(parts) > 7 else ""
@@ -596,13 +571,10 @@ def read_bypass_specs(path: str | Path) -> BypassSpecsFile:
         if idivc < 0:
             n_rating_pts = abs(idivc)
             rt_rows: list[dict] = []
-            for _ in range(n_rating_pts):
-                rt_line = reader.next_data_line()
-                rt_tokens = tokenize_data_line(rt_line)
-                rt_rows.append({
-                    "divx": float(rt_tokens[0]),
-                    "divy": float(rt_tokens[1]),
-                })
+            with reader.section(f"bypass {bypass_id} rating table"):
+                for _ in range(n_rating_pts):
+                    divx, divy = reader.read_floats(2, "rating table row")
+                    rt_rows.append({"divx": divx, "divy": divy})
             rating_tables[bypass_id] = pd.DataFrame(rt_rows)
 
     bypass_data = pd.DataFrame(bypass_rows) if bypass_rows else None
@@ -617,11 +589,11 @@ def read_bypass_specs(path: str | Path) -> BypassSpecsFile:
     try:
         groups, _ = parse_element_groups(rest, n_bypasses,
                                          with_fractions=True)
-    except ValueError:
-        import warnings
-        warnings.warn(
-            "Bypass seepage-zone table only partially parsed; the "
-            "section will be missing from written output")
+    except ValueError as exc:
+        with reader.section("bypass seepage zones"):
+            reader.degrade(
+                f"bypass seepage-zone table only partially parsed ({exc}); "
+                "the section will be missing from written output")
         groups = []
     for g in groups:
         seepage_zones.append({
@@ -670,7 +642,6 @@ def read_diversions(path: str | Path) -> DiversionsFile:
     if spec.dss_file:
         result.dss_pathnames = reader.read_dss_pathnames(spec)
     else:
-        col_names = [f"col_{i + 1}" for i in range(spec.n_columns)]
-        result.data = _read_ts_data_to_eof(reader, spec.n_columns, col_names)
+        result.data = reader.read_ts_rows(spec.n_columns, what="diversions")
 
     return result

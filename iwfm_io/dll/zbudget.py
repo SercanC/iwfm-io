@@ -1,11 +1,14 @@
 """Standalone IWFM zone-budget file reader."""
 
+import os
 from ctypes import c_int, c_double, c_char, byref
 import numpy as np
 
 from ._dll import load_dll
-from ._errors import _check_status
-from ._marshal import str_to_c, c_to_str, c_to_str_list, alloc_int, alloc_double, alloc_char
+from ._errors import IWFMError, _check_status
+from ._proxy import GuardedDLL
+from ._validate import check_date, check_interval, check_window
+from ._marshal import str_to_c, c_to_str, c_to_str_list, alloc_int, alloc_char
 
 
 class IWFMZBudget:
@@ -23,21 +26,49 @@ class IWFMZBudget:
         *dll_version*.
     """
 
+    #: the file the DLL currently serves (process-global in the DLL)
+    _current_path = None
+
     def __init__(self, hdf_file, dll_version=None, dll_path=None):
-        self._dll = load_dll(version=dll_version, dll_path=dll_path)
-        c_len, c_name = str_to_c(hdf_file)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_OpenFile(c_name, c_len, byref(iStat))
-        _check_status(iStat, self._dll)
+        self._open = False
+        self._path = os.path.abspath(str(hdf_file))
+        if not os.path.isfile(self._path):
+            raise FileNotFoundError(f"budget file not found: {self._path}")
+        raw = load_dll(version=dll_version, dll_path=dll_path)
+        self._dll = GuardedDLL(raw, before=self._before_call)
+        self._reopen()
         self._open = True
+
+    _LIFECYCLE = frozenset({"IW_ZBudget_OpenFile", "IW_ZBudget_CloseFile", "IW_GetLastMessage"})
+
+    def _before_call(self, name):
+        if name in self._LIFECYCLE:
+            return
+        if not self._open:
+            raise IWFMError("IWFMZBudget is closed", -1)
+        if IWFMZBudget._current_path != self._path:
+            # another instance took the DLL's single file slot: reopen
+            # ours transparently (the DLL closes the other one)
+            self._reopen()
+
+    def _reopen(self):
+        c_len, c_name = str_to_c(self._path)
+        iStat = c_int(0)
+        self._dll.raw.IW_ZBudget_OpenFile(c_name, c_len, byref(iStat))
+        _check_status(iStat, self._dll.raw)
+        IWFMZBudget._current_path = self._path
 
     def close(self):
         """Close the Z-Budget file."""
         if self._open:
-            iStat = c_int(0)
-            self._dll.IW_ZBudget_CloseFile(byref(iStat))
-            _check_status(iStat, self._dll)
-            self._open = False
+            try:
+                if IWFMZBudget._current_path == self._path:
+                    iStat = c_int(0)
+                    self._dll.IW_ZBudget_CloseFile(byref(iStat))
+                    _check_status(iStat, self._dll)
+                    IWFMZBudget._current_path = None
+            finally:
+                self._open = False
 
     def __enter__(self):
         return self
@@ -63,6 +94,7 @@ class IWFMZBudget:
             c_name, c_len, byref(iStat),
         )
         _check_status(iStat, self._dll)
+        self._n_zones = getattr(self, '_n_zones', 0) or -1  # zone list ready
 
     def generate_zone_list(self, zone_extent, elements, layers, zones,
                            zone_names_ids=None, zone_names=None):
@@ -79,16 +111,54 @@ class IWFMZBudget:
         zone_names : list[str], optional
             Corresponding zone names.
         """
-        elements = np.asarray(elements, dtype=np.int32)
-        layers = np.asarray(layers, dtype=np.int32)
-        zones_arr = np.asarray(zones, dtype=np.int32)
+        from iwfm_io.dll.misc import ZoneExtentID
+        if ZoneExtentID.Horizontal is None:
+            ZoneExtentID._load(self._dll)
+        valid_extents = {int(ZoneExtentID.Horizontal), int(ZoneExtentID.Vertical)}
+        if not isinstance(zone_extent, (int, np.integer)) \
+                or int(zone_extent) not in valid_extents:
+            raise ValueError(
+                f"zone_extent must be ZoneExtentID.Horizontal "
+                f"({ZoneExtentID.Horizontal}) or ZoneExtentID.Vertical "
+                f"({ZoneExtentID.Vertical}), got {zone_extent!r}")
+        zone_extent = int(zone_extent)
+        elements = np.asarray(list(elements), dtype=np.int32)
+        layers = np.asarray(list(layers), dtype=np.int32)
+        zones_arr = np.asarray(list(zones), dtype=np.int32)
         n_elems = len(elements)
+        if n_elems == 0:
+            raise ValueError("generate_zone_list: elements must not be empty")
+        if len(layers) != n_elems or len(zones_arr) != n_elems:
+            raise ValueError(
+                "generate_zone_list: elements, layers and zones must have "
+                f"the same length ({n_elems}, {len(layers)}, {len(zones_arr)})")
+        if (elements < 1).any() or (layers < 1).any() or (zones_arr < 1).any():
+            raise ValueError("generate_zone_list: element, layer and zone "
+                             "ids must be >= 1")
 
-        if zone_names_ids is None:
-            zone_names_ids = np.array([], dtype=np.int32)
-            zone_names = []
-        zone_names_ids = np.asarray(zone_names_ids, dtype=np.int32)
+        # the Fortran indexes the name arrays for every zone even when no
+        # names were given (an out-of-bounds write with none): always
+        # send one name per zone
+        zone_ids_present = sorted(int(z) for z in np.unique(zones_arr))
+        if zone_names_ids is None and zone_names is None:
+            zone_names_ids = zone_ids_present
+            zone_names = [f"Zone {z}" for z in zone_ids_present]
+        elif zone_names_ids is None or zone_names is None:
+            raise ValueError("generate_zone_list: pass zone_names_ids and "
+                             "zone_names together")
+        zone_names_ids = np.asarray(list(zone_names_ids), dtype=np.int32)
+        zone_names = [str(n) for n in zone_names]
+        if len(zone_names) != len(zone_names_ids):
+            raise ValueError(
+                "generate_zone_list: zone_names_ids and zone_names differ "
+                f"in length ({len(zone_names_ids)} vs {len(zone_names)})")
+        given = {int(z) for z in zone_names_ids}
+        unnamed = [z for z in zone_ids_present if z not in given]
+        if unnamed:
+            zone_names_ids = np.asarray(list(zone_names_ids) + unnamed, dtype=np.int32)
+            zone_names = zone_names + [f"Zone {z}" for z in unnamed]
         n_with_names = len(zone_names_ids)
+        self._n_zones = len(zone_ids_present)
 
         # Pack zone names into a single buffer with offset array
         packed = "".join(zone_names)
@@ -220,7 +290,15 @@ class IWFMZBudget:
 
     def get_column_headers_general(self, area_unit="SQ FT",
                                    volume_unit="CU FT", max_columns=200):
-        """Return general column headers (lumped inter-zone flows)."""
+        """Return general column headers (lumped inter-zone flows).
+
+        *max_columns* only sizes the receiving buffers (the Fortran
+        writes every column regardless, so a too-small buffer is an
+        access violation); it is raised to a safe minimum internally.
+        """
+        if not isinstance(max_columns, (int, np.integer)) or max_columns < 1:
+            raise ValueError(f"max_columns must be >= 1, got {max_columns!r}")
+        max_columns = max(int(max_columns), 2000)
         buf_len = max_columns * 200
         u_len, c_au = str_to_c(area_unit)
         _, c_vu = str_to_c(volume_unit)
@@ -235,7 +313,33 @@ class IWFMZBudget:
             col_buf, byref(n_cols), loc_arr, byref(iStat),
         )
         _check_status(iStat, self._dll)
-        return c_to_str_list(col_buf, loc_arr, n_cols.value)
+        headers = c_to_str_list(col_buf, loc_arr, n_cols.value)
+        self._n_columns = len(headers)
+        return headers
+
+    def _column_count(self):
+        n = getattr(self, "_n_columns", None)
+        if n is None:
+            self.get_column_headers_general()
+            n = self._n_columns
+        return n
+
+    def _sim_window(self):
+        """(first, last) output stamps, cached."""
+        w = getattr(self, "_window", None)
+        if w is None:
+            dates = self.get_time_specs()["dates"]
+            w = (dates[0], dates[-1]) if dates else None
+            self._window = w
+        return w
+
+    def _check_zone_ids(self, zones):
+        known = set(int(z) for z in self.get_zone_list())
+        bad = [int(z) for z in zones if int(z) not in known]
+        if bad:
+            raise ValueError(
+                f"zone(s) {bad[:5]} are not in the generated zone list "
+                f"({len(known)} zones: {sorted(known)[:10]}...)")
 
     def get_column_headers_for_zone(self, zone, columns_list=None,
                                     area_unit="SQ FT", volume_unit="CU FT",
@@ -294,6 +398,23 @@ class IWFMZBudget:
         np.ndarray
             Shape ``(n_times, n_columns)``.
         """
+        if not getattr(self, "_n_zones", 0):
+            raise IWFMError("no zone list generated yet -- call "
+                            "generate_zone_list first", -1)
+        cols = [int(c) for c in columns]
+        if not cols or cols[0] != 1 or min(cols) < 1:
+            raise ValueError("columns must start with 1 (the Time column) "
+                             "and be >= 1")
+        n_avail = self._column_count()
+        if max(cols) > n_avail:
+            raise ValueError(
+                f"column {max(cols)} is out of range: this Z-Budget has "
+                f"{n_avail} columns (1 = Time)")
+        self._check_zone_ids([zone])
+        if not isinstance(begin_date, str) or not isinstance(end_date, str):
+            raise TypeError("begin_date/end_date must be IWFM date strings")
+        check_window(begin_date, end_date, self._sim_window())
+        interval = check_interval(interval)
         n_cols = len(columns)
         n_times = self.n_timesteps
         c_zone = c_int(zone)
@@ -343,6 +464,26 @@ class IWFMZBudget:
         """
         zones_arr = np.asarray(zones, dtype=np.int32)
         cols_arr = np.asarray(columns_per_zone, dtype=np.int32)
+        if zones_arr.ndim != 1 or len(zones_arr) == 0:
+            raise ValueError("zones must be a non-empty 1-D sequence")
+        if cols_arr.ndim != 2 or cols_arr.shape[1] != len(zones_arr):
+            raise ValueError(
+                "columns_per_zone must be a 2-D array of shape "
+                f"(max_cols, n_zones={len(zones_arr)}), got {cols_arr.shape}")
+        if (cols_arr[0] != 1).any() or (cols_arr < 1).any():
+            raise ValueError("columns_per_zone: first row must be 1 (Time) "
+                             "and every column index >= 1")
+        n_avail = self._column_count()
+        if cols_arr.max() > n_avail:
+            raise ValueError(
+                f"column {int(cols_arr.max())} is out of range: this "
+                f"Z-Budget has {n_avail} columns (1 = Time)")
+        self._check_zone_ids(zones_arr.tolist())
+        begin_date = check_date("begin_date", begin_date)
+        window = self._sim_window()
+        if window is not None:
+            check_window(begin_date, window[1], window)
+        interval = check_interval(interval)
         n_zones = len(zones_arr)
         n_cols_max = cols_arr.shape[0]
 

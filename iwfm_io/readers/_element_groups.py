@@ -15,7 +15,7 @@ the next group begins.
 
 from __future__ import annotations
 
-from iwfm_io._tokens import is_comment, tokenize_data_line
+from iwfm_io._tokens import is_comment
 
 
 def element_groups_to_df(groups):

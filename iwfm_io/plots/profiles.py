@@ -6,9 +6,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from . import (build_triangulation, _id_to_index_map,
-               get_stream_node_xy, _has_df_methods, savefig)
+from . import (build_triangulation, get_stream_node_xy, _has_df_methods, savefig)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -201,18 +199,3 @@ def plot_stream_longitudinal_profile(model, reach_ids=None,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        x, y = m.get_node_coordinates()
-        p1 = (x.min(), y.mean())
-        p2 = (x.max(), y.mean())
-        plot_stratigraphic_cross_section(m, [p1, p2], save_path="xsection.png")
-        plot_stream_longitudinal_profile(m, save_path="stream_profile.png")
-    plt.show()

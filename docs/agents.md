@@ -79,8 +79,10 @@ scenario = create_scenario(
     changes=[set_keyed_value("Simulation/Simulation_MAIN.IN",
                              "EDT", "09/30/1995_24:00")],
 )
-results = run_model(scenario, steps=("preprocessor", "simulation", "budget"))
-# each RunResult has .success, .elapsed, .errors; run_model raises on failure
+results = run_model(scenario, steps=("preprocessor", "simulation", "budget"),
+                    timeout=3600)          # seconds per step; None = no limit
+# each RunResult has .success, .elapsed, .errors, .timed_out, .stdout_tail;
+# run_model raises RunError (carrying .results) on the first failed step
 
 report = compare_models("runs/baseline", scenario)
 ```
@@ -112,7 +114,7 @@ DataFrames (`run, location, datetime, component, value`) ready for
 
 ## Plot
 
-All 58 functions in `iwfm_io.plots` accept the object returned by
+All 66 functions in `iwfm_io.plots` accept the object returned by
 `open_model()` (or a DLL `IWFMModel`) and return `(fig, ax)`; most take
 `save_path=` to write a PNG directly:
 
@@ -264,7 +266,28 @@ ParaView and color by any array.
   involved (node IDs, layer numbers, budget locations).
 - **Element connectivity** is 4 node IDs; `node4 == 0` means a triangle.
 - **Inquiry mode** (`is_for_inquiry=True`) cannot provide tile drains,
-  ag crops, supply requirements, or bypass counts — the DLL raises
-  `IWFMError` ("partially instantiated"). `describe()` reports those
-  sections as `None` instead of raising.
+  ag crops, supply requirements/purposes, stream inflows, bypass counts,
+  or simulation control — the wrapper raises `IWFMError` ("requires a
+  fully instantiated model") before the DLL is touched. `describe()`
+  reports those sections as `None` instead of raising.
+- **Readers are strict**: a truncated, short-row, non-numeric or
+  unrecognised deck raises `IWFMParseError` (`file:line [section]:
+  message`) — report it as a broken input rather than working around it.
+  `open_model(path, strict=False)` / `with iwfm_io.strict_mode(False):`
+  keeps what parsed and warns (`IWFMReadWarning`) when partial data is
+  acceptable. Cross-file pointer problems (time-series columns, entity
+  ids, destination codes) come from `model.validate_references()` as a
+  findings DataFrame — run it when a model misbehaves.
+- **Writers refuse silent corruption**: NaN/None/inf cells, non-integral
+  ids, names containing `/`, numeric-looking cells with a comma, and
+  incomplete layer sets raise `ValueError` naming the file, column and
+  row — fix the DataFrame, never post-edit the written file.
+- **Outputs refresh in place**: tables the adapter reads lazily
+  (components, time series, budgets, heads, stream flows) re-read
+  themselves when the file changes on disk (after a re-run);
+  `model.reload()` forces it. Grid tables come from the preprocessor deck
+  parsed at open — re-open after editing that.
 - `iwfm_io` never loads the DLL; it is safe on any OS and in sandboxes.
+  When it is loaded, every DLL argument is validated in Python first
+  (`ValueError` for a bad date/interval/layer/id instead of a Fortran
+  STOP that kills the interpreter with exit code 0).

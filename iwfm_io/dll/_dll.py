@@ -12,6 +12,7 @@ POINTER(c_double) respectively; character buffers use c_char_p.
 
 import logging
 import os
+import re
 import ctypes
 from ctypes import c_int, c_double, c_char_p, POINTER
 
@@ -57,11 +58,22 @@ _PROJECT_DLLS = os.path.join(_REPO_ROOT, "dlls")
 _USER_DLLS = os.path.join(os.path.expanduser("~"), ".iwfm", "dlls")
 
 
+_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def _check_version(version):
+    if not isinstance(version, str) or not _VERSION_RE.match(version):
+        raise ValueError(
+            f"invalid DLL version {version!r} (expected e.g. '2025.0.1747')")
+    return version
+
+
 def _find_version(version):
     """Return the DLL path for *version*, searching project then user dirs.
 
     Returns None if the version is not found in either location.
     """
+    _check_version(version)
     for root in (_PROJECT_DLLS, _USER_DLLS):
         ver_dir = os.path.join(root, version)
         for name in _DLL_NAMES:
@@ -189,7 +201,13 @@ def load_dll(version=None, dll_path=None, download=True):
     if resolved is None:
         env_ver = os.environ.get("IWFM_DLL_VERSION")
         if env_ver:
-            resolved = _find_version(env_ver)
+            try:
+                resolved = _find_version(env_ver)
+            except ValueError as exc:
+                # a stale/garbage environment variable must not block
+                # every DLL load: warn and fall through to discovery
+                logger.warning("ignoring IWFM_DLL_VERSION: %s", exc)
+                resolved = None
             if resolved is None:
                 logger.warning(
                     "IWFM_DLL_VERSION=%r is set but no DLL found in dlls/%s/ "
@@ -237,6 +255,13 @@ def load_dll(version=None, dll_path=None, download=True):
 
     logger.debug("Loading IWFM DLL: %s", resolved)
     dll = ctypes.WinDLL(resolved)
+    # a library without the IWFM entry points is not an IWFM DLL: refuse
+    # it here instead of handing back a half-registered handle
+    for required in ("IW_GetVersion", "IW_GetLastMessage", "IW_Model_New"):
+        if not hasattr(dll, required):
+            raise OSError(
+                f"{resolved} is not an IWFM DLL: it does not export "
+                f"{required}")
     _register_all(dll)
     return dll
 

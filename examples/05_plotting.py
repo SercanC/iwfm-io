@@ -349,7 +349,7 @@ def demo_animations(adapter):
         return
 
     # Limit to ~2 years of frames so the GIFs render quickly
-    ani = animations.animate_gw_heads(
+    animations.animate_gw_heads(
         adapter, layer=1,
         begin_date=BEGIN, end_date="09/30/1992_24:00",
         save_path=str(OUTPUT_DIR / "ex_26_gw_heads.gif"),
@@ -357,7 +357,7 @@ def demo_animations(adapter):
     plt.close("all")
     print("    saved → ex_26_gw_heads.gif")
 
-    ani = animations.animate_depth_to_water(
+    animations.animate_depth_to_water(
         adapter, layer=1,
         begin_date=BEGIN, end_date="09/30/1992_24:00",
         save_path=str(OUTPUT_DIR / "ex_27_depth_to_water.gif"),

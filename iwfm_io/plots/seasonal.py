@@ -7,8 +7,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from . import CUFT_TO_AF, excel_date_to_datetime, savefig
+from . import CUFT_TO_AF, savefig
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -41,7 +40,7 @@ def plot_ridgeline(dates, values, value_label="Head",
     # Group by year
     years = sorted(set(d.year for d in dates))
     n_years = len(years)
-    cmap_fn = plt.cm.get_cmap(cmap)
+    cmap_fn = plt.get_cmap(cmap)
     colors = [cmap_fn(i / max(n_years - 1, 1)) for i in range(n_years)]
 
     v_range = np.nanmax(values) - np.nanmin(values)
@@ -233,19 +232,3 @@ def plot_budget_polar_seasonal(model, budget_type, location,
 
 
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=".assets/sample_model/Simulation/PreProcessor.bin",
-        simulation_file=".assets/sample_model/Simulation/Simulation_MAIN.IN",
-        is_for_inquiry=True,
-    ) as m:
-        budgets = m.get_budget_list()
-        if budgets:
-            bt = budgets[0]["budget_type"]
-            bd, ed = "10/01/1990_24:00", "09/30/2000_24:00"
-            plot_budget_polar_seasonal(m, bt, 1, bd, ed,
-                                       save_path="polar_seasonal.png")
-    plt.show()

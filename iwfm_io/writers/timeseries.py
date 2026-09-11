@@ -1,5 +1,9 @@
 """
 Writers for IWFM time-series input files.
+
+Every writer here is a thin caller of
+:func:`iwfm_io.writers._timeseries.write_ts_body`, which owns the spec
+block, its load-bearing terminating comment and the NCOL checks.
 """
 
 from __future__ import annotations
@@ -7,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from iwfm_io._writer import IWFMFileWriter
-from iwfm_io.writers._param_blocks import check_count
+from iwfm_io.writers._timeseries import write_ts_body
 from iwfm_io.models.timeseries import (
     ETFile,
     IrigFracFile,
@@ -15,7 +19,6 @@ from iwfm_io.models.timeseries import (
     PrecipFile,
     SupplyAdjustFile,
     TimeSeriesDataFile,
-    TimeSeriesFile,
 )
 
 
@@ -35,9 +38,6 @@ def write_timeseries_file(ts: TimeSeriesDataFile, path: str | Path) -> None:
     w = IWFMFileWriter(path)
     w.write_header(ts.header)
 
-    if ts.data is not None:
-        check_count(ts.n_columns, len(ts.data.columns) - 1,
-                    "Time-series file: NCOL vs data columns")
     values: list = [ts.n_columns]
     defaults = ["NCOL"]
     if ts.factor is not None:
@@ -50,18 +50,40 @@ def write_timeseries_file(ts: TimeSeriesDataFile, path: str | Path) -> None:
         defaults.append("DSSFL")
 
     keywords = list(ts.keywords)
+    fields = []
     for i, value in enumerate(values):
         kw = keywords[i] if i < len(keywords) and keywords[i] else defaults[i]
-        w.write_keyed_value(value, kw)
-    # IWFM's READCH keeps consuming data lines while resolving a blank
-    # DSS filename — this terminating comment is load-bearing.
-    w.write_comment("C  end of specification")
+        fields.append((value, kw))
 
-    if ts.dss_file and ts.dss_pathnames:
-        w.write_dss_pathnames(ts.dss_pathnames)
-    elif ts.data is not None:
-        w.write_timeseries_data(ts.data)
+    write_ts_body(w, fields, ts.data,
+                  ts.dss_pathnames if ts.dss_file else None,
+                  n_columns=ts.n_columns)
+    w.flush()
 
+
+def _write_5param(ts, path: str | Path, keywords: list[str]) -> None:
+    """A 5-parameter (NCOL FACT NSP NFQ DSSFL) time-series file."""
+    w = IWFMFileWriter(path)
+    w.write_header(ts.header)
+    spec = ts.spec
+    fields = list(zip(
+        [spec.n_columns, spec.factor, spec.n_steps_update,
+         spec.repeat_freq, spec.dss_file], keywords))
+    write_ts_body(w, fields, ts.data, ts.dss_pathnames,
+                  n_columns=spec.n_columns)
+    w.flush()
+
+
+def _write_4param(ts, path: str | Path, keywords: list[str]) -> None:
+    """A 4-parameter (NCOL NSP NFQ DSSFL, no factor) time-series file."""
+    w = IWFMFileWriter(path)
+    w.write_header(ts.header)
+    fields = list(zip(
+        [ts.n_columns, ts.n_steps_update, ts.repeat_freq, ts.dss_file],
+        keywords))
+    write_ts_body(w, fields, ts.data,
+                  ts.dss_pathnames if ts.dss_file else None,
+                  n_columns=ts.n_columns)
     w.flush()
 
 
@@ -73,19 +95,8 @@ def write_precip(precip: PrecipFile, path: str | Path) -> None:
     precip : PrecipFile
     path : str or Path
     """
-    w = IWFMFileWriter(path)
-    w.write_header(precip.header)
-    w.write_timeseries_spec(
-        precip.spec,
-        keywords=["NRAIN", "FACTRN", "NSPRN", "NFQRN", "DSSFL"],
-    )
-
-    if precip.dss_pathnames:
-        w.write_dss_pathnames(precip.dss_pathnames)
-    elif precip.data is not None:
-        w.write_timeseries_data(precip.data)
-
-    w.flush()
+    _write_5param(precip, path,
+                  ["NRAIN", "FACTRN", "NSPRN", "NFQRN", "DSSFL"])
 
 
 def write_et(et: ETFile, path: str | Path) -> None:
@@ -98,20 +109,7 @@ def write_et(et: ETFile, path: str | Path) -> None:
     et : ETFile
     path : str or Path
     """
-    w = IWFMFileWriter(path)
-    w.write_header(et.header)
-
-    w.write_timeseries_spec(
-        et.spec,
-        keywords=["NCOLET", "FACTET", "NSPET", "NFQET", "DSSFL"],
-    )
-
-    if et.dss_pathnames:
-        w.write_dss_pathnames(et.dss_pathnames)
-    elif et.data is not None:
-        w.write_timeseries_data(et.data)
-
-    w.flush()
+    _write_5param(et, path, ["NCOLET", "FACTET", "NSPET", "NFQET", "DSSFL"])
 
 
 def write_irigfrac(irig: IrigFracFile, path: str | Path) -> None:
@@ -124,26 +122,7 @@ def write_irigfrac(irig: IrigFracFile, path: str | Path) -> None:
     irig : IrigFracFile
     path : str or Path
     """
-    w = IWFMFileWriter(path)
-    w.write_header(irig.header)
-
-    if irig.data is not None:
-        check_count(irig.n_columns, len(irig.data.columns) - 1,
-                    "IrigFrac: NCOL vs data columns")
-    w.write_keyed_value(irig.n_columns, "NCOLIRF")
-    w.write_keyed_value(irig.n_steps_update, "NSPIRF")
-    w.write_keyed_value(irig.repeat_freq, "NFQIRF")
-    w.write_keyed_value(irig.dss_file, "DSSFL")
-    # IWFM's READCH keeps consuming data lines while resolving a blank
-    # DSS filename — this terminating comment is load-bearing.
-    w.write_comment("C  end of specification")
-
-    if irig.dss_file and irig.dss_pathnames:
-        w.write_dss_pathnames(irig.dss_pathnames)
-    elif irig.data is not None:
-        w.write_timeseries_data(irig.data)
-
-    w.flush()
+    _write_4param(irig, path, ["NCOLIRF", "NSPIRF", "NFQIRF", "DSSFL"])
 
 
 def write_irr_period(ip: IrrPeriodFile, path: str | Path) -> None:
@@ -156,24 +135,7 @@ def write_irr_period(ip: IrrPeriodFile, path: str | Path) -> None:
     ip : IrrPeriodFile
     path : str or Path
     """
-    w = IWFMFileWriter(path)
-    w.write_header(ip.header)
-
-    if ip.data is not None:
-        check_count(ip.n_columns, len(ip.data.columns) - 1,
-                    "IrrPeriod: NCOL vs data columns")
-    w.write_keyed_value(ip.n_columns, "NCOLIP")
-    w.write_keyed_value(ip.n_steps_update, "NSPIP")
-    w.write_keyed_value(ip.repeat_freq, "NFQIP")
-    w.write_keyed_value(ip.dss_file, "DSSFL")
-    w.write_comment("C  end of specification")
-
-    if ip.dss_file and ip.dss_pathnames:
-        w.write_dss_pathnames(ip.dss_pathnames)
-    elif ip.data is not None:
-        w.write_timeseries_data(ip.data)
-
-    w.flush()
+    _write_4param(ip, path, ["NCOLIP", "NSPIP", "NFQIP", "DSSFL"])
 
 
 def write_supply_adjust(sa: SupplyAdjustFile, path: str | Path) -> None:
@@ -186,21 +148,4 @@ def write_supply_adjust(sa: SupplyAdjustFile, path: str | Path) -> None:
     sa : SupplyAdjustFile
     path : str or Path
     """
-    w = IWFMFileWriter(path)
-    w.write_header(sa.header)
-
-    if sa.data is not None:
-        check_count(sa.n_columns, len(sa.data.columns) - 1,
-                    "SupplyAdjust: NCOL vs data columns")
-    w.write_keyed_value(sa.n_columns, "NCOLADJ")
-    w.write_keyed_value(sa.n_steps_update, "NSPADJ")
-    w.write_keyed_value(sa.repeat_freq, "NFQADJ")
-    w.write_keyed_value(sa.dss_file, "DSSFL")
-    w.write_comment("C  end of specification")
-
-    if sa.dss_file and sa.dss_pathnames:
-        w.write_dss_pathnames(sa.dss_pathnames)
-    elif sa.data is not None:
-        w.write_timeseries_data(sa.data)
-
-    w.flush()
+    _write_4param(sa, path, ["NCOLADJ", "NSPADJ", "NFQADJ", "DSSFL"])

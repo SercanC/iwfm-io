@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable, Optional, Union
 
 import pandas as pd
@@ -146,7 +147,7 @@ class StandardScheme(NameScheme):
                     f"an 8-digit token that would decode as a date"
                 )
             return f"{obs_type}{self.sep}{location}"
-        stamp = pd.Timestamp(parts.time).strftime(self.date_format)
+        stamp = _format_stamp(parts.time, self.date_format)
         if not self._date_token_re.match(stamp):
             raise ValueError(
                 f"date_format {self.date_format!r} must render as 8 digits, "
@@ -160,7 +161,7 @@ class StandardScheme(NameScheme):
             raise ValueError(f"cannot decode observation name {name!r}")
         obs_type = tokens[0]
         if len(tokens) >= 3 and self._date_token_re.match(tokens[-1]):
-            time = pd.to_datetime(tokens[-1], format=self.date_format)
+            time = _parse_stamp(tokens[-1], self.date_format)
             location = self.sep.join(tokens[1:-1])
         else:
             time = None
@@ -183,7 +184,7 @@ class StandardScheme(NameScheme):
                 f"cannot decode {len(bad)} observation name(s), "
                 f"e.g. {bad.head(5).tolist()}"
             )
-        out["time"] = pd.to_datetime(out.pop("date"), format=self.date_format)
+        out["time"] = _parse_stamps(out.pop("date"), self.date_format)
         out.index = pd.Index(names)
         return out
 
@@ -228,7 +229,7 @@ class GroupSequenceScheme(NameScheme):
             raise ValueError("location must be non-empty")
         if parts.time is None:
             return f"{obs_type}{location}"
-        stamp = pd.Timestamp(parts.time).strftime(self.date_format)
+        stamp = _format_stamp(parts.time, self.date_format)
         return f"{obs_type}{location}_{stamp}"
 
     def decode(self, name: str) -> ObsName:
@@ -237,7 +238,7 @@ class GroupSequenceScheme(NameScheme):
         time = None
         if sep and stamp.isdigit():
             try:
-                time = pd.to_datetime(stamp, format=self.date_format)
+                time = _parse_stamp(stamp, self.date_format)
             except ValueError:
                 head = s
         else:
@@ -245,6 +246,40 @@ class GroupSequenceScheme(NameScheme):
         if len(head) <= self.type_len:
             raise ValueError(f"cannot decode observation name {name!r}")
         return ObsName(head[:self.type_len], head[self.type_len:], time)
+
+
+def _format_stamp(time, date_format: str) -> str:
+    """Render *time* with *date_format*, refusing stamps that do not
+    decode back to the same day (a 2-digit ``%y`` year outside
+    1969-2068 would silently collide with another century)."""
+    ts = pd.Timestamp(time)
+    stamp = ts.strftime(date_format)
+    back = datetime.strptime(stamp, date_format)
+    if (back.year, back.month, back.day) != (ts.year, ts.month, ts.day):
+        raise ValueError(
+            f"{ts.date()} does not round-trip through date_format "
+            f"{date_format!r} (renders as {stamp!r} = {back.date()}); use "
+            "a 4-digit-year format such as '%Y%m%d'")
+    return stamp
+
+
+def _parse_stamp(stamp: str, date_format: str) -> "pd.Timestamp":
+    """Parse a name's date token; years beyond pandas' nanosecond range
+    (e.g. 9999) are kept at second resolution instead of raising."""
+    dt = datetime.strptime(stamp, date_format)   # ValueError on garbage
+    try:
+        return pd.Timestamp(dt)
+    except (ValueError, OverflowError):
+        return pd.Timestamp(dt).as_unit("s")
+
+
+def _parse_stamps(stamps: "pd.Series", date_format: str) -> "pd.Series":
+    try:
+        return pd.to_datetime(stamps, format=date_format)
+    except (pd.errors.OutOfBoundsDatetime, OverflowError):
+        return stamps.map(
+            lambda s: _parse_stamp(s, date_format) if isinstance(s, str)
+            else pd.NaT)
 
 
 _SCHEMES: dict = {"standard": StandardScheme(),

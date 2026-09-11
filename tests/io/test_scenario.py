@@ -119,3 +119,79 @@ def test_replace_text(tmp_path):
             changes=[replace_text("Preprocessor/PreProcessor_MAIN.IN",
                                   "text-that-does-not-exist", "x")],
         )
+
+
+# ---------------------------------------------------------------------------
+# hardening (2.13.0): destructive-path guard, output skip, atomic cleanup,
+# value-span replacement
+# ---------------------------------------------------------------------------
+
+def test_refuses_identical_and_nested_paths(tmp_path):
+    base = create_scenario(SAMPLE_MODEL, tmp_path / "base",
+                           subdirs=("Preprocessor", "Simulation"))
+    with pytest.raises(ValueError, match="base model itself"):
+        create_scenario(base, base, overwrite=True)
+    with pytest.raises(ValueError, match="inside the base model"):
+        create_scenario(base, base / "Simulation" / "scen")
+    with pytest.raises(ValueError, match="contains the base model"):
+        create_scenario(base, tmp_path, overwrite=True)
+    # nothing was deleted
+    assert (base / "Simulation").is_dir()
+
+
+def test_baseline_outputs_not_copied_by_default(tmp_path):
+    scen = create_scenario(SAMPLE_MODEL, tmp_path / "scen")
+    assert (scen / "Budget" / "Budget.in").is_file()
+    assert (scen / "ZBudget" / "ZBudget.in").is_file()
+    assert not list((scen / "Budget").glob("*.bud"))
+    assert not list((scen / "ZBudget").glob("*.bud"))
+    assert not list((scen / "Budget").glob("*Messages.out"))
+    from iwfm_io import open_model
+    assert open_model(scen).describe()["results"]["budgets"] == {}
+    scen2 = create_scenario(SAMPLE_MODEL, tmp_path / "scen2",
+                            copy_outputs=True)
+    assert list((scen2 / "Budget").glob("*.bud"))
+
+
+def test_failed_change_removes_partial_scenario(tmp_path):
+    def boom(root):
+        raise RuntimeError("change failed")
+    out = tmp_path / "scen"
+    with pytest.raises(RuntimeError, match="change failed"):
+        create_scenario(SAMPLE_MODEL, out, subdirs=("Preprocessor",),
+                        changes=[boom])
+    assert not out.exists()
+
+
+def test_set_keyed_value_replaces_only_the_value(tmp_path):
+    f = tmp_path / "x.dat"
+    f.write_text("C header\n   1   / NOUTF   1 = on, 0 = off\n")
+    set_keyed_value("x.dat", "NOUTF", 0)(tmp_path)
+    assert f.read_text() == "C header\n   0   / NOUTF   1 = on, 0 = off\n"
+
+
+def test_set_keyed_value_sets_blank_entry(tmp_path):
+    f = tmp_path / "x.dat"
+    f.write_text("C header\n/  HTPOUTFL\n")
+    set_keyed_value("x.dat", "HTPOUTFL", "Results/htp.out")(tmp_path)
+    from iwfm_io._tokens import split_keyed_line
+    line = f.read_text().splitlines()[1]
+    assert split_keyed_line(line) == ("Results/htp.out", "HTPOUTFL")
+
+
+def test_set_keyed_value_rejects_newline_and_escape():
+    with pytest.raises(ValueError, match="single line"):
+        set_keyed_value("x.dat", "BDT", "10/01/1990_24:00\n 1 / RESTART")
+
+
+def test_change_outside_scenario_rejected(tmp_path):
+    (tmp_path / "scen").mkdir()
+    with pytest.raises(ValueError, match="outside the scenario"):
+        set_keyed_value("../other.dat", "BDT", "x")(tmp_path / "scen")
+
+
+def test_legacy_bytes_survive_edit(tmp_path):
+    f = tmp_path / "x.dat"
+    f.write_bytes(b"C  Zone \xe9t\xe9\r\n   5   / ND\r\n")
+    set_keyed_value("x.dat", "ND", 6)(tmp_path)
+    assert f.read_bytes() == b"C  Zone \xe9t\xe9\r\n   6   / ND\r\n"

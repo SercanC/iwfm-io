@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -143,6 +143,17 @@ def balance_weights(obs_data, residuals, budgets: Dict[str, float],
     """
     if split not in ("even", "proportional"):
         raise ValueError(f"split must be 'even' or 'proportional', got {split!r}")
+    if not budgets:
+        raise ValueError("budgets must name at least one group pattern")
+    for pattern, total in budgets.items():
+        try:
+            ok = np.isfinite(float(total)) and float(total) >= 0
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            raise ValueError(
+                f"budget target for {pattern!r} must be a finite "
+                f"non-negative phi, got {total!r}")
     obs = obs_data.copy()
     for col in ("obsnme", "weight", "obgnme"):
         if col not in obs.columns:
@@ -164,6 +175,13 @@ def balance_weights(obs_data, residuals, budgets: Dict[str, float],
             f"residuals missing for {int(missing.sum())} weighted "
             f"observation(s), e.g. {names[missing].head(3).tolist()}"
         )
+    infinite = weight.gt(0).values & ~np.isfinite(
+        aligned.fillna(0.0).to_numpy(dtype=float))
+    if infinite.any():
+        raise ValueError(
+            f"residuals are infinite for {int(infinite.sum())} weighted "
+            f"observation(s), e.g. {names[infinite].head(3).tolist()} -- "
+            "an infinite phi cannot be rescaled (the group would be zeroed)")
 
     contrib = pd.Series((weight.values * aligned.values) ** 2, index=group.values)
     phi_before = contrib.groupby(level=0).sum()

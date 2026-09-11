@@ -246,9 +246,10 @@ def compare_models(a, b, layers=None, include_files=True,
 
     # -- Files ----------------------------------------------------------
     report["files"] = None
-    if include_files and a._root and b._root:
+    if include_files and a.model_root and b.model_root:
         report["files"] = diff_model_files(
-            a._root, b._root, subdirs=file_subdirs, max_workers=max_workers)
+            a.model_root, b.model_root, subdirs=file_subdirs,
+            max_workers=max_workers)
 
     # -- Grid -----------------------------------------------------------
     def _grid():
@@ -274,7 +275,7 @@ def compare_models(a, b, layers=None, include_files=True,
 
     # -- Heads ----------------------------------------------------------
     report["heads"] = None
-    if a._heads_hdf and b._heads_hdf:
+    if a.heads_file and b.heads_file:
         heads = {}
         for layer in layers or range(1, a.n_layers + 1):
             try:
@@ -295,7 +296,9 @@ def compare_models(a, b, layers=None, include_files=True,
         report["heads"] = heads
 
     # -- Budgets --------------------------------------------------------
-    buds_a, buds_b = set(a._budget_hdfs), set(b._budget_hdfs)
+    # HDF and text (.bud) budgets alike -- a fresh executable run
+    # writes only the text form
+    buds_a, buds_b = set(a.available_budgets), set(b.available_budgets)
     report["budgets"] = {
         "common": sorted(buds_a & buds_b),
         "only_in_a": sorted(buds_a - buds_b),

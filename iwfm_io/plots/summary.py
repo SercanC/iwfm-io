@@ -28,7 +28,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-from . import CUFT_TO_AF, savefig, excel_date_to_datetime, _has_df_methods
+from . import CUFT_TO_AF, savefig, _has_df_methods
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -945,87 +945,3 @@ def plot_supply_vs_demand(
 # ──────────────────────────────────────────────────────────────────
 # Main — example usage
 # ──────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import iwfm_io
-
-    # Adjust paths to your model
-    PP_FILE = ".assets/sample_model/Simulation/PreProcessor.bin"
-    SIM_FILE = ".assets/sample_model/Simulation/Simulation_MAIN.IN"
-    BEGIN = "10/01/1990_24:00"
-    END = "09/30/2000_24:00"
-
-    with iwfm_io.dll.IWFMModel(
-        preprocessor_file=PP_FILE,
-        simulation_file=SIM_FILE,
-        is_for_inquiry=True,
-    ) as model:
-
-        # Discover available budgets
-        budgets = model.get_budget_list()
-        if budgets:
-            bt = budgets[0]["budget_type"]
-            loc = 1
-
-            # 21. Pie chart
-            fig, ax = plot_budget_pie(
-                model, bt, loc, BEGIN, END,
-                save_path="budget_pie.png",
-            )
-            plt.close(fig)
-
-            # 22. Monthly average
-            fig, ax = plot_budget_monthly_average(
-                model, bt, loc, BEGIN, END,
-                save_path="budget_monthly_avg.png",
-            )
-            plt.close(fig)
-
-            # 23. Annual bars
-            fig, ax = plot_budget_annual_bars(
-                model, bt, loc, BEGIN, END,
-                save_path="budget_annual.png",
-            )
-            plt.close(fig)
-
-            # 26. Water balance summary
-            fig, ax = plot_water_balance_summary(
-                model, bt, loc, BEGIN, END,
-                save_path="water_balance.png",
-            )
-            plt.close(fig)
-
-        # 24. Rating curves
-        sn_ids = model.get_stream_node_ids()
-        if len(sn_ids) >= 3:
-            fig, ax = plot_rating_curve(
-                model, sn_ids[:3].tolist(),
-                log_scale=True,
-                save_path="rating_curves.png",
-            )
-            plt.close(fig)
-
-        # 25. Aquifer parameter histograms
-        fig, axes = plot_aquifer_parameter_histograms(
-            model, layer=1,
-            save_path="aquifer_params.png",
-        )
-        plt.close(fig)
-
-        # 27. Supply vs demand
-        sub_ids = model.get_subregion_ids()
-        if len(sub_ids) > 0:
-            try:
-                fig, ax = plot_supply_vs_demand(
-                    model,
-                    location_type=1,
-                    locations=sub_ids[:3],
-                    supply_type=1,
-                    supplies=sub_ids[:3],
-                    save_path="supply_demand.png",
-                )
-                plt.close(fig)
-            except Exception as exc:
-                print(f"Supply vs demand skipped: {exc}")
-
-    print("Done — all summary plots generated.")

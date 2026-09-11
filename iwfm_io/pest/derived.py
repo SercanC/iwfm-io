@@ -34,7 +34,7 @@ Typical pairing workflow::
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Mapping, Optional, Union
+from typing import Mapping, Optional
 
 import pandas as pd
 

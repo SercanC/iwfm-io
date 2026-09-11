@@ -132,9 +132,10 @@ def nodes_gdf(model, crs=None, data=None, stratigraphy=True):
         try:
             strat = pd.DataFrame(model.stratigraphy_df())
             ndf = ndf.merge(strat, on="node_id", how="left")
-        except Exception:  # stratigraphy is optional context
-            logger.info("nodes_gdf: no stratigraphy available; "
-                        "exporting coordinates only")
+        except Exception as exc:  # stratigraphy is optional context
+            logger.warning("nodes_gdf: no stratigraphy joined (%s: %s); "
+                           "exporting coordinates only",
+                           type(exc).__name__, exc)
     ndf = _merge_data(ndf, data, "node_id")
     geom = [Point(x, y) for x, y in zip(ndf["x"], ndf["y"])]
     return _maybe_set_crs(gpd.GeoDataFrame(ndf, geometry=geom), crs)
@@ -156,8 +157,9 @@ def elements_gdf(model, crs=None, data=None):
         subs = pd.DataFrame(model.subregions_df()).rename(columns={
             "subregion_id": "subregion", "name": "subregion_name"})
         edf = edf.merge(subs, on="subregion", how="left")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("elements_gdf: subregion names not joined (%s: %s)",
+                       type(exc).__name__, exc)
     edf = _merge_data(edf, data, "element_id")
     return _maybe_set_crs(gpd.GeoDataFrame(edf, geometry=polys), crs)
 
@@ -183,8 +185,9 @@ def subregions_gdf(model, crs=None):
         subs = pd.DataFrame(model.subregions_df())
         out = out.merge(subs, on="subregion_id", how="left")
         out = out[["subregion_id", "name", "n_elements", "area"]]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("subregions_gdf: subregion names not joined (%s: %s)",
+                       type(exc).__name__, exc)
     return _maybe_set_crs(gpd.GeoDataFrame(out, geometry=geoms), crs)
 
 
@@ -344,7 +347,7 @@ def export_gis(model, path, layers=None, crs=None,
     >>> dtw = m.stratigraphy_df()[["node_id"]].assign(
     ...     dtw=m.stratigraphy_df()["elevation"].values
     ...         - heads.iloc[-1].values)
-    >>> export_gis(m, "model.gpkg", layers=["nodes"], node_data=dtw)
+    >>> export_gis(m, "model_dtw.gpkg", layers=["nodes"], node_data=dtw)
     """
     _require_geo()
 
@@ -352,6 +355,8 @@ def export_gis(model, path, layers=None, crs=None,
         requested = list(GIS_LAYERS)
         explicit = False
     else:
+        if isinstance(layers, str):
+            layers = [layers]
         unknown = set(layers) - set(GIS_LAYERS)
         if unknown:
             raise ValueError(
@@ -361,10 +366,27 @@ def export_gis(model, path, layers=None, crs=None,
         explicit = True
 
     path = Path(path)
+    if path.suffix and path.suffix.lower() != ".gpkg":
+        raise ValueError(
+            f"export_gis writes a GeoPackage (.gpkg) or a folder of "
+            f"shapefiles; {path.suffix!r} is not supported")
+    for label, data in (("node_data", node_data), ("element_data", element_data)):
+        if data is not None:
+            key = "node_id" if label == "node_data" else "element_id"
+            if key in data.columns and data[key].duplicated().any():
+                dup = sorted(data.loc[data[key].duplicated(), key].unique()[:3])
+                raise ValueError(
+                    f"{label} has duplicate {key} values (e.g. {dup}); "
+                    "one row per feature is required")
     as_gpkg = path.suffix.lower() == ".gpkg"
     if as_gpkg:
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
+            if explicit:
+                logger.warning(
+                    "export_gis: replacing existing %s -- a partial "
+                    "export (layers=...) rewrites the whole file, layers "
+                    "not listed are lost", path.name)
             path.unlink()
     else:
         path.mkdir(parents=True, exist_ok=True)

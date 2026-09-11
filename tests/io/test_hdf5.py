@@ -2,7 +2,6 @@
 
 import pytest
 import numpy as np
-from pathlib import Path
 
 from tests.io.conftest import BUDGET_DIR, RESULTS_DIR
 
@@ -36,7 +35,7 @@ class TestBudgetHDF:
         fact = 2.29568e-5  # sample GW main FACTVLOU (cu.ft -> ac.ft)
         hdf_total = float(hdf_df.iloc[:, 0].sum()) * fact
         txt_total = float(np.nansum(
-            np.asarray(txt_df["col_1"], dtype=float)))
+            np.asarray(txt_df.iloc[:, 1], dtype=float)))   # first data column
         assert hdf_total == pytest.approx(txt_total, rel=1e-3)
 
 
