@@ -14,6 +14,7 @@ and warns (:class:`IWFMReadWarning`) in lenient mode; see
 
 from __future__ import annotations
 
+import os
 import warnings
 from contextlib import contextmanager
 from pathlib import Path
@@ -54,12 +55,16 @@ def resolve_child_path(value: str, base_dir: str | Path) -> str:
     rel = value.replace("\\", "/")
     base = Path(base_dir)
     candidates = [base / rel, base.parent / rel]
+    # resolved references are absolute: a relative one would be relative
+    # to the CWD at read time and be written verbatim into a deck that
+    # lives elsewhere (the writers relativise absolute paths against the
+    # deck's own folder / base_dir)
     for cand in candidates:
         if cand.exists():
-            return str(cand)
+            return os.path.abspath(cand)
     for cand in candidates:
         if cand.parent.exists():
-            return str(cand)
+            return os.path.abspath(cand)
     return value.strip()
 
 

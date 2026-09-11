@@ -763,7 +763,8 @@ def _element_areas_from_preprocessor(pp) -> "pd.Series":
     ys = pd.Series(nodes["y"].to_numpy(float),
                    index=nodes["node_id"].to_numpy(int))
 
-    conf = elements[["node1", "node2", "node3", "node4"]].to_numpy(int)
+    # copy=True: pandas 3 hands out read-only views (copy-on-write)
+    conf = elements[["node1", "node2", "node3", "node4"]].to_numpy(dtype=int, copy=True)
     conf[:, 3] = np.where(conf[:, 3] == 0, conf[:, 0], conf[:, 3])
     x = xs.reindex(conf.ravel()).to_numpy().reshape(conf.shape)
     y = ys.reindex(conf.ravel()).to_numpy().reshape(conf.shape)

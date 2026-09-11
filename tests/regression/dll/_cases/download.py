@@ -303,6 +303,10 @@ def case_load_env_version_traversal(model_dir):
 
 
 def case_load_env_version_2015(model_dir):
+    from iwfm_io.dll import list_dll_versions
+    if "2015.0.1403" not in list_dll_versions():
+        from common import skipped
+        return skipped("2015.0.1403 DLL not installed")
     os.environ["IWFM_DLL_VERSION"] = "2015.0.1403"
     try:
         return _load(model_dir)

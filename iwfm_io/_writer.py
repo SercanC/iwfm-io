@@ -332,20 +332,34 @@ class IWFMFileWriter:
     ) -> None:
         """Write a file-path keyed value.
 
-        If *path* is None, writes a blank value (optional file).  When
-        *base_dir* is given, an absolute path is written relative to it
-        (a relative one is passed through unchanged) -- pass
+        If *path* is None, writes a blank value (optional file).  An
+        absolute path is written relative to *base_dir* -- or, when
+        *base_dir* is not given, relative to the folder of the file
+        being written (a relative one is passed through unchanged) -- pass
         the simulation working directory (the folder of the simulation
         main file), which is what IWFM resolves referenced paths
         against.  ``..`` traversals are supported (``..\\Results\\...``).
         """
         if path is None:
             val_str = ""
-        elif base_dir is not None and os.path.isabs(str(path)):
-            try:
-                val_str = os.path.relpath(path, base_dir)
-            except ValueError:  # e.g. different drive on Windows
-                val_str = str(path)
+        elif os.path.isabs(str(path)):
+            # anchor: base_dir, else the folder of the file being written
+            # (right for the main files, whose folder IS the working dir)
+            anchor = base_dir if base_dir is not None else (
+                self.path.parent if self.path is not None else None)
+            val_str = str(path)
+            if anchor is not None:
+                try:
+                    val_str = os.path.relpath(path, anchor)
+                except ValueError:  # e.g. different drive on Windows
+                    pass
+            if val_str.startswith("/"):
+                # a leading '/' reads back as a BLANK value (list-directed
+                # read stops at the slash) -- never write a POSIX absolute
+                raise ValueError(
+                    f"{keyword}: absolute path {path!r} cannot be written "
+                    "into an IWFM deck (a leading '/' reads as a blank "
+                    "value); pass base_dir so it can be relativised")
         else:
             # a relative reference is already deck-relative (the reader
             # keeps unresolvable ones as written) -- never relpath it

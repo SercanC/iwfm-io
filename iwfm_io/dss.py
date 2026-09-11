@@ -144,7 +144,7 @@ def read_dss_timeseries(dss_file, paths) -> "pd.DataFrame":
     with _open_dss(dss_file) as fid:
         for p in paths:
             ts = fid.read_ts(p, trim_missing=True)
-            vals = np.asarray(ts.values, dtype=float)
+            vals = np.array(ts.values, dtype=float)   # own copy: written below
             mask = np.asarray(ts.nodata, dtype=bool)
             vals[mask] = np.nan
             # second resolution: IWFM's recurring-year records (year
