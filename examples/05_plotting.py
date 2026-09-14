@@ -13,20 +13,22 @@ Outputs are saved to test_output/ as ex_*.png / ex_*.gif.
 Usage:
     python examples/05_plotting.py
 
-Plot modules covered (58 functions total):
-  maps            (11) — grid, GSE, head contour, streams, parameters, wells
-  profiles         (2) — stratigraphic cross-section, stream longitudinal profile
-  timeseries       (7) — head hydrographs, stream flow, budget time series
-  trends           (4) — head trend map, seasonal amplitude
-  seasonal         (4) — ridgeline, calendar heatmap, polar
-  spatial_patterns (3) — sparkline grid, small multiples
-  summary          (7) — rating curves, budget pie, monthly average
-  water_balance    (5) — Sankey diagram, butterfly chart, cumulative departure
-  stream_analysis  (2) — gain/loss profile, exchange map
-  animations       (3) — head animation, DTW animation
-  subsidence       (2) — subsidence bowl
-  supply_demand    (4) — supply gap timeline
-  connectivity     (2) — diversion network, bypass diagram
+Plot modules covered (66 functions total):
+  maps             (11) — grid, GSE, head contour, streams, parameters, wells
+  profiles         ( 2) — stratigraphic cross-section, stream longitudinal profile
+  cross_sections   ( 2) — multi-layer head panel + animation
+  timeseries       ( 7) — head hydrographs, stream flow, budget time series
+  trends           ( 4) — head trend map, seasonal amplitude, drawdown, recovery lag
+  seasonal         ( 4) — ridgeline, calendar heatmap, polar
+  spatial_patterns ( 3) — sparkline grid, small multiples, head vs GSE
+  summary          ( 7) — model overview, budget pie/bars, monthly average
+  water_balance    ( 5) — Sankey diagram, butterfly chart, cumulative departure
+  stream_analysis  ( 2) — gain/loss profile, exchange map
+  supply_demand    ( 4) — supply gap timeline, shortage vs pumping depth
+  subsidence       ( 2) — subsidence bowl, subsidence vs head
+  animations       ( 3) — head animation, stream flows, DTW animation
+  connectivity     ( 2) — diversion network, bypass diagram
+  calibration      ( 8) — obs vs sim, residual map, phi, ensembles (PEST)
 """
 
 import sys
@@ -178,12 +180,11 @@ def demo_timeseries(adapter):
         )
         _save(fig, "ex_12_gw_head_hydrographs.png")
 
-    # Cumulative GW storage change — requires DLL budget; skip if unavailable
-    if hasattr(adapter, "get_budget_timeseries"):
-        fig, ax = timeseries.plot_cumulative_gw_storage_change(
-            adapter, begin_date=BEGIN, end_date=END,
-        )
-        _save(fig, "ex_13_cumulative_storage_change.png")
+    # Cumulative GW storage change per subregion (served from the GW budget)
+    fig, ax = timeseries.plot_cumulative_gw_storage_change(
+        adapter, subregions=[1, 2], begin_date=BEGIN, end_date=END,
+    )
+    _save(fig, "ex_13_cumulative_storage_change.png")
 
 
 # ── 4. Trends ─────────────────────────────────────────────────────────────────

@@ -5,10 +5,11 @@
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from . import (get_stream_segments, get_stream_node_xy, overlay_grid,
-               plot_contour_map, _has_df_methods, savefig,
-               style_map_axes, map_legend_outside)
+from . import (
+    get_stream_segments, get_stream_node_xy, overlay_grid,
+    plot_contour_map, _has_df_methods, style_map_axes, map_legend_outside,
+    _prepare_axes, _finish,
+)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -17,7 +18,7 @@ from . import (get_stream_segments, get_stream_node_xy, overlay_grid,
 
 def plot_stream_gain_loss_profile(model, reach_ids=None,
                                    factor=1.0, ax=None,
-                                   figsize=(14, 5), save_path=None):
+                                   figsize=(14, 5), save_path=None, close=False):
     """Longitudinal plot coloring each segment by GW gain/loss.
 
     Blue segments = gaining (GW feeds stream).
@@ -32,10 +33,7 @@ def plot_stream_gain_loss_profile(model, reach_ids=None,
     factor : float
         Unit conversion factor.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if _has_df_methods(model):
         sf_df = model.stream_flows_df(factor)
@@ -100,8 +98,7 @@ def plot_stream_gain_loss_profile(model, reach_ids=None,
         Patch(color="indianred", alpha=0.6, label="Losing (stream → GW)"),
     ])
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -111,7 +108,7 @@ def plot_stream_gain_loss_profile(model, reach_ids=None,
 
 def plot_stream_aquifer_exchange_map(model, layer=1, factor=1.0,
                                       show_heads=True, ax=None,
-                                      figsize=(10, 8), save_path=None):
+                                      figsize=(10, 8), save_path=None, close=False):
     """Spatial map of GW gain/loss magnitude at each stream node.
 
     Stream nodes are plotted as circles: blue = gaining, red = losing,
@@ -123,10 +120,7 @@ def plot_stream_aquifer_exchange_map(model, layer=1, factor=1.0,
     layer : int
         Layer for head contour overlay.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     # Head contour background
     if show_heads:
@@ -148,8 +142,7 @@ def plot_stream_aquifer_exchange_map(model, layer=1, factor=1.0,
         ax.set_aspect("equal")
         style_map_axes(ax)
         ax.set_title("Stream–Aquifer Exchange (model has no stream nodes)")
-        if save_path:
-            savefig(fig, save_path)
+        _finish(fig, save_path, close=close)
         return fig, ax
     if len(gain_gw) != len(sx):
         raise ValueError(
@@ -185,8 +178,7 @@ def plot_stream_aquifer_exchange_map(model, layer=1, factor=1.0,
     ax.set_title("Stream–Aquifer Exchange")
     map_legend_outside(ax)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 

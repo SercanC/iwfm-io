@@ -3,7 +3,7 @@
 Every plot below was produced by `iwfm_io.plots` from **C2VSimFG v1.5**,
 DWR's fine-grid groundwater–surface water model of California's
 Central Valley (30,179 nodes, 32,537 elements, 4 layers, water years
-1974–2021). Static maps and charts come from the 58-function DLL test
+1974–2021). Static maps and charts come from the 58-case DLL test
 suite (`examples/test_plots.py .assets/c2vsimfg_v1.5`); the plots the
 DLL cannot serve in inquiry mode were rendered DLL-free through
 `IOModelAdapter` (`examples/test_plots_dllfree.py`).

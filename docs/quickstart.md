@@ -356,7 +356,7 @@ print(f"Nodes: {adapter.n_nodes}, Elements: {adapter.n_elements}")
 ```python
 from iwfm_io.plots import maps
 
-fig, ax = maps.plot_element_map(adapter)
+fig, ax = maps.plot_grid_mesh(adapter, color_by="subregion")   # elements coloured by subregion
 fig.savefig("grid.png", dpi=150)
 ```
 

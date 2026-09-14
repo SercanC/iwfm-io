@@ -19,115 +19,19 @@ with the same shape::
 
 Values are stored exactly as they appear in the file — apply the
 conversion factors for model units.
+
+Both parsers take an :class:`~iwfm_io._parser.IWFMFileReader`
+positioned at the section (typically :meth:`IWFMFileReader.tail_cursor`
+— the remainder of a file as its own reader, reporting real line
+numbers).
 """
 
 from __future__ import annotations
 
-import warnings
-from contextlib import contextmanager
-
 import pandas as pd
 
-from iwfm_io._parser import IWFMParseError, IWFMReadWarning
-from iwfm_io._strict import current_strict
-from iwfm_io._tokens import is_comment, split_keyed_line, tokenize_data_line
-
-
-class LineCursor:
-    """Minimal data-line cursor over a list of raw file lines.
-
-    Parameters
-    ----------
-    lines : list[str]
-        Raw lines (comments included) — typically the remainder of a
-        file from :meth:`IWFMFileReader.skip_to_end`.
-    path : str or Path, optional
-        The file the lines came from, for error messages.
-    lineno0 : int
-        Number of file lines preceding *lines* (so ``lineno`` reports
-        real file line numbers).
-    strict : bool, optional
-        Reader mode; ``None`` snapshots the mode in effect.
-    """
-
-    def __init__(self, lines: list[str], path=None, lineno0: int = 0,
-                 strict: bool | None = None) -> None:
-        self._lines = lines
-        self._pos = 0
-        self.path = path
-        self.lineno0 = lineno0
-        self.strict = current_strict() if strict is None else bool(strict)
-        self._sections: list[str] = []
-
-    @property
-    def eof(self) -> bool:
-        self._skip_comments()
-        return self._pos >= len(self._lines)
-
-    @property
-    def lineno(self) -> int:
-        """1-based file line number of the most recently consumed line."""
-        return self.lineno0 + self._pos
-
-    @property
-    def section_name(self) -> str:
-        return " > ".join(self._sections)
-
-    @contextmanager
-    def section(self, name: str):
-        """Name the section being read, for error messages."""
-        self._sections.append(name)
-        try:
-            yield self
-        finally:
-            self._sections.pop()
-
-    def error(self, msg: str, lineno: int | None = None) -> IWFMParseError:
-        """Build an :class:`IWFMParseError` carrying file, line and section."""
-        if lineno is None:
-            lineno = self.lineno if self.lineno else None
-        return IWFMParseError(msg, path=self.path, lineno=lineno,
-                              section=self.section_name)
-
-    def degrade(self, msg: str, lineno: int | None = None) -> None:
-        """Raise :meth:`error` in strict mode, warn in lenient mode."""
-        err = self.error(msg, lineno)
-        if self.strict:
-            raise err
-        warnings.warn(str(err), IWFMReadWarning, stacklevel=2)
-
-    def _skip_comments(self) -> None:
-        while self._pos < len(self._lines) and is_comment(self._lines[self._pos]):
-            self._pos += 1
-
-    def peek(self) -> str | None:
-        """Next data line without consuming it, or None at EOF."""
-        self._skip_comments()
-        if self._pos >= len(self._lines):
-            return None
-        return self._lines[self._pos]
-
-    def next(self) -> str:
-        line = self.peek()
-        if line is None:
-            raise self.error(
-                "end of file reached while a data line was still expected "
-                "— the file may be truncated or a section is missing",
-                lineno=self.lineno0 + len(self._lines) or None)
-        self._pos += 1
-        return line
-
-    def peek_keyword(self) -> str:
-        """Uppercased first word of the next data line's ``/ keyword`` part."""
-        line = self.peek()
-        if line is None:
-            return ""
-        _, keyword = split_keyed_line(line)
-        return keyword.split()[0].upper() if keyword else ""
-
-    def read_keyed_value(self) -> tuple[str, str]:
-        value, keyword = split_keyed_line(self.next())
-        return value, keyword
+from iwfm_io._parser import IWFMFileReader
+from iwfm_io._tokens import tokenize_data_line
 
 
 def expand_node_range(spec: str) -> list[int]:
@@ -161,7 +65,7 @@ def _numeric_tokens(line: str) -> list[float] | None:
 
 
 def parse_node_layer_table(
-    cursor: LineCursor,
+    reader: IWFMFileReader,
     param_names: list[str],
     n_leading: int = 1,
     leading_names: list[str] | None = None,
@@ -190,7 +94,7 @@ def parse_node_layer_table(
     blocks = 0
 
     while True:
-        line = cursor.peek()
+        line = reader.peek_data_line()
         if line is None:
             break
         vals = _numeric_tokens(line)
@@ -210,7 +114,7 @@ def parse_node_layer_table(
             params = vals
         else:
             break
-        cursor.next()
+        reader.next_data_line()
         records.append(current_lead + [layer] + params)
 
     if not records:
@@ -224,7 +128,7 @@ def parse_node_layer_table(
 
 
 def parse_param_block(
-    cursor: LineCursor,
+    reader: IWFMFileReader,
     param_names: list[str],
     factor_names: list[str],
 ) -> dict:
@@ -232,7 +136,7 @@ def parse_param_block(
 
     Parameters
     ----------
-    cursor : LineCursor
+    reader : IWFMFileReader
         Positioned at the NGROUP keyed line.
     param_names : list[str]
         Column names for the per-layer parameters, in file order
@@ -248,16 +152,16 @@ def parse_param_block(
     (DataFrame or None; Option 2), ``parametric_grids`` (list of dicts;
     Option 1: node_range, nodes, ndp, nep, elements, params).
     """
-    value, _ = cursor.read_keyed_value()
+    value, _ = reader.read_keyed_value()
     try:
         ngroup = int(value)
     except ValueError:
-        raise cursor.error(
+        raise reader.error(
             f"expected an integer for NGROUP but found {value!r}") from None
 
-    factor_vals = _numeric_tokens(cursor.next())
+    factor_vals = _numeric_tokens(reader.next_data_line())
     if factor_vals is None:
-        raise cursor.error(
+        raise reader.error(
             "conversion-factor line after NGROUP is not numeric")
     factors = {
         name: (factor_vals[i] if i < len(factor_vals) else 1.0)
@@ -265,37 +169,37 @@ def parse_param_block(
     }
 
     time_units: dict[str, str] = {}
-    while cursor.peek_keyword().startswith("TUNIT"):
-        value, keyword = cursor.read_keyed_value()
+    while reader.peek_keyword().startswith("TUNIT"):
+        value, keyword = reader.read_keyed_value()
         time_units[keyword.split()[0].upper()] = value
 
     node_params = None
     parametric_grids: list[dict] = []
 
     if ngroup == 0:
-        node_params = parse_node_layer_table(cursor, param_names)
+        node_params = parse_node_layer_table(reader, param_names)
     else:
         for _ in range(ngroup):
-            line = cursor.peek()
+            line = reader.peek_data_line()
             if line is None:
                 break
             node_range = "".join(tokenize_data_line(line))
-            cursor.next()
-            ndp_val, _ = cursor.read_keyed_value()
-            nep_val, _ = cursor.read_keyed_value()
+            reader.next_data_line()
+            ndp_val, _ = reader.read_keyed_value()
+            nep_val, _ = reader.read_keyed_value()
             try:
                 ndp = int(ndp_val)
                 nep = int(nep_val)
             except ValueError:
-                raise cursor.error(
+                raise reader.error(
                     "expected integers for NDP/NEP but found "
                     f"{ndp_val!r}/{nep_val!r}") from None
 
             element_rows = []
             for _ in range(nep):
-                vals = _numeric_tokens(cursor.next())
+                vals = _numeric_tokens(reader.next_data_line())
                 if not vals:
-                    raise cursor.error(
+                    raise reader.error(
                         "parametric element row is not numeric")
                 row = {"element_id": int(vals[0])}
                 for i, v in enumerate(vals[1:5], start=1):
@@ -304,7 +208,7 @@ def parse_param_block(
             elements = pd.DataFrame(element_rows) if element_rows else None
 
             params = parse_node_layer_table(
-                cursor, param_names,
+                reader, param_names,
                 n_leading=3, leading_names=["node_id", "x", "y"],
                 max_blocks=ndp,
             )

@@ -27,6 +27,17 @@ from iwfm_io.models.stream import (
 # Stream Main
 # ------------------------------------------------------------------
 
+# Stream component versions IWFM dispatches on (Package_AppStream.f90)
+# and, for each version this reader models, the layout of the stream-bed
+# parameter rows (Class_StrmGWConnector_v4*.f90):
+#   v40:  IR  CSTRM  DSTRM  WETPR
+#   v42:  IR  WETPR  IGW  CSTRM  DSTRM  (+ 4-token continuation rows)
+# 4.21 (different main-file sequence — no diversion-spec entry) and 5.0
+# (cross-section geometry) are recognised by name but not modeled.
+IWFM_STREAM_VERSIONS = ("4.0", "4.1", "4.2", "4.21", "5.0")
+SUPPORTED_STREAM_VERSIONS = {"4.0": "v40", "4.1": "v40", "4.2": "v42"}
+
+
 def read_stream_main(path: str | Path) -> StreamMain:
     """Read an IWFM stream main file (e.g. ``Stream_MAIN.dat``).
 
@@ -42,6 +53,9 @@ def read_stream_main(path: str | Path) -> StreamMain:
     reader = IWFMFileReader(path)
     header = reader.read_header()
     base_dir = Path(path).parent
+    version = reader.check_version(
+        header, SUPPORTED_STREAM_VERSIONS, known=IWFM_STREAM_VERSIONS,
+        what="stream main")
 
     # ---- File paths (6 keyed path lines) ----
     path_keys = [
@@ -120,15 +134,19 @@ def read_stream_main(path: str | Path) -> StreamMain:
     # Stream-node bed parameter rows — one row per stream NODE (plus,
     # in v4.2+, optional 4-token continuation rows for additional GW
     # nodes of wide stream nodes).  The column ORDER changed across
-    # stream-package versions (confirmed against the IWFM source,
-    # Class_StrmGWConnector_v4*.f90):
-    #   v4.0/4.1:  IR  CSTRM  DSTRM  WETPR
-    #   v4.2+:     IR  WETPR  IGW  CSTRM  DSTRM
-    # Rows may carry a trailing "/ annotation" (kept in "notes").
-    try:
-        _stream_ver = float(header.version) if header.version else 4.0
-    except (TypeError, ValueError):
-        _stream_ver = 4.0
+    # stream-package versions (see SUPPORTED_STREAM_VERSIONS); rows may
+    # carry a trailing "/ annotation" (kept in "notes").  The layout is
+    # dispatched by the version header; a headerless file (or an
+    # unsupported version in a lenient read) falls back to a numeric
+    # comparison of whatever the header says, 4.0 when absent.
+    if version is not None:
+        bed_layout = SUPPORTED_STREAM_VERSIONS[version]
+    else:
+        try:
+            _stream_ver = float(header.version) if header.version else 4.0
+        except (TypeError, ValueError):
+            _stream_ver = 4.0
+        bed_layout = "v42" if _stream_ver >= 4.2 else "v40"
     reach_rows: list[dict] = []
     _cur_node = None
     what = "stream bed row"
@@ -140,7 +158,7 @@ def read_stream_main(path: str | Path) -> StreamMain:
             tokens = tokenize_data_line(line)
             m = re.search(r"\s/(.+)$", line)
             note = m.group(1).strip().lstrip("/").strip() if m else ""
-            if _stream_ver >= 4.2:
+            if bed_layout == "v42":
                 if len(tokens) >= 5:
                     reader.next_data_line()
                     _cur_node = reader.to_ints(tokens[:1], what)[0]
@@ -168,6 +186,15 @@ def read_stream_main(path: str | Path) -> StreamMain:
                     }
                     extra_start = 4
                 else:
+                    if (version is not None and len(tokens) == 4
+                            and _cur_node is None):
+                        # a v4.0-shaped first row under a v4.2 header
+                        reader.next_data_line()
+                        reader.degrade(
+                            f"stream bed row has 4 values but stream "
+                            f"version {version} lays out 5 (IR WETPR IGW "
+                            f"CSTRM DSTRM): {line.strip()!r}; the version "
+                            "header and the table disagree")
                     break
             else:
                 if len(tokens) < 4:

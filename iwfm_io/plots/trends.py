@@ -7,10 +7,10 @@
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from . import (plot_contour_map, overlay_streams,
-               excel_date_to_datetime, savefig,
-               _has_df_methods)
+from . import (
+    plot_contour_map, overlay_streams, excel_date_to_datetime,
+    _has_df_methods, _prepare_axes, _finish,
+)
 
 
 def _compute_layer_head_stats(model, layer, begin_date, end_date):
@@ -45,7 +45,7 @@ def _compute_layer_head_stats(model, layer, begin_date, end_date):
 # ──────────────────────────────────────────────────────────────────
 
 def plot_head_trend_map(model, layer, begin_date, end_date,
-                        ax=None, figsize=(10, 8), save_path=None):
+                        ax=None, figsize=(10, 8), save_path=None, close=False):
     """Map of linear head trend (slope) at every node.
 
     Red = declining, blue = rising.
@@ -57,10 +57,7 @@ def plot_head_trend_map(model, layer, begin_date, end_date,
     begin_date, end_date : str
         IWFM date strings.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     dates, heads = _compute_layer_head_stats(model, layer, begin_date, end_date)
     n_nodes, n_times = heads.shape
@@ -95,8 +92,7 @@ def plot_head_trend_map(model, layer, begin_date, end_date,
     cs.set_clim(-vmax, vmax)
     overlay_streams(model, ax, color="black", linewidth=0.8)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -105,15 +101,12 @@ def plot_head_trend_map(model, layer, begin_date, end_date,
 # ──────────────────────────────────────────────────────────────────
 
 def plot_seasonal_amplitude_map(model, layer, begin_date, end_date,
-                                 ax=None, figsize=(10, 8), save_path=None):
+                                 ax=None, figsize=(10, 8), save_path=None, close=False):
     """Map of (max head − min head) at each node over the period.
 
     Highlights areas with the strongest seasonal water-table fluctuation.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     _, heads = _compute_layer_head_stats(model, layer, begin_date, end_date)
     amplitude = np.nanmax(heads, axis=1) - np.nanmin(heads, axis=1)
@@ -125,8 +118,7 @@ def plot_seasonal_amplitude_map(model, layer, begin_date, end_date,
     )
     overlay_streams(model, ax, color="blue", linewidth=0.8)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -138,7 +130,7 @@ def plot_drought_drawdown_rate(model, layer, begin_date, end_date,
                                 drought_start_idx=None,
                                 drought_end_idx=None,
                                 ax=None, figsize=(10, 8),
-                                save_path=None):
+                                save_path=None, close=False):
     """Map of head decline rate during a drought window.
 
     If drought indices are not given, the function finds the longest
@@ -149,10 +141,7 @@ def plot_drought_drawdown_rate(model, layer, begin_date, end_date,
     drought_start_idx, drought_end_idx : int, optional
         Time-step indices bounding the drought period.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     dates, heads = _compute_layer_head_stats(model, layer, begin_date, end_date)
     n_nodes, n_times = heads.shape
@@ -196,8 +185,7 @@ def plot_drought_drawdown_rate(model, layer, begin_date, end_date,
     )
     overlay_streams(model, ax, color="blue", linewidth=0.8)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -207,7 +195,7 @@ def plot_drought_drawdown_rate(model, layer, begin_date, end_date,
 
 def plot_recovery_lag_map(model, layer, begin_date, end_date,
                            recovery_threshold=0.9, ax=None,
-                           figsize=(10, 8), save_path=None):
+                           figsize=(10, 8), save_path=None, close=False):
     """Map of recovery time after heads reach their minimum.
 
     Recovery is defined as regaining *recovery_threshold* fraction of
@@ -218,10 +206,7 @@ def plot_recovery_lag_map(model, layer, begin_date, end_date,
     recovery_threshold : float
         Fraction (0–1) of the head drop that must be recovered.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     dates, heads = _compute_layer_head_stats(model, layer, begin_date, end_date)
     n_nodes, n_times = heads.shape
@@ -267,8 +252,7 @@ def plot_recovery_lag_map(model, layer, begin_date, end_date,
     )
     overlay_streams(model, ax, color="black", linewidth=0.8)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 

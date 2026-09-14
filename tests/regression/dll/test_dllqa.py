@@ -312,9 +312,16 @@ def dl_intact(run):
 
 
 def dl_no_leftovers(run):
+    """An interrupted fetch installs nothing and leaks nothing into the
+    system temp dir.  Since 2.15 the partial archive is deliberately kept
+    in dest_dir as ``<name>.zip.part`` so the next call resumes it; a
+    *complete* archive that fails its hash is still always discarded."""
     v = run.returned()
     assert v["call"]["outcome"] == "raised" and v["call"]["exc_type"] == "ConnectionResetError", v
-    assert v["dest_files"] in ([], None) and v["new_tmp_zips"] == [], v
+    assert v["new_tmp_zips"] == [], v
+    left = v["dest_files"] or []
+    assert not [f for f in left if f.lower().endswith(".dll")], v
+    assert all(f.endswith(".zip.part") for f in left), v
 
 
 def dl_not_installed(run):

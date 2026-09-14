@@ -6,7 +6,10 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from . import (build_triangulation, get_stream_node_xy, _has_df_methods, savefig)
+from . import (
+    build_triangulation, get_stream_node_xy, _has_df_methods,
+    _prepare_axes, _finish,
+)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -16,7 +19,7 @@ from . import (build_triangulation, get_stream_node_xy, _has_df_methods, savefig
 def plot_stratigraphic_cross_section(model, points, n_samples=100,
                                      show_heads=True, layer_colors=None,
                                      ax=None, figsize=(14, 5),
-                                     save_path=None):
+                                     save_path=None, close=False):
     """Plot a stratigraphic cross-section along a transect.
 
     Parameters
@@ -31,10 +34,7 @@ def plot_stratigraphic_cross_section(model, points, n_samples=100,
     layer_colors : list of str, optional
         Colors for each aquifer layer fill.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     points = np.asarray(points)
     # Build cumulative distance along polyline
@@ -107,8 +107,7 @@ def plot_stratigraphic_cross_section(model, points, n_samples=100,
     ax.legend(loc="upper right", fontsize=8, ncol=2)
     ax.grid(True, alpha=0.3)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -118,7 +117,7 @@ def plot_stratigraphic_cross_section(model, points, n_samples=100,
 
 def plot_stream_longitudinal_profile(model, reach_ids=None,
                                       ax=None, figsize=(14, 5),
-                                      save_path=None):
+                                      save_path=None, close=False):
     """Plot stream bottom elevation along reaches.
 
     Parameters
@@ -128,10 +127,7 @@ def plot_stream_longitudinal_profile(model, reach_ids=None,
         Specific reaches to plot. If None, plots all reaches
         connected in downstream order.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if _has_df_methods(model):
         sn_df = model.stream_nodes_df()
@@ -193,8 +189,7 @@ def plot_stream_longitudinal_profile(model, reach_ids=None,
     if len(reach_ids) <= 15:
         ax.legend(fontsize=7, ncol=2)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 

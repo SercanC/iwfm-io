@@ -1,149 +1,153 @@
 # Plot Gallery
 
-66 visualization functions across 15 modules. All accept either an `IWFMModel` or `IOModelAdapter` instance and return `(fig, ax)`. Most accept an optional `save_path` parameter.
+66 visualization functions across 15 modules. All accept either an `IWFMModel` or `IOModelAdapter` instance and return `(fig, ax)`. Most accept an optional `save_path` parameter, and `close=True` to close the figure after saving (useful when generating many plots in a loop).
+
+This catalogue is generated from the modules themselves; the descriptions are the functions' own docstring summaries.
 
 ```python
 from iwfm_io.plots import maps, timeseries, water_balance  # etc.
 ```
 
-## Maps (11 functions)
+## Maps (`maps`, 11 functions)
 
 | Function | Description |
 |----------|-------------|
-| `maps.plot_element_map` | Model grid colored by subregion |
-| `maps.plot_node_map` | Node locations |
-| `maps.plot_stream_network` | Stream reaches and nodes |
-| `maps.plot_head_contour` | GW head contour map for a given layer/date |
-| `maps.plot_depth_to_water` | Depth-to-water contour map |
-| `maps.plot_head_change_map` | Change in head between two dates |
-| `maps.plot_well_locations` | Well/pumping locations on grid |
-| `maps.plot_lake_map` | Lake outlines on grid |
-| `maps.plot_tile_drain_map` | Tile drain node locations |
-| `maps.plot_stream_aquifer_exchange_map` | Stream-aquifer exchange by reach |
-| `maps.plot_aquifer_parameter` | Spatial distribution of an aquifer parameter |
+| `maps.plot_grid_mesh` | Plot the finite-element mesh, optionally colored by subregion |
+| `maps.plot_ground_surface_elevation` | Plot a filled contour map of ground surface elevation |
+| `maps.plot_layer_thickness` | Plot a filled contour map of aquifer layer thickness |
+| `maps.plot_aquifer_parameter` | Plot a per-element map of an aquifer parameter for a given layer |
+| `maps.plot_gw_head_contour` | Plot a groundwater head contour map |
+| `maps.plot_depth_to_water` | Plot depth to water (ground surface minus head at last output timestep) |
+| `maps.plot_head_change` | Plot the difference between two head arrays (t2 minus t1) |
+| `maps.plot_stream_network` | Plot the stream network on top of the model grid |
+| `maps.plot_well_locations` | Plot well locations colored/sized by perforation depth |
+| `maps.plot_lake_and_diversion_elements` | Highlight lake and diversion element groups on the model grid |
+| `maps.plot_tile_drain_locations` | Plot tile drain node locations on the model grid |
 
-## Profiles (2 functions)
-
-| Function | Description |
-|----------|-------------|
-| `profiles.plot_stratigraphic_cross_section` | Vertical cross-section through layers |
-| `profiles.plot_stream_gain_loss_profile` | Longitudinal gain/loss along a stream |
-
-## Time Series (7 functions)
+## Profiles (`profiles`, 2 functions)
 
 | Function | Description |
 |----------|-------------|
-| `timeseries.plot_gw_head_hydrographs` | GW head at selected nodes over time |
-| `timeseries.plot_stream_hydrographs` | Stream flow at selected reaches |
-| `timeseries.plot_budget_timeseries` | Budget component time series |
-| `timeseries.plot_budget_stacked_area` | Stacked area chart of budget components |
-| `timeseries.plot_land_use_timeseries` | Land-use area changes over time |
-| `timeseries.plot_diversion_timeseries` | Diversion flows over time |
-| `timeseries.plot_pumping_timeseries` | Pumping rates over time |
+| `profiles.plot_stratigraphic_cross_section` | Plot a stratigraphic cross-section along a transect |
+| `profiles.plot_stream_longitudinal_profile` | Plot stream bottom elevation along reaches |
 
-## Trends (4 functions)
+## Cross Sections (`cross_sections`, 2 functions)
 
 | Function | Description |
 |----------|-------------|
-| `trends.plot_head_trend` | Long-term GW head trend with linear fit |
-| `trends.plot_seasonal_decomposition` | Trend + seasonal + residual decomposition |
-| `trends.plot_drought_analysis` | Drought periods highlighted on hydrograph |
-| `trends.plot_exceedance_curve` | Flow/head duration (exceedance) curve |
+| `cross_sections.animate_cross_section` | Animate the water table along a cross-section over time |
+| `cross_sections.plot_multi_layer_head_panel` | Same transect, one subplot per layer, showing how head |
 
-## Seasonal (4 functions)
+## Time Series (`timeseries`, 7 functions)
 
 | Function | Description |
 |----------|-------------|
-| `seasonal.plot_monthly_ridgeline` | Monthly distribution ridgeline plot |
-| `seasonal.plot_monthly_heatmap` | Year × month heatmap |
-| `seasonal.plot_polar_seasonal` | Polar plot of monthly averages |
-| `seasonal.plot_seasonal_boxplot` | Seasonal box-and-whisker plots |
+| `timeseries.plot_gw_head_hydrographs` | Multi-line plot of groundwater head vs. time at selected nodes |
+| `timeseries.plot_stream_flow_hydrograph` | Plot stream flow vs. time at selected stream nodes |
+| `timeseries.plot_stream_stage_hydrograph` | Plot stream stage (water surface elevation) vs. time |
+| `timeseries.plot_budget_timeseries` | Plot budget components as a stacked area chart or multi-line chart |
+| `timeseries.plot_zbudget_timeseries` | Plot zone-budget components over time |
+| `timeseries.plot_cumulative_gw_storage_change` | Line chart of cumulative groundwater storage change |
+| `timeseries.plot_land_use_area_timeseries` | Stacked area chart of land-use categories over time |
 
-## Spatial Patterns (3 functions)
-
-| Function | Description |
-|----------|-------------|
-| `spatial_patterns.plot_node_sparklines` | Small sparklines at each node on the map |
-| `spatial_patterns.plot_small_multiples` | Grid of per-subregion hydrographs |
-| `spatial_patterns.plot_head_vs_gse_scatter` | Head vs ground surface elevation scatter |
-
-## Summary (7 functions)
+## Trends (`trends`, 4 functions)
 
 | Function | Description |
 |----------|-------------|
-| `summary.plot_rating_curve` | Stage-discharge rating curve |
-| `summary.plot_aquifer_parameter_histograms` | Histograms of aquifer Kh, Kv, Ss, Sy |
-| `summary.plot_budget_pie` | Pie chart of budget components |
-| `summary.plot_budget_bar` | Bar chart comparing budget components |
-| `summary.plot_water_table_depth_histogram` | Distribution of depth-to-water |
-| `summary.plot_subregion_summary_table` | Tabular summary figure by subregion |
-| `summary.plot_model_overview` | Multi-panel model summary dashboard |
+| `trends.plot_head_trend_map` | Map of linear head trend (slope) at every node |
+| `trends.plot_seasonal_amplitude_map` | Map of (max head − min head) at each node over the period |
+| `trends.plot_drought_drawdown_rate` | Map of head decline rate during a drought window |
+| `trends.plot_recovery_lag_map` | Map of recovery time after heads reach their minimum |
 
-## Water Balance (5 functions)
+## Seasonal (`seasonal`, 4 functions)
 
 | Function | Description |
 |----------|-------------|
-| `water_balance.plot_budget_sankey` | Sankey diagram of water flows |
-| `water_balance.plot_budget_butterfly` | Butterfly (mirror bar) chart: inflows vs outflows |
-| `water_balance.plot_cumulative_departure` | Cumulative departure from mean |
-| `water_balance.plot_mass_balance_error` | Mass balance closure error over time |
-| `water_balance.plot_storage_change` | Storage change time series |
+| `seasonal.plot_ridgeline` | Overlapping monthly hydrographs for successive years |
+| `seasonal.plot_calendar_heatmap` | Year × month heatmap of monthly values |
+| `seasonal.plot_polar_seasonal` | 12-month values on a polar axis |
+| `seasonal.plot_budget_polar_seasonal` | Polar seasonal plot from budget monthly averages |
 
-## Animations (3 functions)
-
-| Function | Description |
-|----------|-------------|
-| `animations.animate_head_contour` | Animated GW head contour (saves GIF) |
-| `animations.animate_stream_flow` | Animated stream flow (saves GIF) |
-| `animations.animate_depth_to_water` | Animated depth-to-water (saves GIF) |
-
-## Subsidence (2 functions)
+## Spatial Patterns (`spatial_patterns`, 3 functions)
 
 | Function | Description |
 |----------|-------------|
-| `subsidence.plot_subsidence_bowl` | Subsidence contour map |
-| `subsidence.plot_subsidence_correlation` | Subsidence vs head/pumping scatter |
+| `spatial_patterns.plot_sparkline_grid` | Plot tiny hydrographs at sampled node locations on the map |
+| `spatial_patterns.plot_small_multiples` | Tile the same head contour map for each year |
+| `spatial_patterns.plot_head_vs_gse_scatter` | Scatter plot of initial head vs ground surface elevation |
 
-## Supply & Demand (4 functions)
-
-| Function | Description |
-|----------|-------------|
-| `supply_demand.plot_supply_demand_gap` | Supply vs demand with gap shading |
-| `supply_demand.plot_shortage_duration` | Shortage frequency/duration analysis |
-| `supply_demand.plot_supply_reliability` | Supply reliability curve |
-| `supply_demand.plot_subregion_depth_to_gw` | Subregion-average depth to GW |
-
-## Cross Sections (2 functions)
+## Summary (`summary`, 7 functions)
 
 | Function | Description |
 |----------|-------------|
-| `cross_sections.plot_multi_layer_section` | Multi-layer cross-section panel |
-| `cross_sections.animate_cross_section` | Animated cross-section (saves GIF) |
+| `summary.plot_budget_pie` | Pie chart of average absolute flow by budget component |
+| `summary.plot_budget_monthly_average` | Grouped bar chart of monthly-average budget flows |
+| `summary.plot_budget_annual_bars` | Grouped or stacked bar chart of annual budget totals |
+| `summary.plot_rating_curve` | Stage-discharge rating curves for one or more stream nodes |
+| `summary.plot_aquifer_parameter_histograms` | Histogram grid of aquifer parameters for a single layer |
+| `summary.plot_water_balance_summary` | Horizontal bar chart of mean inflows (positive) and outflows (negative) |
+| `summary.plot_supply_vs_demand` | Grouped bar chart of supply requirements vs shortages |
 
-## Connectivity (2 functions)
-
-| Function | Description |
-|----------|-------------|
-| `connectivity.plot_diversion_network` | Diversion connectivity diagram |
-| `connectivity.plot_bypass_diagram` | Bypass routing diagram |
-
----
-
-## Calibration (8 functions)
-
-PEST(++) calibration figures built on the `iwfm_io.pest` data structures
-(these take `IesResults`/stats frames rather than a model instance).
+## Water Balance (`water_balance`, 5 functions)
 
 | Function | Description |
 |----------|-------------|
-| `calibration.plot_phi_convergence` | Ensemble phi boxplots per IES iteration + mean line |
-| `calibration.plot_phi_by_group` | Top phi-contributing observation groups, first vs last iteration |
-| `calibration.plot_residual_butterfly` | Diverging mean-residual bars by observation group |
-| `calibration.plot_obs_vs_sim` | Observed vs simulated 1:1 (auto-hexbin for large N) with RMSE/R²/NSE |
-| `calibration.plot_parameter_histograms` | Prior vs posterior parameter distributions with bounds |
-| `calibration.plot_parameter_railing` | % of ensemble values at parameter bounds, per group |
-| `calibration.plot_ensemble_hydrograph` | Ensemble envelope + base realization + observed + original model |
-| `calibration.plot_residual_map` | Residual metric at observation x/y over the model mesh |
+| `water_balance.plot_water_balance_sankey` | Sankey diagram of water balance components |
+| `water_balance.plot_budget_sankey` | Sankey of the average water-year budget |
+| `water_balance.plot_butterfly_chart` | Mirrored horizontal bar chart: inflows left, outflows right |
+| `water_balance.plot_budget_butterfly` | Butterfly chart from model budget time-series averages |
+| `water_balance.plot_cumulative_departure` | Running sum of (total inflow − total outflow) over time |
+
+## Stream Analysis (`stream_analysis`, 2 functions)
+
+| Function | Description |
+|----------|-------------|
+| `stream_analysis.plot_stream_gain_loss_profile` | Longitudinal plot coloring each segment by GW gain/loss |
+| `stream_analysis.plot_stream_aquifer_exchange_map` | Spatial map of GW gain/loss magnitude at each stream node |
+
+## Supply / Demand (`supply_demand`, 4 functions)
+
+| Function | Description |
+|----------|-------------|
+| `supply_demand.plot_supply_gap_timeline` | Stacked area: requirement on top, actual delivery below, gap in red |
+| `supply_demand.plot_budget_supply_gap` | Supply gap timeline from budget time-series columns |
+| `supply_demand.plot_pumping_depth_vs_shortage` | Scatter plot correlating depth-to-GW with supply shortfall |
+| `supply_demand.plot_subregion_depth_vs_shortage` | Depth vs shortage for all subregions using model API |
+
+## Subsidence (`subsidence`, 2 functions)
+
+| Function | Description |
+|----------|-------------|
+| `subsidence.plot_subsidence_bowl` | Contour map of cumulative subsidence |
+| `subsidence.plot_subsidence_vs_head` | Cross-plot of subsidence vs head at a single node over time |
+
+## Animations (`animations`, 3 functions)
+
+| Function | Description |
+|----------|-------------|
+| `animations.animate_gw_heads` | Create an animation of groundwater head contours over time |
+| `animations.animate_stream_flows` | Animate stream flow by varying line width and color over time |
+| `animations.animate_depth_to_water` | Animate depth-to-water (GSE minus head) over time |
+
+## Connectivity (`connectivity`, 2 functions)
+
+| Function | Description |
+|----------|-------------|
+| `connectivity.plot_diversion_network` | Graph visualization showing diversion flow paths |
+| `connectivity.plot_bypass_flow_diagram` | Bypass routing diagram with loss fractions |
+
+## Calibration (PEST / PESTPP-IES) (`calibration`, 8 functions)
+
+| Function | Description |
+|----------|-------------|
+| `calibration.plot_phi_convergence` | Box-plot the ensemble phi distribution per IES iteration |
+| `calibration.plot_phi_by_group` | Horizontal bars of mean per-group phi, first vs last iteration |
+| `calibration.plot_residual_butterfly` | Diverging horizontal bars of a residual metric by group |
+| `calibration.plot_obs_vs_sim` | Observed vs simulated 1:1 plot with fit statistics |
+| `calibration.plot_parameter_histograms` | Prior-vs-posterior histograms, one panel per parameter |
+| `calibration.plot_parameter_railing` | Stacked horizontal bars: % of ensemble values at bounds, per group |
+| `calibration.plot_ensemble_hydrograph` | Ensemble time-series band with base realization and observations |
+| `calibration.plot_residual_map` | Map a residual metric at observation locations |
 
 ## Running the Test Suite
 

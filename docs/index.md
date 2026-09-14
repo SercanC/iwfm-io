@@ -56,8 +56,11 @@ Runnable scripts in the `examples/` directory:
 | `02_read_outputs.py` | .assets/sample_model/Results | HDF5 and text output readers |
 | `03_roundtrip.py` | .assets/sample_model | Read → modify → write round-trips |
 | `04_dll_wrapper.py` | Windows + DLL | `IWFMModel`, `IWFMBudget`, `IWFMZBudget` |
-| `05_plotting.py` | .assets/sample_model | Plotting gallery — all 13 modules |
+| `05_plotting.py` | .assets/sample_model | Plotting gallery — all 15 modules |
 | `06_multi_run_budgets.py` | multiple runs | Multi-run unified budget DataFrames |
 | `07_compare_models.py` | .assets/sample_model | `compare_models()` baseline vs scenario diffs |
 | `08_run_scenario.py` | Windows + sample_model/Bin | `create_scenario()` + `run_model()` loop |
 | `09_full_input_datasets.py` | .assets/sample_model | Every input dataset as a DataFrame; edit + write back |
+| `10_pest_calibration.py` | .assets/sample_model/Results | One-call PEST++ setup (`pest_setup_from_model`) + extract-step demo |
+| `11_relationships.py` | .assets/sample_model | Cross-file relationships: `series()`, `column_usage()`, `validate_references()`, convenience accessors |
+| `test_plots_dllfree.py` | .assets/sample_model (any OS) | The formerly DLL-only plots through `IOModelAdapter` |

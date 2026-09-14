@@ -89,6 +89,7 @@ scen = create_scenario(r"<base_root>", r"<new_root>", changes=[
 ])
 import iwfm_io
 try:
+    # output is streamed; a step silent for hang_warning_seconds logs a warning
     iwfm_io.run_model(scen, timeout=3600)   # Windows; exes from <model>/Bin or IWFM_BIN_DIR
 except iwfm_io.RunError as e:               # e.results = steps that ran; .errors = FATAL lines
     print(e)

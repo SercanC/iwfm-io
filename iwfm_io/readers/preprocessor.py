@@ -11,13 +11,19 @@ from pathlib import Path
 
 import pandas as pd
 
-try:
-    import geopandas as gpd
-    from shapely.geometry import Point, Polygon
 
-    HAS_GEO = True
-except ImportError:
-    HAS_GEO = False
+
+def _geo():
+    """``(geopandas, Point, Polygon)`` when the ``[geo]`` extra is
+    installed, else ``None``.  Imported at call time so ``import iwfm_io``
+    never pays the geopandas/shapely import cost."""
+    try:
+        import geopandas as gpd
+        from shapely.geometry import Point, Polygon
+    except ImportError:
+        return None
+    return gpd, Point, Polygon
+
 
 from iwfm_io._parser import IWFMFileReader, IWFMParseError
 from iwfm_io._strict import strict_mode
@@ -76,7 +82,9 @@ def read_nodes(path: str | Path) -> NodeFile:
 
     df = pd.DataFrame({"node_id": node_ids, "x": xs, "y": ys})
 
-    if HAS_GEO:
+    geo = _geo()
+    if geo is not None:
+        gpd, Point, _ = geo
         geometry = [Point(x, y) for x, y in zip(xs, ys)]
         df = gpd.GeoDataFrame(df, geometry=geometry)
 
@@ -149,7 +157,9 @@ def read_elements(path: str | Path, node_file: NodeFile | None = None) -> Elemen
     })
 
     # Build polygon geometry if node coordinates available
-    if HAS_GEO and node_file is not None and node_file.data is not None:
+    geo = _geo() if node_file is not None and node_file.data is not None         else None
+    if geo is not None:
+        gpd, _, Polygon = geo
         node_df = node_file.data
         coord_lookup = {}
         for _, row in node_df.iterrows():
@@ -259,6 +269,15 @@ def read_strata(path: str | Path,
 # Stream Geometry
 # ------------------------------------------------------------------
 
+# Stream component versions IWFM dispatches on (Package_AppStream.f90)
+# and the ones whose preprocessor stream-geometry layout this reader
+# models (reach table, stream-node rows, rating tables; 4.2 adds the
+# partial-interaction table).  4.21 and 5.0 (cross-section geometry
+# instead of rating tables) are recognised by name but not modeled.
+IWFM_STREAM_VERSIONS = ("4.0", "4.1", "4.2", "4.21", "5.0")
+SUPPORTED_STREAM_GEOM_VERSIONS = ("4.0", "4.1", "4.2")
+
+
 def read_stream_geom(path: str | Path, node_file: NodeFile | None = None) -> StreamGeomFile:
     """Read an IWFM stream geometry file (e.g. ``Stream.dat``).
 
@@ -274,6 +293,9 @@ def read_stream_geom(path: str | Path, node_file: NodeFile | None = None) -> Str
     """
     reader = IWFMFileReader(path)
     header = reader.read_header()
+    reader.check_version(
+        header, SUPPORTED_STREAM_GEOM_VERSIONS, known=IWFM_STREAM_VERSIONS,
+        what="stream geometry")
 
     n_reaches, _ = reader.read_keyed_int()
     n_rating_points, _ = reader.read_keyed_int()
@@ -321,7 +343,9 @@ def read_stream_geom(path: str | Path, node_file: NodeFile | None = None) -> Str
     nodes_df = pd.DataFrame(stream_nodes)
 
     # Add geometry from GW node coordinates if available
-    if HAS_GEO and node_file is not None and node_file.data is not None:
+    geo = _geo() if node_file is not None and node_file.data is not None         else None
+    if geo is not None:
+        gpd, Point, _ = geo
         ndf = node_file.data
         coord_lookup = {}
         for _, row in ndf.iterrows():

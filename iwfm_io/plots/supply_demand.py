@@ -5,8 +5,7 @@
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from . import excel_date_to_datetime, savefig
+from . import (excel_date_to_datetime, _prepare_axes, _finish)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -16,7 +15,7 @@ from . import excel_date_to_datetime, savefig
 def plot_supply_gap_timeline(dates, requirement, actual,
                               label="Water Supply",
                               ax=None, figsize=(12, 5),
-                              save_path=None):
+                              save_path=None, close=False):
     """Stacked area: requirement on top, actual delivery below, gap in red.
 
     Parameters
@@ -27,10 +26,7 @@ def plot_supply_gap_timeline(dates, requirement, actual,
     actual : array-like
         Actual delivery at each time step.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     requirement = np.asarray(requirement, dtype=float)
     actual = np.asarray(actual, dtype=float)
@@ -50,8 +46,7 @@ def plot_supply_gap_timeline(dates, requirement, actual,
     ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -88,7 +83,7 @@ def plot_budget_supply_gap(model, budget_type, location,
 def plot_pumping_depth_vs_shortage(depth_to_gw, shortage,
                                     location_labels=None,
                                     ax=None, figsize=(8, 6),
-                                    save_path=None):
+                                    save_path=None, close=False):
     """Scatter plot correlating depth-to-GW with supply shortfall.
 
     Reveals when pumping becomes uneconomic or insufficient.
@@ -101,10 +96,7 @@ def plot_pumping_depth_vs_shortage(depth_to_gw, shortage,
         Supply shortage for each location.
     location_labels : list of str, optional
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     depth_to_gw = np.asarray(depth_to_gw, dtype=float)
     shortage = np.asarray(shortage, dtype=float)
@@ -136,8 +128,7 @@ def plot_pumping_depth_vs_shortage(depth_to_gw, shortage,
     ax.set_title("Pumping Depth vs Supply Shortage")
     ax.grid(True, alpha=0.3)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 

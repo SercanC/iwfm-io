@@ -15,7 +15,7 @@
 
 | Function | Description |
 |----------|-------------|
-| `run_model(model_dir, steps=(...), timeout=None)` | Run the IWFM toolchain (default: preprocessor + simulation; add `"budget"`, `"zbudget"`). Executables resolved from `<model_dir>/Bin` or `IWFM_BIN_DIR`. Raises `RunError` on failure, carrying the `results` of the steps that ran (`check=False` to inspect instead). A `timeout` (seconds per step) kills the executable and reports a failed `RunResult` — IWFM's ZBudget can busy-loop when its print interval exceeds the data span, so set one for unattended runs. |
+| `run_model(model_dir, steps=(...), timeout=None, hang_warning_seconds=600)` | Run the IWFM toolchain (default: preprocessor + simulation; add `"budget"`, `"zbudget"`). Executables resolved from `<model_dir>/Bin` or `IWFM_BIN_DIR`. Raises `RunError` on failure, carrying the `results` of the steps that ran (`check=False` to inspect instead). Output is streamed as it arrives (logged live unless `quiet=True`); after `hang_warning_seconds` of silence a warning says the step may be stuck. A `timeout` (seconds per step) kills the executable and reports a failed `RunResult` — IWFM's ZBudget can busy-loop when its print interval exceeds the data span, so set one for unattended runs. |
 | `run_preprocessor / run_simulation / run_budget / run_zbudget(model_dir)` | Run one tool. Returns a `RunResult` (`success`, `elapsed`, `errors`, `returncode`, `timed_out`, `stdout_tail`). Failure = nonzero exit, a timeout, **or** a `* FATAL` banner (with its detail lines) in console output or the tool's Messages file. |
 
 ### Module-Level Functions
@@ -24,7 +24,7 @@
 |----------|-------------|
 | `load_dll(dll_path=None, version=None, download=True)` | Load the IWFM DLL. Returns a `ctypes.WinDLL` handle. When `version` names a published build that is not installed, it is downloaded automatically (`download=False` disables the fetch for offline machines). A library without the IWFM exports (`IW_GetVersion`, `IW_GetLastMessage`, `IW_Model_New`) is refused with `OSError`. |
 | `list_dll_versions()` | Scan `dlls/` and `~/.iwfm/dlls/` for installed DLL versions. |
-| `download_dll(version="2025.0.1747")` | Download an official DLL build (sha256-verified, PE-header-checked, written atomically) from the project's GitHub releases into `~/.iwfm/dlls/<version>/`. |
+| `download_dll(version="2025.0.1747")` | Download an official DLL build (sha256-verified, PE-header-checked, written atomically) from the project's GitHub releases into `~/.iwfm/dlls/<version>/`. An interrupted download leaves `<name>.zip.part` in the destination and the next call resumes it with a `Range` request; a complete archive that fails its checksum is always discarded. |
 | `get_version(dll)` | Return the IWFM version string. |
 | `get_kernel_version(dll)` | Return the IWFM kernel version string. |
 | `set_log_file(dll, path)` | Redirect DLL log output to a file. |

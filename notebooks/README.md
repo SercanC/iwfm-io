@@ -14,7 +14,7 @@ read on GitHub without running anything.
 | 04 | [Writing & round-trips](04_writing_and_roundtrips.ipynb) | `write_*` mirrors, read → edit DataFrame → write, `base_dir`, the IWFM writer quirks, exe round-trip proof | sample model |
 | 05 | [DLL wrapper](05_dll_wrapper.ipynb) | DLL version management + `download_dll`, `IWFMModel`, `IWFMBudget`, `IWFMZBudget`, type IDs, inquiry-mode limits | **Windows x64** + sample model |
 | 06 | [Scenarios & running models](06_scenarios_and_running_models.ipynb) | `create_scenario` + change factories, `link_unchanged` hardlinks, `run_model`, `compare_models`, head/budget differences | **Windows** + sample model Bin |
-| 07 | [Plotting gallery](07_plotting_gallery.ipynb) | curated tour of the 58-function plot library + the reusable map primitives | sample model + Results |
+| 07 | [Plotting gallery](07_plotting_gallery.ipynb) | curated tour of the 66-function plot library + the reusable map primitives | sample model + Results |
 | 08 | [Wells, gauges & metadata](08_wells_gauges_metadata.ipynb) | `gwl_metadata`/`gauge_metadata` schemas, hydrograph linking, compositing, `build_well_mapping`, flow/stage extraction | sample model + Results |
 | 09 | [PEST part 1 — building](09_pest_iwfm_setup.ipynb) | `pest_setup_from_model` one-call quickstart (+ `iwfm-io pest` CLI), then the pieces: obs names, SMP, `match_sim_to_obs`, budget obs, `ParamSpec` zones, `apply_parameters`, pilot points, `RatioChain`, `ObsFileSpec`, `balance_weights`, `PestSetup`, `setup_agents` | sample model + Results |
 | 10 | [PEST part 2 — results](10_pest_results_analysis.ipynb) | `load_ies_ensembles`, phi/ensemble access, `ies_stats`/`rei_stats`, `diagnose_ies`, calibration figures, derived observations, finals reruns | none (self-generating) |

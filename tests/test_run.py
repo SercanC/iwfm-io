@@ -43,7 +43,7 @@ def test_run_preprocessor_on_scenario(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# failure detection and timeouts (no executables needed)
+# failure detection (no executables needed)
 # ---------------------------------------------------------------------------
 
 def test_scan_for_errors_keeps_detail_lines():
@@ -66,49 +66,177 @@ def test_scan_for_errors_ignores_benign_words():
     assert _scan_for_errors("nonfatal warning\nERROR: none\n") == []
 
 
-@pytest.mark.skipif(os.name != "nt", reason="runner is Windows-only")
-def test_timeout_is_a_failed_result(tmp_path, monkeypatch):
-    import subprocess
+# ---------------------------------------------------------------------------
+# streaming / hang warning / timeout, driven by a fake executable: the
+# Python interpreter stands in for the IWFM tool (``_find_exe`` is pointed
+# at it; ``IWFM_BIN_DIR`` still has to resolve) and the step's "main input
+# file" is a tiny Python script that prints slowly, hangs, or never ends.
+# ---------------------------------------------------------------------------
+
+windows_only = pytest.mark.skipif(os.name != "nt",
+                                  reason="runner is Windows-only")
+
+
+@pytest.fixture
+def fake_exe(tmp_path, monkeypatch):
+    """Return ``make(step, script) -> model_dir`` wiring a fake tool."""
+    import sys
+
+    bin_dir = tmp_path / "fake_bin"
+    bin_dir.mkdir()
+    for name in ("PreProcessor_x64.exe", "Simulation_x64.exe",
+                 "Budget_x64.exe", "ZBudget_x64.exe"):
+        (bin_dir / name).write_bytes(b"")          # discovered by name ...
+    monkeypatch.setenv("IWFM_BIN_DIR", str(bin_dir))
+    # ... but the interpreter is what actually runs the "input file"
+    monkeypatch.setattr("iwfm_io.run._find_exe",
+                        lambda bin_dir, key: Path(sys.executable))
+    subdir = {"preprocessor": ("Preprocessor", "PreProcessor_MAIN.IN"),
+              "simulation": ("Simulation", "Simulation_MAIN.IN"),
+              "zbudget": ("ZBudget", "ZBudget_MAIN.IN")}
+
+    def make(step, script):
+        model = tmp_path / "model"
+        folder, name = subdir[step]
+        (model / folder).mkdir(parents=True, exist_ok=True)
+        (model / folder / name).write_text(script)
+        return model
+    return make
+
+
+@windows_only
+def test_streams_lines_to_logger_and_keeps_tail(fake_exe, caplog):
+    import logging
     from iwfm_io.run import run_step
-    binp = tmp_path / "Bin"; binp.mkdir()
-    (binp / "Simulation_x64.exe").write_bytes(b"")
-    sim = tmp_path / "Simulation"; sim.mkdir()
-    (sim / "Simulation_MAIN.IN").write_text("C\n")
+    model = fake_exe("simulation", (
+        "import time\n"
+        "for i in range(3):\n"
+        "    print('step', i, flush=True); time.sleep(0.2)\n"
+        "print('done', flush=True)\n"))
+    with caplog.at_level(logging.INFO, logger="iwfm_io.run"):
+        r = run_step("simulation", model, quiet=False, timeout=60)
+    assert r.success and r.returncode == 0 and not r.timed_out
+    assert r.stdout_tail.splitlines() == ["step 0", "step 1", "step 2", "done"]
+    streamed = [rec.getMessage() for rec in caplog.records
+                if rec.levelno == logging.INFO]
+    assert streamed == ["simulation | step 0", "simulation | step 1",
+                        "simulation | step 2", "simulation | done"]
 
-    def fake_run(cmd, **kw):
-        raise subprocess.TimeoutExpired(cmd, kw.get("timeout"), output=b"tick\n")
-    monkeypatch.setattr("iwfm_io.run.subprocess.run", fake_run)
-    r = run_step("simulation", tmp_path, timeout=1, quiet=True)
-    assert r.success is False and r.timed_out is True
-    assert any("timed out" in e for e in r.errors)
 
-
-@pytest.mark.skipif(os.name != "nt", reason="runner is Windows-only")
-def test_relative_input_file_is_relative_to_model_dir(tmp_path, monkeypatch):
+@windows_only
+def test_quiet_run_does_not_stream(fake_exe, caplog):
+    import logging
     from iwfm_io.run import run_step
-    binp = tmp_path / "Bin"; binp.mkdir()
-    (binp / "PreProcessor_x64.exe").write_bytes(b"")
-    pp = tmp_path / "Preprocessor"; pp.mkdir()
-    (pp / "PreProcessor_MAIN.IN").write_text("C\n")
-    seen = {}
+    model = fake_exe("simulation", "print('hello')\n")
+    with caplog.at_level(logging.INFO, logger="iwfm_io.run"):
+        r = run_step("simulation", model, quiet=True, timeout=60)
+    assert r.success and r.stdout_tail == "hello"
+    assert not [rec for rec in caplog.records if rec.levelno == logging.INFO]
 
-    class P:
-        returncode = 0
-        stdout = ""
-        stderr = ""
 
-    def fake_run(cmd, **kw):
-        seen["cwd"] = kw["cwd"]
-        return P()
-    monkeypatch.setattr("iwfm_io.run.subprocess.run", fake_run)
-    monkeypatch.chdir(tmp_path.parent)
-    r = run_step("preprocessor", tmp_path,
-                 input_file="Preprocessor/PreProcessor_MAIN.IN", quiet=True)
+@windows_only
+def test_hang_warning_after_silence(fake_exe, caplog):
+    """No output for ``hang_warning_seconds`` -> one warning naming the
+    step, the ZBudget busy-loop and ``timeout=``; output resuming
+    re-arms it; the run itself still completes normally."""
+    import logging
+    from iwfm_io.run import run_step
+    model = fake_exe("zbudget", (
+        "import time\n"
+        "print('start', flush=True)\n"
+        "time.sleep(1.6)\n"
+        "print('resumed', flush=True)\n"
+        "time.sleep(1.6)\n"
+        "print('finished', flush=True)\n"))
+    with caplog.at_level(logging.WARNING, logger="iwfm_io.run"):
+        r = run_step("zbudget", model, quiet=True, hang_warning_seconds=0.5)
+    assert r.success and not r.timed_out
+    assert r.stdout_tail.splitlines() == ["start", "resumed", "finished"]
+    warnings = [rec.getMessage() for rec in caplog.records
+                if rec.levelno == logging.WARNING]
+    assert len(warnings) == 2                    # once per silent stretch
+    for msg in warnings:
+        assert msg.startswith("zbudget: no console output for")
+        assert "may be hung" in msg and "ZBudget" in msg
+        assert "timeout=" in msg and "no timeout is set" in msg
+
+
+@windows_only
+def test_hang_warning_disabled(fake_exe, caplog):
+    import logging
+    from iwfm_io.run import run_step
+    model = fake_exe("simulation", "import time; time.sleep(1.2)\n")
+    with caplog.at_level(logging.WARNING, logger="iwfm_io.run"):
+        r = run_step("simulation", model, quiet=True, hang_warning_seconds=0.3,
+                     timeout=30)
+        assert any("may be hung" in rec.getMessage() for rec in caplog.records)
+        caplog.clear()
+        r = run_step("simulation", model, quiet=True, hang_warning_seconds=None)
     assert r.success
-    assert Path(seen["cwd"]) == pp
+    assert not [rec for rec in caplog.records if rec.levelno == logging.WARNING]
 
 
-@pytest.mark.skipif(os.name != "nt", reason="runner is Windows-only")
+@windows_only
+def test_timeout_is_a_failed_result(fake_exe, caplog):
+    """A run that exceeds ``timeout`` is killed and reported, never
+    raised; what it printed before is kept."""
+    import logging
+    import time as _time
+    from iwfm_io.run import run_step
+    model = fake_exe("simulation", (
+        "import time\n"
+        "print('tick', flush=True)\n"
+        "time.sleep(120)\n"
+        "print('never', flush=True)\n"))
+    t0 = _time.perf_counter()
+    with caplog.at_level(logging.WARNING, logger="iwfm_io.run"):
+        r = run_step("simulation", model, timeout=1.5, quiet=True,
+                     hang_warning_seconds=0.5)
+    assert _time.perf_counter() - t0 < 30       # the child was killed
+    assert r.success is False and r.timed_out is True and r.returncode == -1
+    assert any("timed out after 1.5 s" in e for e in r.errors)
+    assert r.stdout_tail == "tick"
+    msgs = [rec.getMessage() for rec in caplog.records]
+    assert any("killed after timeout=1.5 s" in m for m in msgs)
+
+
+@windows_only
+def test_fatal_banner_in_streamed_output_fails_the_step(fake_exe):
+    from iwfm_io.run import run_step
+    model = fake_exe("simulation", (
+        "print('*   Reading data')\n"
+        "print('* FATAL:')\n"
+        "print('*   Error in opening file PreProcessor.bin!')\n"))
+    r = run_step("simulation", model, quiet=True, timeout=60)
+    assert r.success is False and r.returncode == 0 and not r.timed_out
+    assert len(r.errors) == 1 and "PreProcessor.bin" in r.errors[0]
+
+
+@windows_only
+def test_nonzero_exit_fails_the_step(fake_exe):
+    from iwfm_io.run import run_step
+    model = fake_exe("simulation", "import sys; print('bye'); sys.exit(3)\n")
+    r = run_step("simulation", model, quiet=True, timeout=60)
+    assert r.success is False and r.returncode == 3
+    assert r.stdout_tail == "bye"
+
+
+@windows_only
+def test_relative_input_file_is_relative_to_model_dir(fake_exe, monkeypatch):
+    """The tool runs in its input file's folder (like the DWR batch
+    files) even when the input path is given relative to the model."""
+    from iwfm_io.run import run_step
+    model = fake_exe("preprocessor", "import os; print(os.getcwd())\n")
+    monkeypatch.chdir(model.parent)
+    r = run_step("preprocessor", model,
+                 input_file="Preprocessor/PreProcessor_MAIN.IN", quiet=True,
+                 timeout=60)
+    assert r.success
+    assert Path(r.stdout_tail.strip()).resolve() == (
+        model / "Preprocessor").resolve()
+
+
+@windows_only
 def test_run_model_error_carries_partial_results(tmp_path, monkeypatch):
     from iwfm_io.run import RunError, RunResult, run_model
     calls = []

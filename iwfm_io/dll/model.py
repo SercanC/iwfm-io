@@ -12,6 +12,7 @@ try:
 except ImportError:
     _HAS_GEO = False
 
+from ._base import _DllCallMixin, call_dll, fortran_view
 from ._dll import load_dll
 from ._errors import IWFMError, _check_status
 from ._proxy import GuardedDLL
@@ -21,7 +22,26 @@ from ._validate import (check_date, check_ids, check_int,
 from ._marshal import str_to_c, c_to_str, c_to_str_list, alloc_int, alloc_double, alloc_char
 
 
-class IWFMModel:
+def _c_dates(begin_date, end_date):
+    """Marshal a begin/end date pair that shares one length argument."""
+    d_len, c_begin = str_to_c(begin_date)
+    e_len, c_end = str_to_c(end_date)
+    if e_len.value != d_len.value:
+        raise ValueError("begin_date and end_date must have the same "
+                         "length (MM/DD/YYYY_HH:MM)")
+    return d_len, c_begin, c_end
+
+
+#: the five aquifer-parameter arrays, in the DLL's argument order
+_AQUIFER_PARAM_NAMES = ("Kh", "AquiferKv", "AquitardKv", "Sy", "Ss")
+
+
+def _aquifer_params(bufs, shape):
+    return {name: fortran_view(buf, shape).copy()
+            for name, buf in zip(_AQUIFER_PARAM_NAMES, bufs)}
+
+
+class IWFMModel(_DllCallMixin):
     """Python wrapper around the IWFM simulation model DLL.
 
     Parameters
@@ -54,7 +74,7 @@ class IWFMModel:
         simulation main's folder (or the preprocessor main's when no
         simulation file is given) by default, restoring the previous
         CWD afterwards.  Pass *run_dir* to override for exotic layouts.
-    
+
     Concurrency: the IWFM DLL keeps one active model and is not
     reentrant. Every call is serialised by a process-wide lock and
     re-activates this model first, so several instances can coexist
@@ -219,6 +239,18 @@ class IWFMModel:
             pass
 
     # ==================================================================
+    # Call helpers (see ``_base._DllCallMixin`` for the shared ones)
+    # ==================================================================
+
+    def _node_layer(self, name, *mid):
+        """``name(n_nodes, n_layers, *mid, buf)`` -> (n_nodes, n_layers)
+        float64 array (Fortran column-major buffer)."""
+        nn, nl = self.n_nodes, self.n_layers
+        buf = alloc_double(nn * nl)
+        self._call(name, c_int(nn), c_int(nl), *mid, buf)
+        return fortran_view(buf, (nn, nl)).copy()
+
+    # ==================================================================
     # Simulation control
     # ==================================================================
 
@@ -226,17 +258,13 @@ class IWFMModel:
         """Run the entire simulation."""
         self._cache.pop("time_specs", None)
         self._require_full_instantiation("simulate")
-        iStat = c_int(0)
-        self._dll.IW_Model_SimulateAll(byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_SimulateAll")
 
     def simulate_timestep(self):
         """Advance one time step."""
         self._cache.pop("time_specs", None)
         self._require_full_instantiation("simulate_timestep")
-        iStat = c_int(0)
-        self._dll.IW_Model_SimulateForOneTimeStep(byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_SimulateForOneTimeStep")
 
     def simulate_interval(self, interval):
         """Simulate for a specified interval (e.g. '1MON')."""
@@ -244,24 +272,18 @@ class IWFMModel:
         self._require_full_instantiation("simulate_interval")
         interval = check_interval(interval)
         iv_len, c_iv = str_to_c(interval)
-        iStat = c_int(0)
-        self._dll.IW_Model_SimulateForAnInterval(iv_len, c_iv, byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_SimulateForAnInterval", iv_len, c_iv)
 
     def advance_time(self):
         """Advance the simulation clock by one time step."""
         self._cache.pop("time_specs", None)
         self._require_full_instantiation("advance_time")
-        iStat = c_int(0)
-        self._dll.IW_Model_AdvanceTime(byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_AdvanceTime")
 
     def read_timeseries_data(self):
         """Read time-series input data for the current time step."""
         self._require_full_instantiation("read_timeseries_data")
-        iStat = c_int(0)
-        self._dll.IW_Model_ReadTSData(byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_ReadTSData")
 
     def read_timeseries_data_overwrite(self, region_lu_areas, diversions_idx,
                                        diversions_val, inflows_idx, inflows_val,
@@ -281,67 +303,46 @@ class IWFMModel:
         c_inf_val = (c_double * n_inf)(*inflows_val)
         c_byp_idx = (c_int * n_byp)(*bypasses_idx)
         c_byp_val = (c_double * n_byp)(*bypasses_val)
-        iStat = c_int(0)
 
-        self._dll.IW_Model_ReadTSData_Overwrite(
-            c_int(n_lu), c_int(n_sub), c_rlu,
-            c_int(n_div), c_div_idx, c_div_val,
-            c_int(n_inf), c_inf_idx, c_inf_val,
-            c_int(n_byp), c_byp_idx, c_byp_val,
-            byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_ReadTSData_Overwrite",
+                   c_int(n_lu), c_int(n_sub), c_rlu,
+                   c_int(n_div), c_div_idx, c_div_val,
+                   c_int(n_inf), c_inf_idx, c_inf_val,
+                   c_int(n_byp), c_byp_idx, c_byp_val)
 
     def print_results(self):
         """Write simulation results for the current time step."""
         self._require_full_instantiation("print_results")
-        iStat = c_int(0)
-        self._dll.IW_Model_PrintResults(byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_PrintResults")
 
     def advance_state(self):
         """Advance the model state in time."""
         self._require_full_instantiation("advance_state")
-        iStat = c_int(0)
-        self._dll.IW_Model_AdvanceState(byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_AdvanceState")
 
     def turn_supply_adjustment(self, diversion=True, pumping=True):
         """Turn supply adjustment on/off."""
-        iStat = c_int(0)
-        self._dll.IW_Model_TurnSupplyAdjustOnOff(
-            c_int(1 if diversion else 0),
-            c_int(1 if pumping else 0),
-            byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_TurnSupplyAdjustOnOff",
+                   c_int(1 if diversion else 0), c_int(1 if pumping else 0))
 
     def restore_pumping_to_read_values(self):
         """Restore pumping to file-specified values."""
-        iStat = c_int(0)
-        self._dll.IW_Model_RestorePumpingToReadValues(byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_RestorePumpingToReadValues")
 
     def set_supply_adjustment_max_iters(self, n):
         """Set maximum iterations for supply adjustment."""
-        iStat = c_int(0)
-        self._dll.IW_Model_SetSupplyAdjustmentMaxIters(c_int(n), byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_SetSupplyAdjustmentMaxIters", c_int(n))
 
     def set_supply_adjustment_tolerance(self, tol):
         """Set convergence tolerance for supply adjustment."""
-        iStat = c_int(0)
-        self._dll.IW_Model_SetSupplyAdjustmentTolerance(c_double(tol), byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_SetSupplyAdjustmentTolerance", c_double(tol))
 
     def compute_future_water_demands(self, end_date):
         """Compute future water demands up to end_date."""
         self._require_full_instantiation("compute_future_water_demands")
         end_date = check_date("end_date", end_date)
         d_len, c_date = str_to_c(end_date)
-        iStat = c_int(0)
-        self._dll.IW_Model_ComputeFutureWaterDemands(d_len, c_date, byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_ComputeFutureWaterDemands", d_len, c_date)
 
     @staticmethod
     def delete_inquiry_data_file(dll, sim_filename):
@@ -365,9 +366,7 @@ class IWFMModel:
                 f"({active}), not of {sim_filename}; close that model first "
                 "or pass its simulation main")
         s_len, c_sim = str_to_c(sim_filename)
-        iStat = c_int(0)
-        dll.IW_Model_DeleteInquiryDataFile(s_len, c_sim, byref(iStat))
-        _check_status(iStat, dll)
+        call_dll(dll, "IW_Model_DeleteInquiryDataFile", s_len, c_sim)
 
     # ==================================================================
     # Time queries
@@ -377,30 +376,19 @@ class IWFMModel:
     def current_date_time(self):
         """Current simulation date-time string."""
         buf_len = 32
-        c_len = c_int(buf_len)
         buf = alloc_char(buf_len)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetCurrentDateAndTime(c_len, buf, byref(iStat))
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetCurrentDateAndTime", c_int(buf_len), buf)
         return c_to_str(buf, buf_len)
 
     @property
     def n_timesteps(self):
         """Total number of simulation time steps."""
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNTimeSteps(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNTimeSteps")
 
     @property
     def is_end_of_simulation(self):
         """True if simulation has reached its end."""
-        val = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_IsEndOfSimulation(byref(val), byref(iStat))
-        _check_status(iStat, self._dll)
-        return val.value != 0
+        return self._scalar_int("IW_Model_IsEndOfSimulation") != 0
 
     def get_time_specs(self):
         """Return dict with 'dates', 'interval' (cached; the clock does
@@ -415,12 +403,9 @@ class IWFMModel:
         date_buf = alloc_char(date_buf_len)
         intv_buf = alloc_char(intv_buf_len)
         loc_arr = alloc_int(n_data)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetTimeSpecs(
-            date_buf, c_int(date_buf_len), intv_buf, c_int(intv_buf_len),
-            c_int(n_data), loc_arr, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetTimeSpecs",
+                   date_buf, c_int(date_buf_len), intv_buf, c_int(intv_buf_len),
+                   c_int(n_data), loc_arr)
         dates = c_to_str_list(date_buf, loc_arr, n_data)
         interval = c_to_str(intv_buf, intv_buf_len)
         self._cache["time_specs"] = {"dates": dates, "interval": interval}
@@ -447,12 +432,9 @@ class IWFMModel:
         buf = alloc_char(buf_len)
         loc_arr = alloc_int(max_intervals)
         n_out = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetOutputIntervals(
-            buf, c_int(buf_len), loc_arr, c_int(max_intervals),
-            byref(n_out), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetOutputIntervals",
+                   buf, c_int(buf_len), loc_arr, c_int(max_intervals),
+                   byref(n_out))
         return c_to_str_list(buf, loc_arr, n_out.value)
 
     # ==================================================================
@@ -533,191 +515,84 @@ class IWFMModel:
 
     @property
     def n_nodes(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNNodes(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNNodes")
 
     @property
     def n_elements(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNElements(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNElements")
 
     @property
     def n_layers(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNLayers(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNLayers")
 
     @property
     def n_subregions(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNSubregions(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNSubregions")
 
     def get_node_ids(self):
-        n = self.n_nodes
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNodeIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetNodeIDs", self.n_nodes)
 
     def get_node_coordinates(self):
         """Return (x, y) arrays of node coordinates."""
-        n = self.n_nodes
-        x = alloc_double(n)
-        y = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNodeXY(c_int(n), x, y, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(x, dtype=np.float64), np.array(y, dtype=np.float64)
+        return self._double_arrays("IW_Model_GetNodeXY", self.n_nodes, 2)
 
     def get_element_ids(self):
-        n = self.n_elements
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetElementIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetElementIDs", self.n_elements)
 
     def get_element_config(self, element):
         """Return vertex node indices for an element (4 values; 0 = triangle)."""
         element = check_range("element", element, self.n_elements)
-        nodes = alloc_int(4)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetElementConfigData(
-            c_int(element), c_int(4), nodes, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetElementConfigData", 4, c_int(element))
 
     def get_subregion_ids(self):
-        n = self.n_subregions
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetSubregionIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetSubregionIDs", self.n_subregions)
 
     def get_subregion_name(self, subregion):
         subregion = check_range("subregion", subregion, self.n_subregions)
         buf_len = 100
         buf = alloc_char(buf_len)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetSubregionName(
-            c_int(subregion), c_int(buf_len), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetSubregionName",
+                   c_int(subregion), c_int(buf_len), buf)
         return c_to_str(buf, buf_len)
 
     def get_element_subregions(self):
-        n = self.n_elements
-        subs = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetElemSubregions(c_int(n), subs, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(subs, dtype=np.int32)
+        return self._int_array("IW_Model_GetElemSubregions", self.n_elements)
 
     # ==================================================================
     # Stratigraphy & aquifer parameters
     # ==================================================================
 
     def get_ground_surface_elevation(self):
-        n = self.n_nodes
-        elev = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGSElev(c_int(n), elev, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(elev, dtype=np.float64)
+        return self._double_array("IW_Model_GetGSElev", self.n_nodes)
 
     def get_aquifer_top_elevation(self):
         """Shape (n_nodes, n_layers)."""
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetAquiferTopElev(c_int(nn), c_int(nl), buf, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetAquiferTopElev")
 
     def get_aquifer_bottom_elevation(self):
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetAquiferBottomElev(c_int(nn), c_int(nl), buf, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetAquiferBottomElev")
 
     def get_aquifer_horizontal_k(self):
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetAquiferHorizontalK(c_int(nn), c_int(nl), buf, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetAquiferHorizontalK")
 
     def get_aquifer_vertical_k(self):
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetAquiferVerticalK(c_int(nn), c_int(nl), buf, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetAquiferVerticalK")
 
     def get_aquitard_vertical_k(self):
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetAquitardVerticalK(c_int(nn), c_int(nl), buf, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetAquitardVerticalK")
 
     def get_aquifer_specific_yield(self):
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetAquiferSy(c_int(nn), c_int(nl), buf, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetAquiferSy")
 
     def get_aquifer_specific_storage(self):
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetAquiferSs(c_int(nn), c_int(nl), buf, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetAquiferSs")
 
     def get_aquifer_parameters(self):
         """Return all aquifer parameters as a dict of arrays."""
         nn, nl = self.n_nodes, self.n_layers
-        sz = nn * nl
-        kh = alloc_double(sz)
-        akv = alloc_double(sz)
-        aqkv = alloc_double(sz)
-        sy = alloc_double(sz)
-        ss = alloc_double(sz)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetAquiferParameters(
-            c_int(nn), c_int(nl), kh, akv, aqkv, sy, ss, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        shape = (nn, nl)
-        return {
-            "Kh": np.frombuffer(kh, dtype=np.float64).reshape(shape, order="F").copy(),
-            "AquiferKv": np.frombuffer(akv, dtype=np.float64).reshape(shape, order="F").copy(),
-            "AquitardKv": np.frombuffer(aqkv, dtype=np.float64).reshape(shape, order="F").copy(),
-            "Sy": np.frombuffer(sy, dtype=np.float64).reshape(shape, order="F").copy(),
-            "Ss": np.frombuffer(ss, dtype=np.float64).reshape(shape, order="F").copy(),
-        }
+        bufs = [alloc_double(nn * nl) for _ in _AQUIFER_PARAM_NAMES]
+        self._call("IW_Model_GetAquiferParameters", c_int(nn), c_int(nl), *bufs)
+        return _aquifer_params(bufs, (nn, nl))
 
     def get_stratigraphy_at_xy(self, x, y):
         """Return stratigraphy at a coordinate."""
@@ -733,12 +608,9 @@ class IWFMModel:
         gs = c_double(0.0)
         tops = alloc_double(nl)
         bots = alloc_double(nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStratigraphy_AtXYCoordinate(
-            c_int(nl), c_double(x), c_double(y),
-            byref(gs), tops, bots, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetStratigraphy_AtXYCoordinate",
+                   c_int(nl), c_double(x), c_double(y),
+                   byref(gs), tops, bots)
         return {
             "GSElev": gs.value,
             "TopElevs": np.array(tops, dtype=np.float64),
@@ -750,69 +622,32 @@ class IWFMModel:
     # ==================================================================
 
     def get_n_parametric_grids(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWNParametricGrids(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetGWNParametricGrids")
 
     def get_n_parametric_nodes(self, grid_id):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWNParametricNodes(c_int(grid_id), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetGWNParametricNodes", c_int(grid_id))
 
     def get_n_parametric_elements(self, grid_id):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWNParametricElements(c_int(grid_id), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetGWNParametricElements", c_int(grid_id))
 
     def get_parametric_node_xy(self, grid_id):
         n = self.get_n_parametric_nodes(grid_id)
-        x = alloc_double(n)
-        y = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWParametricNodeXY(
-            c_int(grid_id), c_int(n), x, y, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(x, dtype=np.float64), np.array(y, dtype=np.float64)
+        return self._double_arrays("IW_Model_GetGWParametricNodeXY", n, 2,
+                                   c_int(grid_id))
 
     def get_parametric_element_config(self, grid_id, elem_id):
         verts = alloc_int(4)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWParametricElementConfigData(
-            c_int(grid_id), c_int(elem_id), verts, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetGWParametricElementConfigData",
+                   c_int(grid_id), c_int(elem_id), verts)
         return np.array(verts, dtype=np.int32)
 
     def get_parametric_aquifer_parameters(self, grid_id):
         n = self.get_n_parametric_nodes(grid_id)
         nl = self.n_layers
-        sz = n * nl
-        kh = alloc_double(sz)
-        akv = alloc_double(sz)
-        aqkv = alloc_double(sz)
-        sy = alloc_double(sz)
-        ss = alloc_double(sz)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWParametricAquiferParameters(
-            c_int(grid_id), c_int(n), c_int(nl),
-            kh, akv, aqkv, sy, ss, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        shape = (n, nl)
-        return {
-            "Kh": np.frombuffer(kh, dtype=np.float64).reshape(shape, order="F").copy(),
-            "AquiferKv": np.frombuffer(akv, dtype=np.float64).reshape(shape, order="F").copy(),
-            "AquitardKv": np.frombuffer(aqkv, dtype=np.float64).reshape(shape, order="F").copy(),
-            "Sy": np.frombuffer(sy, dtype=np.float64).reshape(shape, order="F").copy(),
-            "Ss": np.frombuffer(ss, dtype=np.float64).reshape(shape, order="F").copy(),
-        }
+        bufs = [alloc_double(n * nl) for _ in _AQUIFER_PARAM_NAMES]
+        self._call("IW_Model_GetGWParametricAquiferParameters",
+                   c_int(grid_id), c_int(n), c_int(nl), *bufs)
+        return _aquifer_params(bufs, (n, nl))
 
     # ==================================================================
     # Groundwater results
@@ -820,12 +655,7 @@ class IWFMModel:
 
     def get_gw_heads_initial(self):
         """Shape (n_nodes, n_layers)."""
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWHeadsIC(c_int(nn), c_int(nl), buf, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetGWHeadsIC")
 
     def get_gw_heads_for_layer(self, layer, begin_date, end_date, factor=1.0):
         """Return (dates, heads) for a layer over a date range.
@@ -836,48 +666,27 @@ class IWFMModel:
         begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         nn = self.n_nodes
         nt = self.n_timesteps
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         dates = alloc_double(nt)
         heads = alloc_double(nn * nt)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWHeads_ForALayer(
-            c_int(layer), c_begin, c_end, d_len, c_double(factor),
-            c_int(nn), c_int(nt), dates, heads, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetGWHeads_ForALayer",
+                   c_int(layer), c_begin, c_end, d_len, c_double(factor),
+                   c_int(nn), c_int(nt), dates, heads)
         return (
             np.array(dates, dtype=np.float64),
-            np.frombuffer(heads, dtype=np.float64).reshape((nn, nt), order="F").copy(),
+            fortran_view(heads, (nn, nt)).copy(),
         )
 
     def get_gw_heads_all(self, previous=False, factor=1.0):
         """Current timestep heads, shape (n_nodes, n_layers)."""
         self._require_full_instantiation("GWHeads_All")
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetGWHeads_All(
-            c_int(nn), c_int(nl), c_int(1 if previous else 0),
-            c_double(factor), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetGWHeads_All",
+                                c_int(1 if previous else 0), c_double(factor))
 
     def get_subsidence_all(self, factor=1.0):
         """Current timestep subsidence, shape (n_nodes, n_layers)."""
         self._require_full_instantiation("Subsidence_All")
-        nn, nl = self.n_nodes, self.n_layers
-        buf = alloc_double(nn * nl)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetSubsidence_All(
-            c_int(nn), c_int(nl), c_double(factor), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape((nn, nl), order="F").copy()
+        return self._node_layer("IW_Model_GetSubsidence_All", c_double(factor))
 
     # ==================================================================
     # Stream network structure
@@ -885,180 +694,85 @@ class IWFMModel:
 
     @property
     def n_stream_nodes(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNStrmNodes(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNStrmNodes")
 
     @property
     def n_reaches(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNReaches(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNReaches")
 
     def get_stream_node_ids(self):
-        n = self.n_stream_nodes
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmNodeIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetStrmNodeIDs", self.n_stream_nodes)
 
     def get_reach_ids(self):
-        n = self.n_reaches
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetReachIDs", self.n_reaches)
 
     def get_reaches_for_stream_nodes(self, node_indices):
         node_indices = list(check_ids("node_indices", node_indices, self.n_stream_nodes))
         n = len(node_indices)
         nodes = (c_int * n)(*node_indices)
-        reaches = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReaches_ForStrmNodes(
-            c_int(n), nodes, reaches, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(reaches, dtype=np.int32)
+        return self._int_array("IW_Model_GetReaches_ForStrmNodes", n, mid=(nodes,))
 
     def get_reach_upstream_nodes(self):
-        n = self.n_reaches
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachUpstrmNodes(c_int(n), nodes, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetReachUpstrmNodes", self.n_reaches)
 
     def get_reach_downstream_nodes(self):
-        n = self.n_reaches
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachDownstrmNodes(c_int(n), nodes, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetReachDownstrmNodes", self.n_reaches)
 
     def get_reach_outflow_destinations(self):
-        n = self.n_reaches
-        dest = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachOutflowDest(c_int(n), dest, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(dest, dtype=np.int32)
+        return self._int_array("IW_Model_GetReachOutflowDest", self.n_reaches)
 
     def get_reach_outflow_dest_types(self):
-        n = self.n_reaches
-        dt = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachOutflowDestTypes(c_int(n), dt, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(dt, dtype=np.int32)
+        return self._int_array("IW_Model_GetReachOutflowDestTypes", self.n_reaches)
 
     def get_reach_n_nodes(self, reach):
         reach = check_range("reach", reach, self.n_reaches)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachNNodes(c_int(reach), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetReachNNodes", c_int(reach))
 
     def get_reach_stream_nodes(self, reach):
         reach = check_range("reach", reach, self.n_reaches)
         n = self.get_reach_n_nodes(reach)
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachStrmNodes(c_int(reach), c_int(n), nodes, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetReachStrmNodes", n, c_int(reach))
 
     def get_reach_gw_nodes(self, reach):
         reach = check_range("reach", reach, self.n_reaches)
         n = self.get_reach_n_nodes(reach)
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachGWNodes(c_int(reach), c_int(n), nodes, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetReachGWNodes", n, c_int(reach))
 
     def get_stream_bottom_elevations(self):
-        n = self.n_stream_nodes
-        elevs = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmBottomElevs(c_int(n), elevs, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(elevs, dtype=np.float64)
+        return self._double_array("IW_Model_GetStrmBottomElevs", self.n_stream_nodes)
 
     def get_n_rating_table_points(self, stream_node):
         stream_node = check_range("stream_node", stream_node, self.n_stream_nodes)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNStrmRatingTablePoints(
-            c_int(stream_node), byref(n), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNStrmRatingTablePoints",
+                                c_int(stream_node))
 
     def get_stream_rating_table(self, stream_node):
         stream_node = check_range("stream_node", stream_node, self.n_stream_nodes)
         n = self.get_n_rating_table_points(stream_node)
-        stage = alloc_double(n)
-        flow = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmRatingTable(
-            c_int(stream_node), c_int(n), stage, flow, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(stage, dtype=np.float64), np.array(flow, dtype=np.float64)
+        return self._double_arrays("IW_Model_GetStrmRatingTable", n, 2,
+                                   c_int(stream_node))
 
     def get_stream_n_upstream_nodes(self, node):
         node = check_range("node", node, self.n_stream_nodes)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmNUpstrmNodes(c_int(node), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetStrmNUpstrmNodes", c_int(node))
 
     def get_stream_upstream_nodes(self, node):
         node = check_range("node", node, self.n_stream_nodes)
         n = self.get_stream_n_upstream_nodes(node)
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmUpstrmNodes(c_int(node), c_int(n), nodes, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetStrmUpstrmNodes", n, c_int(node))
 
     def is_stream_upstream_node(self, node1, node2):
-        result = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_IsStrmUpstreamNode(
-            c_int(node1), c_int(node2), byref(result), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return result.value == 1
+        return self._scalar_int("IW_Model_IsStrmUpstreamNode",
+                                c_int(node1), c_int(node2)) == 1
 
     def get_reach_n_upstream_reaches(self, reach):
         reach = check_range("reach", reach, self.n_reaches)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachNUpstrmReaches(c_int(reach), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetReachNUpstrmReaches", c_int(reach))
 
     def get_reach_upstream_reaches(self, reach):
         reach = check_range("reach", reach, self.n_reaches)
         n = self.get_reach_n_upstream_reaches(reach)
-        reaches = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetReachUpstrmReaches(
-            c_int(reach), c_int(n), reaches, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(reaches, dtype=np.int32)
+        return self._int_array("IW_Model_GetReachUpstrmReaches", n, c_int(reach))
 
     # ==================================================================
     # Stream flow results (current timestep)
@@ -1087,24 +801,13 @@ class IWFMModel:
     def _get_strm_array(self, func_name, factor=1.0):
         """Helper for stream node array getters (current-timestep state)."""
         self._require_full_instantiation(func_name.replace("IW_Model_Get", ""))
-        n = self.n_stream_nodes
-        buf = alloc_double(n)
-        iStat = c_int(0)
-        getattr(self._dll, func_name)(
-            c_int(n), c_double(factor), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(buf, dtype=np.float64)
+        return self._double_array(func_name, self.n_stream_nodes,
+                                  mid=(c_double(factor),))
 
     def get_stream_flow(self, node, factor=1.0):
         self._require_full_instantiation("StrmFlow")
-        flow = c_double(0.0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmFlow(
-            c_int(node), c_double(factor), byref(flow), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return flow.value
+        return self._scalar_double("IW_Model_GetStrmFlow",
+                                   c_int(node), c_double(factor))
 
     def get_stream_flows(self, factor=1.0):
         return self._get_strm_array("IW_Model_GetStrmFlows", factor)
@@ -1160,40 +863,23 @@ class IWFMModel:
 
     def get_n_stream_inflows(self):
         self._require_full_instantiation("stream inflows")
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmNInflows(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetStrmNInflows")
 
     def get_stream_inflow_nodes(self):
         n = self.get_n_stream_inflows()
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmInflowNodes(c_int(n), nodes, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetStrmInflowNodes", n)
 
     def get_stream_inflow_ids(self):
         n = self.get_n_stream_inflows()
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmInflowIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetStrmInflowIDs", n)
 
     def get_stream_inflows_at(self, inflow_indices, factor=1.0):
         self._require_full_instantiation("stream inflows")
         inflow_indices = list(check_ids("inflow_indices", inflow_indices, 10**9))
         n = len(inflow_indices)
         idx = (c_int * n)(*inflow_indices)
-        vals = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmInflows_AtSomeInflows(
-            c_int(n), idx, c_double(factor), vals, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(vals, dtype=np.float64)
+        return self._double_array("IW_Model_GetStrmInflows_AtSomeInflows", n,
+                                  mid=(idx, c_double(factor)))
 
     # ==================================================================
     # Diversions
@@ -1201,93 +887,54 @@ class IWFMModel:
 
     @property
     def n_diversions(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNDiversions(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNDiversions")
 
     def get_diversion_ids(self):
-        n = self.n_diversions
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetDiversionIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetDiversionIDs", self.n_diversions)
 
     def get_required_diversions(self, div_indices, factor=1.0):
         self._require_full_instantiation("RequiredDiversions")
         n = len(div_indices)
         idx = (c_int * n)(*div_indices)
-        vals = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmRequiredDiversions_AtSomeDiversions(
-            c_int(n), idx, c_double(factor), vals, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(vals, dtype=np.float64)
+        return self._double_array(
+            "IW_Model_GetStrmRequiredDiversions_AtSomeDiversions", n,
+            mid=(idx, c_double(factor)))
 
     def get_actual_diversions(self, div_indices, factor=1.0):
         self._require_full_instantiation("ActualDiversions")
         n = len(div_indices)
         idx = (c_int * n)(*div_indices)
-        vals = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmActualDiversions_AtSomeDiversions(
-            c_int(n), idx, c_double(factor), vals, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(vals, dtype=np.float64)
+        return self._double_array(
+            "IW_Model_GetStrmActualDiversions_AtSomeDiversions", n,
+            mid=(idx, c_double(factor)))
 
     def get_diversion_export_nodes(self, div_indices):
         div_indices = list(check_ids("div_indices", div_indices, self.n_diversions))
         n = len(div_indices)
         idx = (c_int * n)(*div_indices)
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmDiversionsExportNodes(
-            c_int(n), idx, nodes, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetStrmDiversionsExportNodes", n, mid=(idx,))
 
     def get_diversion_n_elements(self, div):
         div = check_range("diversion", div, self.n_diversions)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmDiversionNElems(c_int(div), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetStrmDiversionNElems", c_int(div))
 
     def get_diversion_elements(self, div):
         div = check_range("diversion", div, self.n_diversions)
         n = self.get_diversion_n_elements(div)
-        elems = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmDiversionElems(c_int(div), c_int(n), elems, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(elems, dtype=np.int32)
+        return self._int_array("IW_Model_GetStrmDiversionElems", n, c_int(div))
 
     def get_diversion_n_recharge_zone_elements(self, div):
         div = check_range("diversion", div, self.n_diversions)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmDiversionNRechargeZoneElems(
-            c_int(div), byref(n), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetStrmDiversionNRechargeZoneElems",
+                                c_int(div))
 
     def get_diversion_recharge_zone_elements(self, div):
         div = check_range("diversion", div, self.n_diversions)
         n = self.get_diversion_n_recharge_zone_elements(div)
         elems = alloc_int(n)
         fracs = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetStrmDiversionRechargeZoneElems(
-            c_int(div), c_int(n), elems, fracs, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetStrmDiversionRechargeZoneElems",
+                   c_int(div), c_int(n), elems, fracs)
         return np.array(elems, dtype=np.int32), np.array(fracs, dtype=np.float64)
 
     # ==================================================================
@@ -1296,31 +943,16 @@ class IWFMModel:
 
     @property
     def n_bypasses(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNBypasses(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNBypasses")
 
     def get_bypass_ids(self):
-        n = self.n_bypasses
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBypassIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetBypassIDs", self.n_bypasses)
 
     def get_bypass_export_nodes(self, bypass_indices):
         bypass_indices = list(check_ids("bypass_indices", bypass_indices, self.n_bypasses))
         n = len(bypass_indices)
         idx = (c_int * n)(*bypass_indices)
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBypassExportNodes(
-            c_int(n), idx, nodes, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetBypassExportNodes", n, mid=(idx,))
 
     def get_bypass_export_dest_data(self, bypass_indices):
         bypass_indices = list(check_ids("bypass_indices", bypass_indices, self.n_bypasses))
@@ -1329,11 +961,8 @@ class IWFMModel:
         exp_nodes = alloc_int(n)
         dest_types = alloc_int(n)
         dests = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBypassExportDestinationData(
-            c_int(n), idx, exp_nodes, dest_types, dests, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBypassExportDestinationData",
+                   c_int(n), idx, exp_nodes, dest_types, dests)
         return {
             "export_nodes": np.array(exp_nodes, dtype=np.int32),
             "dest_types": np.array(dest_types, dtype=np.int32),
@@ -1342,34 +971,18 @@ class IWFMModel:
 
     def get_bypass_outflows(self, factor=1.0):
         self._require_full_instantiation("BypassOutflows")
-        n = self.n_bypasses
-        buf = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBypassOutflows(
-            c_int(n), c_double(factor), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(buf, dtype=np.float64)
+        return self._double_array("IW_Model_GetBypassOutflows", self.n_bypasses,
+                                  mid=(c_double(factor),))
 
     def get_bypass_recoverable_loss_factor(self, bypass):
         bypass = check_range("bypass", bypass, self.n_bypasses)
-        val = c_double(0.0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBypassRecoverableLossFactor(
-            c_int(bypass), byref(val), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return val.value
+        return self._scalar_double("IW_Model_GetBypassRecoverableLossFactor",
+                                   c_int(bypass))
 
     def get_bypass_non_recoverable_loss_factor(self, bypass):
         bypass = check_range("bypass", bypass, self.n_bypasses)
-        val = c_double(0.0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBypassNonRecoverableLossFactor(
-            c_int(bypass), byref(val), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return val.value
+        return self._scalar_double("IW_Model_GetBypassNonRecoverableLossFactor",
+                                   c_int(bypass))
 
     # ==================================================================
     # Lakes
@@ -1377,36 +990,19 @@ class IWFMModel:
 
     @property
     def n_lakes(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNLakes(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNLakes")
 
     def get_lake_ids(self):
-        n = self.n_lakes
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetLakeIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetLakeIDs", self.n_lakes)
 
     def get_n_elements_in_lake(self, lake):
         lake = check_range("lake", lake, self.n_lakes)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNElementsInLake(c_int(lake), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNElementsInLake", c_int(lake))
 
     def get_elements_in_lake(self, lake):
         lake = check_range("lake", lake, self.n_lakes)
         n = self.get_n_elements_in_lake(lake)
-        elems = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetElementsInLake(c_int(lake), c_int(n), elems, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(elems, dtype=np.int32)
+        return self._int_array("IW_Model_GetElementsInLake", n, c_int(lake))
 
     # ==================================================================
     # Wells & pumping
@@ -1414,108 +1010,54 @@ class IWFMModel:
 
     @property
     def n_wells(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNWells(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNWells")
 
     @property
     def n_elem_pumps(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNElemPumps(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNElemPumps")
 
     def get_well_ids(self):
-        n = self.n_wells
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetWellIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetWellIDs", self.n_wells)
 
     def get_well_coordinates(self):
-        n = self.n_wells
-        x = alloc_double(n)
-        y = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetWellCoordinates(c_int(n), x, y, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(x, dtype=np.float64), np.array(y, dtype=np.float64)
+        return self._double_arrays("IW_Model_GetWellCoordinates", self.n_wells, 2)
 
     def get_well_perforation_top_bottom(self):
-        n = self.n_wells
-        top = alloc_double(n)
-        bot = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetWellPerfTopBottom(c_int(n), top, bot, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(top, dtype=np.float64), np.array(bot, dtype=np.float64)
+        return self._double_arrays("IW_Model_GetWellPerfTopBottom", self.n_wells, 2)
 
     def get_well_n_elements(self, well):
         well = check_range("well", well, self.n_wells)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetWellNElems(c_int(well), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetWellNElems", c_int(well))
 
     def get_well_elements(self, well):
         well = check_range("well", well, self.n_wells)
         n = self.get_well_n_elements(well)
-        elems = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetWellElems(c_int(well), c_int(n), elems, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(elems, dtype=np.int32)
+        return self._int_array("IW_Model_GetWellElems", n, c_int(well))
 
     def get_elem_pump_ids(self):
-        n = self.n_elem_pumps
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetElemPumpIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetElemPumpIDs", self.n_elem_pumps)
 
     # ==================================================================
     # Tile drains
     # ==================================================================
 
     def get_n_tile_drain_nodes(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNTileDrainNodes(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNTileDrainNodes")
 
     def get_tile_drain_ids(self):
         n = self.get_n_tile_drain_nodes()
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetTileDrainIDs(c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetTileDrainIDs", n)
 
     def get_tile_drain_nodes(self):
         n = self.get_n_tile_drain_nodes()
-        nodes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetTileDrainNodes(c_int(n), nodes, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(nodes, dtype=np.int32)
+        return self._int_array("IW_Model_GetTileDrainNodes", n)
 
     # ==================================================================
     # Hydrographs
     # ==================================================================
 
     def get_n_hydrograph_types(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNHydrographTypes(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNHydrographTypes")
 
     def get_hydrograph_type_list(self):
         """Return list of dicts with 'name' and 'location_type'."""
@@ -1524,11 +1066,8 @@ class IWFMModel:
         buf = alloc_char(buf_len)
         loc_arr = alloc_int(n)
         loc_types = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetHydrographTypeList(
-            c_int(n), loc_arr, c_int(buf_len), buf, loc_types, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetHydrographTypeList",
+                   c_int(n), loc_arr, c_int(buf_len), buf, loc_types)
         names = c_to_str_list(buf, loc_arr, n)
         return [{"name": names[i], "location_type": loc_types[i]}
                 for i in range(n)]
@@ -1551,32 +1090,18 @@ class IWFMModel:
 
     def get_n_hydrographs(self, location_type):
         location_type = self._check_hydrograph_type(location_type)
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNHydrographs(c_int(location_type), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNHydrographs", c_int(location_type))
 
     def get_hydrograph_ids(self, location_type):
         location_type = self._check_hydrograph_type(location_type)
         n = self.get_n_hydrographs(location_type)
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetHydrographIDs(c_int(location_type), c_int(n), ids, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetHydrographIDs", n, c_int(location_type))
 
     def get_hydrograph_coordinates(self, location_type):
         location_type = self._check_hydrograph_type(location_type)
         n = self.get_n_hydrographs(location_type)
-        x = alloc_double(n)
-        y = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetHydrographCoordinates(
-            c_int(location_type), c_int(n), x, y, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(x, dtype=np.float64), np.array(y, dtype=np.float64)
+        return self._double_arrays("IW_Model_GetHydrographCoordinates", n, 2,
+                                   c_int(location_type))
 
     def get_hydrograph(self, hyd_type, index, layer, begin_date, end_date,
                        interval, fact_lt=1.0, fact_vl=1.0):
@@ -1594,24 +1119,17 @@ class IWFMModel:
                 "the DLL's re-sampling uses fixed-day strides -- resample the "
                 "returned series in pandas instead")
         nt = self.n_timesteps
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         iv_len, c_intv = str_to_c(interval)
         dates = alloc_double(nt)
         vals = alloc_double(nt)
         data_unit = c_int(0)
         nt_out = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetHydrograph(
-            c_int(hyd_type), c_int(index), c_int(layer),
-            d_len, c_begin, c_end, iv_len, c_intv,
-            c_double(fact_lt), c_double(fact_vl),
-            c_int(nt), dates, vals, byref(data_unit), byref(nt_out), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetHydrograph",
+                   c_int(hyd_type), c_int(index), c_int(layer),
+                   d_len, c_begin, c_end, iv_len, c_intv,
+                   c_double(fact_lt), c_double(fact_vl),
+                   c_int(nt), dates, vals, byref(data_unit), byref(nt_out))
         n = nt_out.value
         dates_arr = np.array(dates[:n], dtype=np.float64)
         vals_arr = np.array(vals[:n], dtype=np.float64)
@@ -1628,11 +1146,7 @@ class IWFMModel:
     # ==================================================================
 
     def get_n_budgets(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_N(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetBudget_N")
 
     def get_budget_list(self):
         """Return list of dicts with 'name', 'budget_type', 'location_type'."""
@@ -1644,11 +1158,8 @@ class IWFMModel:
         buf = alloc_char(buf_len)
         btypes = alloc_int(n)
         ltypes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_List(
-            c_int(n), loc_arr, c_int(buf_len), buf, btypes, ltypes, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_List",
+                   c_int(n), loc_arr, c_int(buf_len), buf, btypes, ltypes)
         names = c_to_str_list(buf, loc_arr, n)
         return [{"name": names[i], "budget_type": btypes[i],
                  "location_type": ltypes[i]} for i in range(n)]
@@ -1674,13 +1185,8 @@ class IWFMModel:
     def get_budget_n_columns(self, budget_type, location):
         check_int("budget_type", budget_type)
         location = check_range("location", location, self._budget_n_locations(budget_type))
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_NColumns(
-            c_int(budget_type), c_int(location), byref(n), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetBudget_NColumns",
+                                c_int(budget_type), c_int(location))
 
     def get_budget_column_titles(self, budget_type, location,
                                  length_unit="FT", area_unit="SQ FT",
@@ -1694,13 +1200,10 @@ class IWFMModel:
         _, c_vu = str_to_c(volume_unit)
         loc_arr = alloc_int(n)
         buf = alloc_char(buf_len)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_ColumnTitles(
-            c_int(budget_type), c_int(location), u_len,
-            c_lu, c_au, c_vu, c_int(n), loc_arr,
-            c_int(buf_len), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_ColumnTitles",
+                   c_int(budget_type), c_int(location), u_len,
+                   c_lu, c_au, c_vu, c_int(n), loc_arr,
+                   c_int(buf_len), buf)
         return c_to_str_list(buf, loc_arr, n)
 
     def get_budget_timeseries(self, budget_type, location, columns,
@@ -1735,30 +1238,21 @@ class IWFMModel:
         interval = self._check_interval(interval)
         n_cols = len(columns)
         nt = self.n_timesteps
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         iv_len, c_intv = str_to_c(interval)
         c_cols = (c_int * n_cols)(*columns)
         dates = alloc_double(nt)
         values = (c_double * (nt * n_cols))()
         dtypes = alloc_int(n_cols)
         nt_out = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_TSData(
-            c_int(budget_type), c_int(location), c_int(n_cols), c_cols,
-            d_len, c_begin, c_end, iv_len, c_intv,
-            c_double(fact_lt), c_double(fact_ar), c_double(fact_vl),
-            dates, c_int(nt), values, dtypes,
-            byref(nt_out), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_TSData",
+                   c_int(budget_type), c_int(location), c_int(n_cols), c_cols,
+                   d_len, c_begin, c_end, iv_len, c_intv,
+                   c_double(fact_lt), c_double(fact_ar), c_double(fact_vl),
+                   dates, c_int(nt), values, dtypes,
+                   byref(nt_out))
         n = nt_out.value
-        val_arr = np.frombuffer(values, dtype=np.float64).reshape(
-            (nt, n_cols), order="F"
-        )[:n, :].copy()
+        val_arr = fortran_view(values, (nt, n_cols))[:n, :].copy()
         return {
             "dates": np.array(dates[:n], dtype=np.float64),
             "values": val_arr,
@@ -1773,36 +1267,27 @@ class IWFMModel:
         location = check_range("location", location, self._budget_n_locations(budget_type))
         begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         max_flows = 200
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         flows = alloc_double(max_flows * 12)
         sd_flows = alloc_double(max_flows * 12)
         n_flows_out = c_int(0)
         name_buf_len = max_flows * 200
         name_buf = alloc_char(name_buf_len)
         loc_arr = alloc_int(max_flows)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_MonthlyAverageFlows(
-            c_int(budget_type), c_int(location), c_int(lu_type),
-            c_int(swshed_comp), d_len, c_begin, c_end,
-            c_double(fact_vl), c_int(max_flows), flows, sd_flows,
-            byref(n_flows_out), c_int(name_buf_len), name_buf,
-            loc_arr, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_MonthlyAverageFlows",
+                   c_int(budget_type), c_int(location), c_int(lu_type),
+                   c_int(swshed_comp), d_len, c_begin, c_end,
+                   c_double(fact_vl), c_int(max_flows), flows, sd_flows,
+                   byref(n_flows_out), c_int(name_buf_len), name_buf,
+                   loc_arr)
         nf = n_flows_out.value
         names = c_to_str_list(name_buf, loc_arr, nf)
         # The DLL fills the array at the DECLARED dimensions
         # (max_flows x 12, column-major), so reshape the full buffer
         # first and then slice the valid rows — taking the first nf*12
         # flat elements would scatter the data.
-        flow_arr = np.frombuffer(flows, dtype=np.float64).reshape(
-            (max_flows, 12), order="F")[:nf, :].copy()
-        sd_arr = np.frombuffer(sd_flows, dtype=np.float64).reshape(
-            (max_flows, 12), order="F")[:nf, :].copy()
+        flow_arr = fortran_view(flows, (max_flows, 12))[:nf, :].copy()
+        sd_arr = fortran_view(sd_flows, (max_flows, 12))[:nf, :].copy()
         return {"names": names, "flows": flow_arr, "std_devs": sd_arr}
 
     def get_budget_annual(self, budget_type, location, begin_date, end_date,
@@ -1813,11 +1298,7 @@ class IWFMModel:
         begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         max_flows = 200
         max_times = 200
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         flows = alloc_double(max_flows * max_times)
         n_flows_out = c_int(0)
         n_times_out = c_int(0)
@@ -1825,22 +1306,18 @@ class IWFMModel:
         name_buf = alloc_char(name_buf_len)
         loc_arr = alloc_int(max_flows)
         years = alloc_int(max_times)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_AnnualFlows(
-            c_int(budget_type), c_int(location), c_int(lu_type),
-            c_int(swshed_comp), d_len, c_begin, c_end,
-            c_double(fact_vl), c_int(max_flows), c_int(max_times),
-            flows, byref(n_flows_out), byref(n_times_out),
-            c_int(name_buf_len), name_buf, loc_arr, years, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_AnnualFlows",
+                   c_int(budget_type), c_int(location), c_int(lu_type),
+                   c_int(swshed_comp), d_len, c_begin, c_end,
+                   c_double(fact_vl), c_int(max_flows), c_int(max_times),
+                   flows, byref(n_flows_out), byref(n_times_out),
+                   c_int(name_buf_len), name_buf, loc_arr, years)
         nf = n_flows_out.value
         nt = n_times_out.value
         names = c_to_str_list(name_buf, loc_arr, nf)
         # Reshape at the declared (max_flows x max_times) stride the DLL
         # wrote with, then slice the valid block (see monthly average).
-        flow_arr = np.frombuffer(flows, dtype=np.float64).reshape(
-            (max_flows, max_times), order="F")[:nf, :nt].copy()
+        flow_arr = fortran_view(flows, (max_flows, max_times))[:nf, :nt].copy()
         return {"names": names, "flows": flow_arr,
                 "years": np.array(years[:nt], dtype=np.int32)}
 
@@ -1853,11 +1330,7 @@ class IWFMModel:
         begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         max_flows = 200
         max_times = 200
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         flows = alloc_double(max_flows * max_times)
         n_flows_out = c_int(0)
         n_times_out = c_int(0)
@@ -1865,23 +1338,19 @@ class IWFMModel:
         name_buf = alloc_char(name_buf_len)
         loc_arr = alloc_int(max_flows)
         years = alloc_int(max_times)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_AnnualFlows_1(
-            c_int(budget_type), c_int(location), c_int(lu_type),
-            c_int(swshed_comp), d_len, c_begin, c_end,
-            c_int(1 if calendar_year else 0),
-            c_double(fact_vl), c_int(max_flows), c_int(max_times),
-            flows, byref(n_flows_out), byref(n_times_out),
-            c_int(name_buf_len), name_buf, loc_arr, years, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_AnnualFlows_1",
+                   c_int(budget_type), c_int(location), c_int(lu_type),
+                   c_int(swshed_comp), d_len, c_begin, c_end,
+                   c_int(1 if calendar_year else 0),
+                   c_double(fact_vl), c_int(max_flows), c_int(max_times),
+                   flows, byref(n_flows_out), byref(n_times_out),
+                   c_int(name_buf_len), name_buf, loc_arr, years)
         nf = n_flows_out.value
         nt = n_times_out.value
         names = c_to_str_list(name_buf, loc_arr, nf)
         # Reshape at the declared (max_flows x max_times) stride the DLL
         # wrote with, then slice the valid block (see monthly average).
-        flow_arr = np.frombuffer(flows, dtype=np.float64).reshape(
-            (max_flows, max_times), order="F")[:nf, :nt].copy()
+        flow_arr = fortran_view(flows, (max_flows, max_times))[:nf, :nt].copy()
         return {"names": names, "flows": flow_arr,
                 "years": np.array(years[:nt], dtype=np.int32)}
 
@@ -1891,43 +1360,29 @@ class IWFMModel:
         begin_date, end_date = check_window(begin_date, end_date, self._sim_window())
         interval = self._check_interval(interval)
         max_times = self.n_timesteps
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         iv_len, c_intv = str_to_c(interval)
         dates = alloc_double(max_times)
         vals = alloc_double(max_times)
         nt_out = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_CumGWStorChange(
-            c_int(subregion), d_len, c_begin, c_end, iv_len, c_intv,
-            c_double(fact_vl), dates, c_int(max_times), vals,
-            byref(nt_out), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_CumGWStorChange",
+                   c_int(subregion), d_len, c_begin, c_end, iv_len, c_intv,
+                   c_double(fact_vl), dates, c_int(max_times), vals,
+                   byref(nt_out))
         n = nt_out.value
         return np.array(dates[:n], dtype=np.float64), np.array(vals[:n], dtype=np.float64)
 
     def get_budget_annual_cum_gw_storage_change(self, subregion, begin_date,
                                                  end_date, fact_vl=1.0):
         max_times = 200
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         vals = alloc_double(max_times)
         years = alloc_int(max_times)
         nt_out = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_AnnualCumGWStorChange(
-            c_int(subregion), d_len, c_begin, c_end,
-            c_double(fact_vl), c_int(max_times), vals, years,
-            byref(nt_out), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_AnnualCumGWStorChange",
+                   c_int(subregion), d_len, c_begin, c_end,
+                   c_double(fact_vl), c_int(max_times), vals, years,
+                   byref(nt_out))
         n = nt_out.value
         return np.array(vals[:n], dtype=np.float64), np.array(years[:n], dtype=np.int32)
 
@@ -1935,22 +1390,15 @@ class IWFMModel:
                                                     end_date, fact_vl=1.0,
                                                     calendar_year=False):
         max_times = 200
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         vals = alloc_double(max_times)
         years = alloc_int(max_times)
         nt_out = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetBudget_AnnualCumGWStorChange_1(
-            c_int(subregion), d_len, c_begin, c_end,
-            c_int(1 if calendar_year else 0),
-            c_double(fact_vl), c_int(max_times), vals, years,
-            byref(nt_out), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetBudget_AnnualCumGWStorChange_1",
+                   c_int(subregion), d_len, c_begin, c_end,
+                   c_int(1 if calendar_year else 0),
+                   c_double(fact_vl), c_int(max_times), vals, years,
+                   byref(nt_out))
         n = nt_out.value
         return np.array(vals[:n], dtype=np.float64), np.array(years[:n], dtype=np.int32)
 
@@ -1959,11 +1407,7 @@ class IWFMModel:
     # ==================================================================
 
     def get_n_zbudgets(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetZBudget_N(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetZBudget_N")
 
     def get_zbudget_list(self):
         n = self.get_n_zbudgets()
@@ -1973,11 +1417,8 @@ class IWFMModel:
         loc_arr = alloc_int(n)
         buf = alloc_char(buf_len)
         ztypes = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetZBudget_List(
-            c_int(n), loc_arr, c_int(buf_len), buf, ztypes, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetZBudget_List",
+                   c_int(n), loc_arr, c_int(buf_len), buf, ztypes)
         names = c_to_str_list(buf, loc_arr, n)
         return [{"name": names[i], "zbudget_type": ztypes[i]} for i in range(n)]
 
@@ -1989,18 +1430,14 @@ class IWFMModel:
         layers = np.asarray(layers, dtype=np.int32)
         zone_ids_arr = np.asarray(zone_ids, dtype=np.int32)
         n_dim = len(elements)
-        n_cols = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetZBudget_NColumns(
+        return self._scalar_int(
+            "IW_Model_GetZBudget_NColumns",
             c_int(zbudget_type), c_int(zone_id), c_int(zone_extent),
             c_int(n_dim),
             (c_int * n_dim)(*elements),
             (c_int * n_dim)(*layers),
             (c_int * n_dim)(*zone_ids_arr),
-            byref(n_cols), byref(iStat),
         )
-        _check_status(iStat, self._dll)
-        return n_cols.value
 
     def get_zbudget_column_titles(self, zbudget_type, zone_id, zone_extent,
                                    elements, layers, zone_ids,
@@ -2019,17 +1456,14 @@ class IWFMModel:
         _, c_vu = str_to_c(volume_unit)
         loc_arr = alloc_int(n_cols)
         buf = alloc_char(buf_len)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetZBudget_ColumnTitles(
-            c_int(zbudget_type), c_int(zone_id), c_int(zone_extent),
-            c_int(n_dim),
-            (c_int * n_dim)(*elements),
-            (c_int * n_dim)(*layers),
-            (c_int * n_dim)(*zone_ids_arr),
-            u_len, c_au, c_vu,
-            c_int(n_cols), loc_arr, c_int(buf_len), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetZBudget_ColumnTitles",
+                   c_int(zbudget_type), c_int(zone_id), c_int(zone_extent),
+                   c_int(n_dim),
+                   (c_int * n_dim)(*elements),
+                   (c_int * n_dim)(*layers),
+                   (c_int * n_dim)(*zone_ids_arr),
+                   u_len, c_au, c_vu,
+                   c_int(n_cols), loc_arr, c_int(buf_len), buf)
         return c_to_str_list(buf, loc_arr, n_cols)
 
     def get_zbudget_timeseries(self, zbudget_type, zone_id, columns,
@@ -2072,34 +1506,25 @@ class IWFMModel:
         n_dim = len(elements)
         n_cols = len(columns)
         nt = self.n_timesteps
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         iv_len, c_intv = str_to_c(interval)
         c_cols = (c_int * n_cols)(*columns)
         dates = alloc_double(nt)
         values = (c_double * (nt * n_cols))()
         dtypes = alloc_int(n_cols)
         nt_out = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetZBudget_TSData(
-            c_int(zbudget_type), c_int(zone_id), c_int(n_cols), c_cols,
-            c_int(zone_extent), c_int(n_dim),
-            (c_int * n_dim)(*elements),
-            (c_int * n_dim)(*layers),
-            (c_int * n_dim)(*zone_ids_arr),
-            d_len, c_begin, c_end, iv_len, c_intv,
-            c_double(fact_ar), c_double(fact_vl),
-            dates, c_int(nt), values, dtypes,
-            byref(nt_out), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetZBudget_TSData",
+                   c_int(zbudget_type), c_int(zone_id), c_int(n_cols), c_cols,
+                   c_int(zone_extent), c_int(n_dim),
+                   (c_int * n_dim)(*elements),
+                   (c_int * n_dim)(*layers),
+                   (c_int * n_dim)(*zone_ids_arr),
+                   d_len, c_begin, c_end, iv_len, c_intv,
+                   c_double(fact_ar), c_double(fact_vl),
+                   dates, c_int(nt), values, dtypes,
+                   byref(nt_out))
         n = nt_out.value
-        val_arr = np.frombuffer(values, dtype=np.float64).reshape(
-            (nt, n_cols), order="F"
-        )[:n, :].copy()
+        val_arr = fortran_view(values, (nt, n_cols))[:n, :].copy()
         return {
             "dates": np.array(dates[:n], dtype=np.float64),
             "values": val_arr,
@@ -2115,39 +1540,23 @@ class IWFMModel:
         div = check_range("diversion", div, self.n_diversions)
         date = check_date("date", date)
         d_len, c_date = str_to_c(date)
-        demand = c_double(0.0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetFutureWaterDemand_ForDiversion(
-            c_int(div), d_len, c_date, c_double(factor),
-            byref(demand), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return demand.value
+        return self._scalar_double("IW_Model_GetFutureWaterDemand_ForDiversion",
+                                   c_int(div), d_len, c_date, c_double(factor))
 
     def get_supply_purpose(self, supply_type, supplies):
         self._require_full_instantiation("SupplyPurpose")
         supplies = list(check_ids("supplies", supplies, 10**9))
         n = len(supplies)
         idx = (c_int * n)(*supplies)
-        result = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetSupplyPurpose(
-            c_int(supply_type), c_int(n), idx, result, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(result, dtype=np.int32)
+        return self._int_array("IW_Model_GetSupplyPurpose", n,
+                               c_int(supply_type), mid=(idx,))
 
     def _get_supply_req_or_short(self, func_name, loc_type, locations, factor):
         self._require_full_instantiation("SupplyRequirement/Shortage")
         n = len(locations)
         idx = (c_int * n)(*locations)
-        vals = alloc_double(n)
-        iStat = c_int(0)
-        getattr(self._dll, func_name)(
-            c_int(loc_type), c_int(n), idx, c_double(factor), vals, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(vals, dtype=np.float64)
+        return self._double_array(func_name, n, c_int(loc_type),
+                                  mid=(idx, c_double(factor)))
 
     def get_supply_requirement_ag(self, location_type, locations, factor=1.0):
         return self._get_supply_req_or_short(
@@ -2171,14 +1580,8 @@ class IWFMModel:
 
     def get_subregion_ag_pumping_avg_depth_to_gw(self):
         self._require_full_instantiation("SubregionAgPumpingAvgDepthToGW")
-        n = self.n_subregions
-        buf = alloc_double(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetSubregionAgPumpingAverageDepthToGW(
-            c_int(n), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(buf, dtype=np.float64)
+        return self._double_array("IW_Model_GetSubregionAgPumpingAverageDepthToGW",
+                                  self.n_subregions)
 
     def get_zone_ag_pumping_avg_depth_to_gw(self, elements, zones, n_zones):
         self._require_full_instantiation("ZoneAgPumpingAvgDepthToGW")
@@ -2186,23 +1589,15 @@ class IWFMModel:
         elements = np.asarray(elements, dtype=np.int32)
         zones_arr = np.asarray(zones, dtype=np.int32)
         n_elems = len(elements)
-        buf = alloc_double(n_zones)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetZoneAgPumpingAverageDepthToGW(
+        return self._double_array(
+            "IW_Model_GetZoneAgPumpingAverageDepthToGW", n_zones,
             c_int(n_elems),
             (c_int * n_elems)(*elements),
             (c_int * n_elems)(*zones_arr),
-            c_int(n_zones), buf, byref(iStat),
         )
-        _check_status(iStat, self._dll)
-        return np.array(buf, dtype=np.float64)
 
     def get_n_ag_crops(self):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNAgCrops(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNAgCrops")
 
     def get_land_use_areas(self, begin_date, end_date, lu_type, lu,
                            n_elements=None, fact_area=1.0):
@@ -2212,55 +1607,33 @@ class IWFMModel:
         if n_elements is None:
             n_elements = self.n_elements
         n_times = self.n_timesteps
-        d_len, c_begin = str_to_c(begin_date)
-        e_len, c_end = str_to_c(end_date)
-        if e_len.value != d_len.value:
-            raise ValueError("begin_date and end_date must have the same "
-                             "length (MM/DD/YYYY_HH:MM)")
+        d_len, c_begin, c_end = _c_dates(begin_date, end_date)
         buf = alloc_double(n_elements * n_times)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetLandUseAreasForTimePeriod(
-            d_len, c_begin, c_end, c_int(lu_type), c_int(lu),
-            c_int(n_elements), c_int(n_times), c_double(fact_area),
-            buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.frombuffer(buf, dtype=np.float64).reshape(
-            (n_elements, n_times), order="F"
-        ).copy()
+        self._call("IW_Model_GetLandUseAreasForTimePeriod",
+                   d_len, c_begin, c_end, c_int(lu_type), c_int(lu),
+                   c_int(n_elements), c_int(n_times), c_double(fact_area),
+                   buf)
+        return fortran_view(buf, (n_elements, n_times)).copy()
 
     # ==================================================================
     # Generic location queries
     # ==================================================================
 
     def get_n_locations(self, location_type):
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNLocations(c_int(location_type), byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_Model_GetNLocations", c_int(location_type))
 
     def get_location_ids(self, location_type):
         n = self.get_n_locations(location_type)
-        ids = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetLocationIDs(
-            c_int(location_type), c_int(n), ids, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.array(ids, dtype=np.int32)
+        return self._int_array("IW_Model_GetLocationIDs", n, c_int(location_type))
 
     def get_names(self, location_type):
         n = self.get_n_locations(location_type)
         buf_len = n * 100
         loc_arr = alloc_int(n)
         buf = alloc_char(buf_len)
-        iStat = c_int(0)
-        self._dll.IW_Model_GetNames(
-            c_int(location_type), c_int(n), loc_arr,
-            c_int(buf_len), buf, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_Model_GetNames",
+                   c_int(location_type), c_int(n), loc_arr,
+                   c_int(buf_len), buf)
         return c_to_str_list(buf, loc_arr, n)
 
     # ==================================================================
@@ -2564,7 +1937,7 @@ class IWFMModel:
         cols = [f"node_{int(nid)}" for nid in node_ids]
         # heads shape: (n_nodes, n_times) -> transpose to (n_times, n_nodes)
         df = pd.DataFrame(heads[:, :len(idx)].T, index=idx, columns=cols)
-        from iwfm_io.model_adapter import _maybe_day_index
+        from iwfm_io._tokens import _maybe_day_index
         return _maybe_day_index(df, day_index)
 
     def subsidence_df(self, factor=1.0):
@@ -2612,7 +1985,7 @@ class IWFMModel:
                      for c in columns]
         df = pd.DataFrame(raw["values"][:len(idx)], index=idx,
                           columns=col_names)
-        from iwfm_io.model_adapter import _maybe_day_index
+        from iwfm_io._tokens import _maybe_day_index
         return _maybe_day_index(df, day_index)
 
     def hydrograph_df(self, hyd_type, index, layer, begin_date=None,
@@ -2634,7 +2007,7 @@ class IWFMModel:
         mask = dates > 0
         idx = self._excel_dates_to_index(dates[mask])
         df = pd.DataFrame({"value": vals[mask][:len(idx)]}, index=idx)
-        from iwfm_io.model_adapter import _maybe_day_index
+        from iwfm_io._tokens import _maybe_day_index
         return _maybe_day_index(df, day_index)
 
     def stream_flows_df(self, factor=1.0):

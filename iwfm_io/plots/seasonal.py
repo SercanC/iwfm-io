@@ -7,7 +7,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from . import CUFT_TO_AF, savefig
+from . import (CUFT_TO_AF, _prepare_axes, _finish)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -16,7 +16,7 @@ from . import CUFT_TO_AF, savefig
 
 def plot_ridgeline(dates, values, value_label="Head",
                    ax=None, figsize=(10, 10), cmap="viridis",
-                   overlap=0.6, save_path=None):
+                   overlap=0.6, save_path=None, close=False):
     """Overlapping monthly hydrographs for successive years.
 
     Shows how seasonal patterns shift over time.
@@ -29,10 +29,7 @@ def plot_ridgeline(dates, values, value_label="Head",
     overlap : float
         Vertical overlap factor (0 = no overlap, 1 = full overlap).
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     dates = list(dates)
     values = np.asarray(values, dtype=float)
@@ -70,8 +67,7 @@ def plot_ridgeline(dates, values, value_label="Head",
                         "J", "A", "S", "O", "N", "D"])
     ax.set_yticks([])
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -81,7 +77,7 @@ def plot_ridgeline(dates, values, value_label="Head",
 
 def plot_calendar_heatmap(dates, values, value_label="Flow",
                            cmap="YlGnBu", ax=None, figsize=(12, 6),
-                           save_path=None):
+                           save_path=None, close=False):
     """Year × month heatmap of monthly values.
 
     Parameters
@@ -90,10 +86,7 @@ def plot_calendar_heatmap(dates, values, value_label="Flow",
         One per month (or per timestep — will be grouped to monthly).
     values : array-like of float
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     dates = list(dates)
     values = np.asarray(values, dtype=float)
@@ -126,8 +119,7 @@ def plot_calendar_heatmap(dates, values, value_label="Flow",
     ax.set_title(f"Calendar Heatmap — {value_label}")
     fig.colorbar(im, ax=ax, label=value_label, shrink=0.8)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -137,7 +129,7 @@ def plot_calendar_heatmap(dates, values, value_label="Flow",
 
 def plot_polar_seasonal(monthly_values, labels=None,
                         title="Seasonal Pattern",
-                        ax=None, figsize=(8, 8), save_path=None):
+                        ax=None, figsize=(8, 8), save_path=None, close=False):
     """12-month values on a polar axis.
 
     Parameters
@@ -148,11 +140,7 @@ def plot_polar_seasonal(monthly_values, labels=None,
     labels : list of str, optional
         Month labels.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize,
-                               subplot_kw={"projection": "polar"})
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize, projection="polar")
 
     if labels is None:
         labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -184,8 +172,7 @@ def plot_polar_seasonal(monthly_values, labels=None,
     if isinstance(monthly_values, dict) and len(monthly_values) <= 8:
         ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=8)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 

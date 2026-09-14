@@ -273,6 +273,9 @@ ParaView and color by any array.
 - **Readers are strict**: a truncated, short-row, non-numeric or
   unrecognised deck raises `IWFMParseError` (`file:line [section]:
   message`) — report it as a broken input rather than working around it.
+  That includes an unrecognised keyword in a keyed block and an IWFM
+  component version the reader does not model (root-zone 4.0/4.01/4.13/
+  5.0, stream 4.21/5.0): both used to be misparsed silently.
   `open_model(path, strict=False)` / `with iwfm_io.strict_mode(False):`
   keeps what parsed and warns (`IWFMReadWarning`) when partial data is
   acceptable. Cross-file pointer problems (time-series columns, entity

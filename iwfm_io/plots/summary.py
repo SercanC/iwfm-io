@@ -24,11 +24,14 @@ plot_supply_vs_demand
     Grouped bars comparing supply requirements to shortages.
 """
 
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-from . import CUFT_TO_AF, savefig, _has_df_methods
+from . import (CUFT_TO_AF, _has_df_methods, _prepare_axes, _finish)
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -72,6 +75,7 @@ def plot_budget_pie(
     figsize=(8, 8),
     save_path=None,
     title=None,
+    close=False,
 ):
     """Pie chart of average absolute flow by budget component.
 
@@ -175,10 +179,7 @@ def plot_budget_pie(
     colors = _DEFAULT_COLORS[: len(pie_vals)]
 
     # Plot
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     wedges, texts, autotexts = ax.pie(
         pie_vals,
@@ -193,8 +194,7 @@ def plot_budget_pie(
 
     ax.set_title(title or f"Budget Composition (avg |flow|) — Location {location}")
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -217,6 +217,7 @@ def plot_budget_monthly_average(
     figsize=(12, 6),
     save_path=None,
     title=None,
+    close=False,
 ):
     """Grouped bar chart of monthly-average budget flows.
 
@@ -298,10 +299,7 @@ def plot_budget_monthly_average(
         -0.4 + bar_width / 2, 0.4 - bar_width / 2, n_sel
     )
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     for k, (name, offset) in enumerate(zip(sel_names, offsets)):
         color = _DEFAULT_COLORS[k % len(_DEFAULT_COLORS)]
@@ -324,8 +322,7 @@ def plot_budget_monthly_average(
     ax.axhline(0, color="black", linewidth=0.5)
     fig.tight_layout()
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -349,6 +346,7 @@ def plot_budget_annual_bars(
     figsize=(14, 6),
     save_path=None,
     title=None,
+    close=False,
 ):
     """Grouped or stacked bar chart of annual budget totals.
 
@@ -418,10 +416,7 @@ def plot_budget_annual_bars(
 
     x = np.arange(n_years)
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if stacked:
         # Separate positive and negative for clean stacking
@@ -456,8 +451,7 @@ def plot_budget_annual_bars(
     ax.axhline(0, color="black", linewidth=0.5)
     fig.tight_layout()
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -474,6 +468,7 @@ def plot_rating_curve(
     figsize=(8, 6),
     save_path=None,
     title=None,
+    close=False,
 ):
     """Stage-discharge rating curves for one or more stream nodes.
 
@@ -498,10 +493,7 @@ def plot_rating_curve(
     if np.isscalar(stream_nodes):
         stream_nodes = [stream_nodes]
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if _has_df_methods(model):
         rt_df = model.stream_rating_tables_df()
@@ -530,8 +522,7 @@ def plot_rating_curve(
     ax.grid(True, which="both", linestyle="--", linewidth=0.4, alpha=0.7)
     fig.tight_layout()
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -549,6 +540,7 @@ def plot_aquifer_parameter_histograms(
     figsize=(12, 8),
     save_path=None,
     title=None,
+    close=False,
 ):
     """Histogram grid of aquifer parameters for a single layer.
 
@@ -655,8 +647,7 @@ def plot_aquifer_parameter_histograms(
     )
     fig.tight_layout(rect=[0, 0, 1, 0.95])
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, axes
 
@@ -683,6 +674,7 @@ def plot_water_balance_summary(
     figsize=(10, 7),
     save_path=None,
     title=None,
+    close=False,
 ):
     """Horizontal bar chart of mean inflows (positive) and outflows (negative).
 
@@ -765,19 +757,13 @@ def plot_water_balance_summary(
 
     n_bars = len(sorted_names)
     if n_bars == 0:
-        if ax is None:
-            fig, ax = plt.subplots(figsize=figsize)
-        else:
-            fig = ax.figure
+        fig, ax = _prepare_axes(ax, figsize)
         ax.set_title(title or "Water Balance — no non-zero components")
         return fig, ax
 
     y_pos = np.arange(n_bars)
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     colors = []
     n_in = len(in_order)
@@ -817,8 +803,7 @@ def plot_water_balance_summary(
 
     fig.tight_layout()
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -838,6 +823,7 @@ def plot_supply_vs_demand(
     figsize=(12, 6),
     save_path=None,
     title=None,
+    close=False,
 ):
     """Grouped bar chart of supply requirements vs shortages.
 
@@ -895,7 +881,10 @@ def plot_supply_vs_demand(
             try:
                 name = model.get_subregion_name(int(locations[i]))
                 group_labels.append(name)
-            except Exception:
+            except Exception as exc:  # no name table, or DLL IWFMError
+                logger.warning("subregion name for location %s unavailable "
+                               "(%s: %s) -- using its number",
+                               locations[i], type(exc).__name__, exc)
                 group_labels.append(f"Loc {locations[i]}")
         else:
             group_labels.append(f"Supply {supplies[i]}")
@@ -914,10 +903,7 @@ def plot_supply_vs_demand(
     x = np.arange(n_groups)
     bar_width = 0.18
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     ax.bar(x - 1.5 * bar_width, req_ag, width=bar_width,
            label="Ag Requirement", color="#2ca02c")
@@ -936,8 +922,7 @@ def plot_supply_vs_demand(
     ax.axhline(0, color="black", linewidth=0.5)
     fig.tight_layout()
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 

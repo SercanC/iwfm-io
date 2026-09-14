@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from . import savefig, build_element_polygons
+from . import (build_element_polygons, _prepare_axes, _finish)
 
 __all__ = [
     "plot_phi_convergence",
@@ -47,20 +47,6 @@ _PRIOR_COLOR = "#999999"
 _POST_COLOR = "#1f77b4"
 
 
-def _prepare_axes(ax, figsize):
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
-    return fig, ax
-
-
-def _finish(fig, save_path, dpi):
-    fig.tight_layout()
-    if save_path:
-        savefig(fig, save_path, dpi=dpi)
-
-
 def _tidy_phi(source, kind):
     """Accept an IesResults or an already-tidy phi frame."""
     if isinstance(source, pd.DataFrame):
@@ -69,7 +55,7 @@ def _tidy_phi(source, kind):
 
 
 def plot_phi_convergence(source, kind="composite", log=True, ax=None,
-                         figsize=(8, 5), save_path=None, dpi=150):
+                         figsize=(8, 5), save_path=None, dpi=150, close=False):
     """Box-plot the ensemble phi distribution per IES iteration.
 
     Parameters
@@ -106,12 +92,13 @@ def plot_phi_convergence(source, kind="composite", log=True, ax=None,
     ax.set_title("Ensemble phi convergence")
     ax.grid(True, linestyle="--", alpha=0.4, axis="y")
     ax.legend(loc="best", fontsize="small", framealpha=0.8)
-    _finish(fig, save_path, dpi)
+    fig.tight_layout()
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, ax
 
 
 def plot_phi_by_group(source, n_top=20, iterations=None, ax=None,
-                      figsize=(8, 7), save_path=None, dpi=150):
+                      figsize=(8, 7), save_path=None, dpi=150, close=False):
     """Horizontal bars of mean per-group phi, first vs last iteration.
 
     Parameters
@@ -146,12 +133,13 @@ def plot_phi_by_group(source, n_top=20, iterations=None, ax=None,
     ax.set_title(f"Top {len(mean)} phi-contributing observation groups")
     ax.grid(True, linestyle="--", alpha=0.4, axis="x")
     ax.legend(loc="best", fontsize="small", framealpha=0.8)
-    _finish(fig, save_path, dpi)
+    fig.tight_layout()
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, ax
 
 
 def plot_residual_butterfly(stats, metric="mean_res", n_top=30, ax=None,
-                            figsize=(8, 7), save_path=None, dpi=150):
+                            figsize=(8, 7), save_path=None, dpi=150, close=False):
     """Diverging horizontal bars of a residual metric by group.
 
     Positive residuals (observed > simulated, i.e. the model is low)
@@ -184,13 +172,14 @@ def plot_residual_butterfly(stats, metric="mean_res", n_top=30, ax=None,
     ax.set_title(f"{metric} by group (obs − sim; red: model low, "
                  f"blue: model high)")
     ax.grid(True, linestyle="--", alpha=0.4, axis="x")
-    _finish(fig, save_path, dpi)
+    fig.tight_layout()
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, ax
 
 
 def plot_obs_vs_sim(data, observed="observed", simulated="simulated",
                     hexbin_threshold=5000, ax=None, figsize=(6.5, 6.5),
-                    save_path=None, dpi=150):
+                    save_path=None, dpi=150, close=False):
     """Observed vs simulated 1:1 plot with fit statistics.
 
     Scatter for small datasets; hexbin density above *hexbin_threshold*
@@ -239,14 +228,15 @@ def plot_obs_vs_sim(data, observed="observed", simulated="simulated",
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, linestyle="--", alpha=0.4)
     ax.legend(loc="lower right", fontsize="small", framealpha=0.8)
-    _finish(fig, save_path, dpi)
+    fig.tight_layout()
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, ax
 
 
 def plot_parameter_histograms(results, parameters=None, group=None,
                               par_data=None, iterations=None, max_pars=20,
                               ncols=4, bins=20, figsize=None,
-                              save_path=None, dpi=150):
+                              save_path=None, dpi=150, close=False):
     """Prior-vs-posterior histograms, one panel per parameter.
 
     Parameters
@@ -326,12 +316,13 @@ def plot_parameter_histograms(results, parameters=None, group=None,
         axes[j // ncols][j % ncols].set_visible(False)
     axes[0][0].legend(fontsize="x-small", framealpha=0.8)
     fig.suptitle("Parameter distributions: prior vs posterior")
-    _finish(fig, save_path, dpi)
+    fig.tight_layout()
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, axes
 
 
 def plot_parameter_railing(source, n_top=25, ax=None, figsize=(8, 6),
-                           save_path=None, dpi=150):
+                           save_path=None, dpi=150, close=False):
     """Stacked horizontal bars: % of ensemble values at bounds, per group.
 
     Parameters
@@ -370,14 +361,15 @@ def plot_parameter_railing(source, n_top=25, ax=None, figsize=(8, 6),
     ax.set_title("Parameter bound railing")
     ax.grid(True, linestyle="--", alpha=0.4, axis="x")
     ax.legend(loc="best", fontsize="small", framealpha=0.8)
-    _finish(fig, save_path, dpi)
+    fig.tight_layout()
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, ax
 
 
 def plot_ensemble_hydrograph(ensemble, observed=None, base="base",
                              original=None, quantiles=(0.05, 0.95),
                              ylabel="Value", title=None, ax=None,
-                             figsize=(10, 5), save_path=None, dpi=150):
+                             figsize=(10, 5), save_path=None, dpi=150, close=False):
     """Ensemble time-series band with base realization and observations.
 
     Parameters
@@ -425,13 +417,14 @@ def plot_ensemble_hydrograph(ensemble, observed=None, base="base",
         ax.set_title(title)
     ax.grid(True, linestyle="--", alpha=0.4)
     ax.legend(loc="best", fontsize="small", framealpha=0.8)
-    _finish(fig, save_path, dpi)
+    fig.tight_layout()
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, ax
 
 
 def plot_residual_map(stats, x="x", y="y", metric="mean_res", model=None,
                       vlim=None, size=25, ax=None, figsize=(8, 9),
-                      save_path=None, dpi=150):
+                      save_path=None, dpi=150, close=False):
     """Map a residual metric at observation locations.
 
     Parameters
@@ -473,5 +466,6 @@ def plot_residual_map(stats, x="x", y="y", metric="mean_res", model=None,
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_title(f"{metric} at observation locations")
-    _finish(fig, save_path, dpi)
+    fig.tight_layout()
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, ax

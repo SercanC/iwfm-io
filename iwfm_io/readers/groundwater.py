@@ -230,8 +230,10 @@ def read_gw_main(
         elif kw in scalar_keywords:
             reader.next_data_line()
             scalars[kw] = value
+        elif reader.degrade_unknown_keyword(line, "GW main file block"):
+            continue  # lenient: reported and skipped, keep scanning
         else:
-            # Unknown or keyword-less line: table data / aquifer params
+            # keyword-less line: table data / aquifer params
             break
 
     config = {
@@ -255,7 +257,8 @@ def read_gw_main(
                                              hydrograph_cols)
 
     # Face flow output block. FCHYDOUTFL is omitted entirely when NOUTF=0,
-    # so only consume lines whose keyword belongs to this block.
+    # so only consume lines whose keyword belongs to this block; NGROUP
+    # (the aquifer parameter section) legitimately follows it.
     n_face_flows = 0
     face_flow_out_file = None
     while True:
@@ -271,6 +274,9 @@ def read_gw_main(
             reader.next_data_line()
             face_flow_out_file = _resolve(value)
             break
+        elif reader.degrade_unknown_keyword(line, "GW main face flow block",
+                                            expected=("NGROUP",)):
+            continue
         else:
             break
 
@@ -308,8 +314,9 @@ def _parse_gw_param_tail(cursor) -> dict:
     so far is kept and an ``IWFMReadWarning`` is emitted — the unparsed
     remainder is not retained, so a written file would lack it.
 
-    *cursor* is a :class:`~iwfm_io.readers._param_blocks.LineCursor`
-    (see :meth:`IWFMFileReader.tail_cursor`) positioned at NGROUP.
+    *cursor* is an :class:`~iwfm_io._parser.IWFMFileReader` over the
+    rest of the file (see :meth:`IWFMFileReader.tail_cursor`) positioned
+    at NGROUP.
     """
     out: dict = {
         "ngroup": None,
@@ -351,7 +358,7 @@ def _parse_gw_param_tail(cursor) -> dict:
                 out["anomaly_time_unit"] = cursor.read_keyed_value()[0]
             rows = []
             for _ in range(nebk):
-                toks = tokenize_data_line(cursor.next())
+                toks = tokenize_data_line(cursor.next_data_line())
                 row = {"ic": int(float(toks[0])),
                        "element_id": int(float(toks[1]))}
                 for i, v in enumerate(toks[2:], start=1):
@@ -365,8 +372,8 @@ def _parse_gw_param_tail(cursor) -> dict:
             section = "groundwater return flow"
             out["iflagrf"] = int(cursor.read_keyed_value()[0])
             rows = []
-            while not cursor.eof and cursor.peek_keyword() != "FACTHP":
-                toks = tokenize_data_line(cursor.peek())
+            while not cursor.data_eof and cursor.peek_keyword() != "FACTHP":
+                toks = tokenize_data_line(cursor.peek_data_line())
                 if len(toks) != 3:
                     break
                 try:
@@ -377,7 +384,7 @@ def _parse_gw_param_tail(cursor) -> dict:
                     })
                 except ValueError:
                     break
-                cursor.next()
+                cursor.next_data_line()
             if rows:
                 out["return_flow"] = pd.DataFrame(rows)
 
@@ -386,26 +393,26 @@ def _parse_gw_param_tail(cursor) -> dict:
             section = "initial heads"
             out["facthp"] = float(cursor.read_keyed_value()[0])
             rows = []
-            while not cursor.eof:
+            while not cursor.data_eof:
                 if cursor.peek_keyword():
                     # a keyed line after the heads table starts an
                     # unrecognized section — do not absorb it
                     break
-                toks = tokenize_data_line(cursor.peek())
+                toks = tokenize_data_line(cursor.peek_data_line())
                 try:
                     node_id = int(float(toks[0]))
                     heads = [float(t) for t in toks[1:]]
                 except (ValueError, IndexError):
                     break
-                cursor.next()
+                cursor.next_data_line()
                 row = {"node_id": node_id}
                 for i, h in enumerate(heads, start=1):
                     row[f"head_layer_{i}"] = h
                 rows.append(row)
             if rows:
                 out["initial_heads"] = pd.DataFrame(rows)
-        if not cursor.eof:
-            cursor.next()
+        if not cursor.data_eof:
+            cursor.next_data_line()
             cursor.degrade(
                 "GW main: unrecognized content after the parsed sections "
                 "was not understood and will be missing from written "
@@ -1086,7 +1093,7 @@ def read_tile_drain(path: str | Path) -> TileDrainFile:
                 hyd_out_file = value if value and value != "*" else None
             rows = []
             for _ in range(n_hydrographs):
-                line = cursor.next()
+                line = cursor.next_data_line()
                 body = re.split(r"\s+/", line, maxsplit=1)[0]
                 parts = body.split(None, 2)
                 m = re.search(r"\s/(.+)$", line)
@@ -1185,6 +1192,8 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
         elif kw in scalar_keywords:
             reader.next_data_line()
             scalars[kw] = value
+        elif reader.degrade_unknown_keyword(line, "subsidence file block"):
+            continue
         else:
             break
 
@@ -1220,8 +1229,8 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
         param_time_units = block["time_units"]
         subsidence_params = block["node_params"]
         parametric_grids = block["parametric_grids"]
-        if not _sub_cursor.eof:
-            _sub_cursor.next()
+        if not _sub_cursor.data_eof:
+            _sub_cursor.next_data_line()
             _sub_cursor.degrade(
                 "Subsidence: unrecognized content after the parameter "
                 "section was not understood and will be missing from "

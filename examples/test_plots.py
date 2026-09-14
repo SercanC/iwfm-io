@@ -1,4 +1,7 @@
-"""Exercise all 58 plot functions through the DLL wrapper.
+"""Exercise the 58 DLL-reachable plot cases through the DLL wrapper.
+
+(The library has 66 plot functions; the 8 PEST calibration figures are
+covered by tests/pest, not from a live model.)
 
 Usage:  python examples/test_plots.py [model_root]
         (default model_root: .assets/sample_model)

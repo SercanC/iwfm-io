@@ -73,6 +73,21 @@ _SOIL_INT_COLS = {
     "icdstag", "icdsturbin", "icdsturbout", "icdstnvrv",
 }
 
+# Root-zone main file versions IWFM dispatches on (Package_RootZone.f90)
+# and, for each version this reader models, its soil-table layout —
+# verified against the per-version Fortran (RootZone_v41/v411 read 14
+# columns, RootZone_v412 reads 16).  4.0/4.01 (13 columns, no capillary
+# rise, different leading block), 4.13 (different sub-file set) and
+# 5.0 (soil-type table) are recognised by name but not modeled, so a
+# strict read refuses them and a lenient read falls back to the
+# token-count rule with a warning.
+IWFM_ROOTZONE_VERSIONS = ("4.0", "4.01", "4.1", "4.11", "4.12", "4.13", "5.0")
+SUPPORTED_ROOTZONE_VERSIONS = {
+    "4.1": _SOIL_COLS_V411,
+    "4.11": _SOIL_COLS_V411,
+    "4.12": _SOIL_COLS_V412,
+}
+
 
 def read_rootzone_main(path: str | Path) -> RootZoneMain:
     """Read the IWFM root zone component main file.
@@ -88,6 +103,10 @@ def read_rootzone_main(path: str | Path) -> RootZoneMain:
     reader = IWFMFileReader(path)
     header = reader.read_header()
     base_dir = Path(path).parent
+    version = reader.check_version(
+        header, SUPPORTED_ROOTZONE_VERSIONS, known=IWFM_ROOTZONE_VERSIONS,
+        what="root-zone main")
+    version_layout = SUPPORTED_ROOTZONE_VERSIONS.get(version) if version else None
 
     # Convergence and iteration parameters
     convergence, _ = reader.read_keyed_float()
@@ -122,10 +141,17 @@ def read_rootzone_main(path: str | Path) -> RootZoneMain:
             key = "factcprise" if kw == "FACTPRISE" else kw.lower()
             config[key] = value if kw == "TUNITK" else float(value)
             path_order.append(("scalar", kw, key))
+        elif reader.degrade_unknown_keyword(
+                line, "root-zone main file/factor block"):
+            continue  # lenient: reported and skipped, keep scanning
         else:
             break
 
-    # Per-element soil parameter table (runs to EOF)
+    # Per-element soil parameter table (runs to EOF).  The layout comes
+    # from the version header when it names a supported version; a
+    # headerless (or unsupported, lenient) file falls back to the row's
+    # token count.  IWFM reads exactly the layout's column count per row
+    # and ignores anything after it.
     element_params = None
     rows = []
     columns: list[str] | None = None
@@ -136,7 +162,15 @@ def read_rootzone_main(path: str | Path) -> RootZoneMain:
                 break
             toks = tokenize_data_line(line)
             if columns is None:
-                if len(toks) >= len(_SOIL_COLS_V412):
+                if version_layout is not None:
+                    columns = version_layout
+                    if len(toks) > len(columns):
+                        reader.warn_once(
+                            "soil_extra",
+                            f"soil parameter rows carry {len(toks)} values "
+                            f"but root-zone version {version} lays out "
+                            f"{len(columns)} columns; the extras are ignored")
+                elif len(toks) >= len(_SOIL_COLS_V412):
                     columns = _SOIL_COLS_V412
                 elif len(toks) >= len(_SOIL_COLS_V411) - 1:
                     columns = _SOIL_COLS_V411
@@ -151,9 +185,12 @@ def read_rootzone_main(path: str | Path) -> RootZoneMain:
             vals = reader.to_floats(toks[: len(columns)],
                                     "soil parameter row")
             if len(vals) < len(columns):
+                by = (f" laid out by root-zone version {version}"
+                      if version_layout is not None else "")
                 reader.degrade(
                     f"soil parameter row has {len(vals)} of "
-                    f"{len(columns)} values (missing values read as NaN)")
+                    f"{len(columns)} values{by} (missing values read as "
+                    "NaN)")
             vals += [float("nan")] * (len(columns) - len(vals))
             rows.append(vals)
     if rows and columns is not None:

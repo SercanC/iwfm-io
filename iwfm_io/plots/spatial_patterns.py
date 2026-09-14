@@ -7,9 +7,11 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from . import (build_triangulation, overlay_streams, overlay_grid,
-               excel_date_to_datetime, savefig, _has_df_methods,
-               style_map_axes)
+from . import (
+    build_triangulation, overlay_streams, overlay_grid,
+    excel_date_to_datetime, _has_df_methods, style_map_axes, _prepare_axes,
+    _finish,
+)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -18,7 +20,7 @@ from . import (build_triangulation, overlay_streams, overlay_grid,
 
 def plot_sparkline_grid(model, layer, begin_date, end_date,
                         n_points=50, figsize=(14, 10),
-                        save_path=None):
+                        save_path=None, close=False):
     """Plot tiny hydrographs at sampled node locations on the map.
 
     Provides a spatial overview of temporal behavior across the model.
@@ -77,8 +79,7 @@ def plot_sparkline_grid(model, layer, begin_date, end_date,
     style_map_axes(ax)
     ax.set_title(f"Sparkline Grid — Head Layer {layer}")
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -89,7 +90,7 @@ def plot_sparkline_grid(model, layer, begin_date, end_date,
 def plot_small_multiples(model, layer, begin_date, end_date,
                           n_panels=None, cmap="coolwarm_r",
                           levels=15, figsize=(18, 12),
-                          save_path=None):
+                          save_path=None, close=False):
     """Tile the same head contour map for each year.
 
     Makes slow spatial changes visible through repetition.
@@ -170,8 +171,7 @@ def plot_small_multiples(model, layer, begin_date, end_date,
     fig.colorbar(sm, ax=axes.ravel().tolist(), label="Head elevation",
                  shrink=0.6, pad=0.02)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, axes
 
 
@@ -180,7 +180,7 @@ def plot_small_multiples(model, layer, begin_date, end_date,
 # ──────────────────────────────────────────────────────────────────
 
 def plot_head_vs_gse_scatter(model, layer=1, ax=None, figsize=(8, 8),
-                              save_path=None):
+                              save_path=None, close=False):
     """Scatter plot of initial head vs ground surface elevation.
 
     Points above the 1:1 line indicate artesian (confined) conditions.
@@ -191,10 +191,7 @@ def plot_head_vs_gse_scatter(model, layer=1, ax=None, figsize=(8, 8),
     model : IWFMModel (inquiry mode)
     layer : int
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     from . import get_heads_snapshot
     if _has_df_methods(model):
@@ -243,8 +240,7 @@ def plot_head_vs_gse_scatter(model, layer=1, ax=None, figsize=(8, 8),
             transform=ax.transAxes, ha="left", va="top",
             fontsize=9, color="indianred", alpha=0.7)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 

@@ -3,7 +3,8 @@
 Covers ``IWFMParseError`` (attributes, message, no StopIteration),
 ``section``/``error``/``degrade``, ``read_row``/``read_data_table``,
 ``read_ints``/``read_floats``, BOM handling, ``peek_data_line`` and the
-shared time-series row reader ``read_ts_rows``.
+shared time-series row reader ``read_ts_rows``, plus ``from_lines``/
+``tail_cursor`` tail readers and ``peek_keyword``.
 """
 
 import warnings
@@ -13,7 +14,6 @@ import pytest
 
 from iwfm_io import IWFMParseError, IWFMReadWarning, strict_mode
 from iwfm_io._parser import IWFMFileReader
-from iwfm_io.readers._param_blocks import LineCursor
 
 
 def _write(tmp_path, text, name="f.dat", encoding="utf-8"):
@@ -144,25 +144,77 @@ class TestRowPrimitives:
         assert r.peek_data_line() is None
 
 
-class TestLineCursor:
+class TestTailReader:
+    """``tail_cursor()`` hands the rest of a file to a second reader
+    (``from_lines``) that keeps the file's path, line numbers and mode."""
+
     def test_next_at_eof_raises_parse_error_with_file_lineno(self, tmp_path):
         p = _write(tmp_path, "C h\n 1 / A\n 2\nC end\n")
         r = IWFMFileReader(p)
         r.read_header()
         r.read_keyed_int()
         c = r.tail_cursor()
-        assert c.next() == " 2"
+        assert isinstance(c, IWFMFileReader)
+        assert r.eof and c.lineno0 == 2 and c.lineno == 2
+        assert c.next_data_line() == " 2"
         assert c.lineno == 3
         with pytest.raises(IWFMParseError) as ei:
-            c.next()
+            c.next_data_line()
         assert not isinstance(ei.value, StopIteration)
         assert ei.value.path == str(p) and ei.value.lineno == 4
 
-    def test_cursor_degrade_follows_mode(self):
+    def test_tail_reader_keeps_mode_and_error_context(self, tmp_path):
+        p = _write(tmp_path, "C h\n 1 / A\n x / B\n")
+        r = IWFMFileReader(p, strict=False)
+        r.read_header()
+        r.read_keyed_int()
+        c = r.tail_cursor()
+        assert c.strict is False
+        with c.section("tail"):
+            c.next_data_line()
+            err = c.error("bad")
+        assert (err.path, err.lineno, err.section) == (str(p), 3, "tail")
+
+    def test_from_lines_degrade_follows_mode(self):
         with pytest.raises(IWFMParseError):
-            LineCursor(["1"], path="p", strict=True).degrade("x")
+            IWFMFileReader.from_lines(["1"], path="p", strict=True).degrade("x")
         with pytest.warns(IWFMReadWarning):
-            LineCursor(["1"], path="p", strict=False).degrade("x")
+            IWFMFileReader.from_lines(["1"], path="p", strict=False).degrade("x")
+
+    def test_from_lines_without_path(self):
+        c = IWFMFileReader.from_lines(["C c", " 1 / A"])
+        assert c.path is None and c.n_lines == 2
+        assert str(c.error("m", lineno=2)) == "line 2: m"
+        with pytest.warns(IWFMReadWarning, match="^w$"):
+            c.warn_once("k", "w")
+
+    def test_from_lines_lineno0_offsets_all_line_numbers(self):
+        c = IWFMFileReader.from_lines(["C a", " 1 / A", "C b"], path="f",
+                                      lineno0=10)
+        assert c.lineno == 10
+        c.next_data_line()
+        assert c.lineno == 12 and c.error("x").lineno == 12
+        assert c.data_eof and not c.eof
+        with pytest.raises(IWFMParseError) as ei:
+            c.next_data_line()
+        assert ei.value.lineno == 13
+
+
+class TestPeekKeyword:
+    def test_peek_keyword_skips_comments_and_does_not_consume(self):
+        c = IWFMFileReader.from_lines(["C c", "  12  / NOUTF  face flows", " 3"])
+        assert c.peek_keyword() == "NOUTF"
+        assert c.lineno == 0 and c.drain_comments() == []
+        assert c.read_keyed_int() == (12, "NOUTF  face flows")
+        assert c.peek_keyword() == ""          # keyword-less row
+        c.next_data_line()
+        assert c.peek_keyword() == ""          # end of data
+
+    def test_peek_keyword_uppercases_and_handles_blank_value(self):
+        c = IWFMFileReader.from_lines(["  / dssfl", "/ old / TDOUTFL"])
+        assert c.peek_keyword() == "DSSFL"
+        c.next_data_line()
+        assert c.peek_keyword() == "TDOUTFL"
 
 
 TS = ("C ts\n 2 / NCOL\n 1.0 / FACT\n 1 / NSP\n 0 / NFQ\n / DSSFL\n"

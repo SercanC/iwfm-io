@@ -12,21 +12,11 @@ from matplotlib.collections import PolyCollection
 import matplotlib.patches as mpatches
 
 from . import (
-    _has_df_methods,
-    build_element_polygons,
-    build_triangulation,
-    node_values_to_element,
-    get_stream_segments,
-    get_stream_node_xy,
-    _id_to_index_map,
-    plot_element_map,
-    plot_contour_map,
-    overlay_streams,
-    overlay_grid,
-    savefig,
-    excel_date_to_datetime,
-    style_map_axes,
-    map_legend_outside,
+    _has_df_methods, build_element_polygons, build_triangulation,
+    node_values_to_element, get_stream_segments, get_stream_node_xy,
+    _id_to_index_map, plot_element_map, plot_contour_map, overlay_streams,
+    overlay_grid, excel_date_to_datetime, style_map_axes,
+    map_legend_outside, _prepare_axes, _finish,
 )
 
 
@@ -36,7 +26,7 @@ from . import (
 
 def plot_grid_mesh(model, color_by="subregion", ax=None, figsize=(10, 8),
                    title="Model Grid", cmap="Set3", edgecolor="gray",
-                   linewidth=0.3, alpha=0.7, save_path=None):
+                   linewidth=0.3, alpha=0.7, save_path=None, close=False):
     """Plot the finite-element mesh, optionally colored by subregion.
 
     Parameters
@@ -67,10 +57,7 @@ def plot_grid_mesh(model, color_by="subregion", ax=None, figsize=(10, 8),
     -------
     fig, ax
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     polygons = build_element_polygons(model)
 
@@ -160,8 +147,7 @@ def plot_grid_mesh(model, color_by="subregion", ax=None, figsize=(10, 8),
     if title:
         ax.set_title(title)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -173,7 +159,7 @@ def plot_grid_mesh(model, color_by="subregion", ax=None, figsize=(10, 8),
 def plot_ground_surface_elevation(model, ax=None, cmap="terrain", levels=25,
                                   title="Ground Surface Elevation",
                                   label="Elevation (ft)", figsize=(10, 8),
-                                  show_streams=False, save_path=None):
+                                  show_streams=False, save_path=None, close=False):
     """Plot a filled contour map of ground surface elevation.
 
     Parameters
@@ -213,8 +199,7 @@ def plot_ground_surface_elevation(model, ax=None, cmap="terrain", levels=25,
         overlay_streams(model, ax)
         map_legend_outside(ax)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -225,7 +210,7 @@ def plot_ground_surface_elevation(model, ax=None, cmap="terrain", levels=25,
 
 def plot_layer_thickness(model, layer=1, ax=None, cmap="YlOrBr", levels=20,
                          title=None, label="Thickness (ft)",
-                         figsize=(10, 8), save_path=None):
+                         figsize=(10, 8), save_path=None, close=False):
     """Plot a filled contour map of aquifer layer thickness.
 
     Thickness is computed as top elevation minus bottom elevation for
@@ -275,8 +260,7 @@ def plot_layer_thickness(model, layer=1, ax=None, cmap="YlOrBr", levels=20,
         label=label, title=title, filled=True, figsize=figsize,
     )
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -297,7 +281,7 @@ def plot_aquifer_parameter(model, parameter="Kh", layer=1, ax=None,
                            cmap="viridis", title=None, label=None,
                            figsize=(10, 8), show_mesh=False,
                            vmin=None, vmax=None, log_scale=False,
-                           save_path=None):
+                           save_path=None, close=False):
     """Plot a per-element map of an aquifer parameter for a given layer.
 
     Parameters
@@ -362,8 +346,7 @@ def plot_aquifer_parameter(model, parameter="Kh", layer=1, ax=None,
         figsize=figsize,
     )
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -377,7 +360,7 @@ def plot_gw_head_contour(model, layer=1, time_index=None,
                          ax=None, cmap="coolwarm", levels=25,
                          title=None, label="Head (ft)",
                          figsize=(10, 8), show_streams=False,
-                         save_path=None):
+                         save_path=None, close=False):
     """Plot a groundwater head contour map.
 
     If *time_index* is ``None`` (and no date range is given), the
@@ -452,8 +435,7 @@ def plot_gw_head_contour(model, layer=1, time_index=None,
         overlay_streams(model, ax)
         map_legend_outside(ax)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -465,7 +447,7 @@ def plot_gw_head_contour(model, layer=1, time_index=None,
 def plot_depth_to_water(model, layer=1, ax=None, cmap="YlGnBu",
                         levels=20, title=None,
                         label="Depth to Water (ft)", figsize=(10, 8),
-                        save_path=None):
+                        save_path=None, close=False):
     """Plot depth to water (ground surface minus head at last output timestep).
 
     Positive values indicate the water table is below ground surface.
@@ -511,8 +493,7 @@ def plot_depth_to_water(model, layer=1, ax=None, cmap="YlGnBu",
         label=label, title=title, filled=True, figsize=figsize,
     )
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -524,7 +505,7 @@ def plot_depth_to_water(model, layer=1, ax=None, cmap="YlGnBu",
 def plot_head_change(model, layer, heads_t1, heads_t2, ax=None,
                      cmap="coolwarm", levels=20, title=None,
                      label="Head Change (ft)", figsize=(10, 8),
-                     symmetric=True, save_path=None):
+                     symmetric=True, save_path=None, close=False):
     """Plot the difference between two head arrays (t2 minus t1).
 
     Parameters
@@ -564,10 +545,7 @@ def plot_head_change(model, layer, heads_t1, heads_t2, ax=None,
     if title is None:
         title = f"Layer {layer} Head Change"
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     tri = build_triangulation(model)
 
@@ -584,8 +562,7 @@ def plot_head_change(model, layer, heads_t1, heads_t2, ax=None,
         ax.set_title(title)
     fig.colorbar(cs, ax=ax, label=label, shrink=0.8)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -597,7 +574,7 @@ def plot_head_change(model, layer, heads_t1, heads_t2, ax=None,
 def plot_stream_network(model, color_by="reach", ax=None, cmap="tab20",
                         linewidth=2.0, alpha=0.9, title="Stream Network",
                         figsize=(10, 8), show_grid=True,
-                        show_bottom_elev=False, save_path=None):
+                        show_bottom_elev=False, save_path=None, close=False):
     """Plot the stream network on top of the model grid.
 
     Parameters
@@ -631,10 +608,7 @@ def plot_stream_network(model, color_by="reach", ax=None, cmap="tab20",
     -------
     fig, ax
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if show_grid:
         overlay_grid(model, ax)
@@ -680,8 +654,7 @@ def plot_stream_network(model, color_by="reach", ax=None, cmap="tab20",
     if title:
         ax.set_title(title)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -693,7 +666,7 @@ def plot_stream_network(model, color_by="reach", ax=None, cmap="tab20",
 def plot_well_locations(model, ax=None, cmap="plasma", figsize=(10, 8),
                         title="Well Locations", show_grid=True,
                         show_streams=False, marker_size_range=(20, 120),
-                        save_path=None):
+                        save_path=None, close=False):
     """Plot well locations colored/sized by perforation depth.
 
     The marker color reflects the top-of-perforation elevation and the
@@ -726,10 +699,7 @@ def plot_well_locations(model, ax=None, cmap="plasma", figsize=(10, 8),
     -------
     fig, ax
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if show_grid:
         overlay_grid(model, ax)
@@ -746,8 +716,7 @@ def plot_well_locations(model, ax=None, cmap="plasma", figsize=(10, 8),
         ax.set_title(title + " (no wells)")
         ax.autoscale_view()
         ax.set_aspect("equal")
-        if save_path:
-            savefig(fig, save_path)
+        _finish(fig, save_path, close=close)
         return fig, ax
 
     if _has_df_methods(model):
@@ -781,8 +750,7 @@ def plot_well_locations(model, ax=None, cmap="plasma", figsize=(10, 8),
     if title:
         ax.set_title(title)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -797,7 +765,7 @@ def plot_lake_and_diversion_elements(model, ax=None, figsize=(10, 8),
                                      diversion_color="coral",
                                      alpha=0.55, show_grid=True,
                                      show_streams=False,
-                                     save_path=None):
+                                     save_path=None, close=False):
     """Highlight lake and diversion element groups on the model grid.
 
     Lake elements are filled with *lake_color* and diversion elements
@@ -830,10 +798,7 @@ def plot_lake_and_diversion_elements(model, ax=None, figsize=(10, 8),
     -------
     fig, ax
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if show_grid:
         overlay_grid(model, ax)
@@ -941,8 +906,7 @@ def plot_lake_and_diversion_elements(model, ax=None, figsize=(10, 8),
     if title:
         ax.set_title(title)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 
@@ -956,7 +920,7 @@ def plot_tile_drain_locations(model, ax=None, figsize=(10, 8),
                               marker="s", marker_size=30,
                               color="limegreen", edgecolor="darkgreen",
                               show_grid=True, show_streams=False,
-                              save_path=None):
+                              save_path=None, close=False):
     """Plot tile drain node locations on the model grid.
 
     Parameters
@@ -988,10 +952,7 @@ def plot_tile_drain_locations(model, ax=None, figsize=(10, 8),
     -------
     fig, ax
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if show_grid:
         overlay_grid(model, ax)
@@ -1009,8 +970,7 @@ def plot_tile_drain_locations(model, ax=None, figsize=(10, 8),
         ax.set_title(title + " (no tile drains)")
         ax.autoscale_view()
         ax.set_aspect("equal")
-        if save_path:
-            savefig(fig, save_path)
+        _finish(fig, save_path, close=close)
         return fig, ax
 
     if _has_df_methods(model):
@@ -1046,8 +1006,7 @@ def plot_tile_drain_locations(model, ax=None, figsize=(10, 8),
     if title:
         ax.set_title(title)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
 
     return fig, ax
 

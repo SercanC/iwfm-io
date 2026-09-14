@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -78,6 +78,17 @@ def download_dll(version=DEFAULT_VERSION, dest_dir=None, force=False,
         If *version* has no published release asset.
     RuntimeError
         If the downloaded archive fails its sha256 check.
+
+    Notes
+    -----
+    The archive is fetched to ``<dest_dir>/IWFM_C_x64-<version>.zip.part``.
+    When a previous attempt was interrupted (network drop, Ctrl-C) that
+    partial file is kept and the next call resumes it with an HTTP
+    ``Range`` request, restarting from scratch only when the server does
+    not honour the range. The sha256 check always covers the complete
+    archive, and the DLL is extracted to a ``.part`` file that is moved
+    into place atomically, so a truncated ``IWFM_C_x64.dll`` is never
+    left behind.
     """
     if version not in KNOWN_DLLS:
         raise ValueError(
@@ -101,12 +112,15 @@ def download_dll(version=DEFAULT_VERSION, dest_dir=None, force=False,
         print(f"  {url}")
 
     os.makedirs(dest_dir, exist_ok=True)
-    tmp_fd, tmp_zip = tempfile.mkstemp(suffix=".zip")
-    os.close(tmp_fd)
+    zip_part = os.path.join(dest_dir, f"IWFM_C_x64-{version}.zip.part")
+    # An interrupted fetch (network error, Ctrl-C) propagates and leaves
+    # the partial archive behind for the next call to resume.
+    _fetch(url, zip_part, show_progress)
     try:
-        _fetch(url, tmp_zip, show_progress)
-
-        digest = _sha256(tmp_zip)
+        # From here on the archive is complete: whatever happens next
+        # (bad hash, bad payload, success) it is disposed of -- a resumed
+        # download that does not add up is worthless as a resume base.
+        digest = _sha256(zip_part)
         expected = KNOWN_DLLS[version]
         if digest != expected:
             raise RuntimeError(
@@ -114,7 +128,7 @@ def download_dll(version=DEFAULT_VERSION, dest_dir=None, force=False,
                 f"(sha256 {digest} != expected {expected}). "
                 "Not installing.")
 
-        with zipfile.ZipFile(tmp_zip) as zf:
+        with zipfile.ZipFile(zip_part) as zf:
             names = [n for n in zf.namelist()
                      if n.lower().endswith("iwfm_c_x64.dll")]
             if not names:
@@ -130,7 +144,7 @@ def download_dll(version=DEFAULT_VERSION, dest_dir=None, force=False,
             os.replace(part, dll_path)   # never leave a truncated DLL
     finally:
         try:
-            os.remove(tmp_zip)
+            os.remove(zip_part)
         except OSError:
             pass
 
@@ -142,27 +156,71 @@ def download_dll(version=DEFAULT_VERSION, dest_dir=None, force=False,
 
 
 def _fetch(url, dest, show_progress):
-    """Download *url* to *dest* with a simple progress line."""
-    def _hook(blocks, block_size, total):
-        if not show_progress or total <= 0:
-            return
-        done = min(blocks * block_size, total)
-        pct = 100.0 * done / total
-        print(f"\r  {done / 1e6:6.1f} / {total / 1e6:.1f} MB ({pct:3.0f}%)",
-              end="", flush=True)
+    """Download *url* to *dest*, resuming a partial *dest* when possible.
 
-    req = urllib.request.Request(url, headers={"User-Agent": "iwfm-io"})
-    with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as out:
-        total = int(resp.headers.get("Content-Length") or 0)
-        block = 1 << 20
-        blocks = 0
-        while True:
-            chunk = resp.read(block)
-            if not chunk:
-                break
-            out.write(chunk)
-            blocks += 1
-            _hook(blocks, block, total)
+    An existing non-empty *dest* is treated as the head of an interrupted
+    download: the request carries ``Range: bytes=<size>-`` and, when the
+    server answers ``206 Partial Content``, the remainder is appended.
+    A ``200`` answer (no range support, or the file changed) restarts
+    the download from scratch; ``416`` (range not satisfiable — the
+    partial file is already as long as the asset, or longer) discards
+    it and restarts too.
+    """
+    existing = 0
+    try:
+        existing = os.path.getsize(dest)
+    except OSError:
+        pass
+
+    headers = {"User-Agent": "iwfm-io"}
+    if existing > 0:
+        headers["Range"] = f"bytes={existing}-"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        resp = urllib.request.urlopen(req, timeout=60)
+    except urllib.error.HTTPError as exc:
+        if existing > 0 and exc.code == 416:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            return _fetch(url, dest, show_progress)
+        raise
+
+    with resp:
+        status = getattr(resp, "status", None)
+        if status is None:
+            status = resp.getcode()
+        resumed = existing > 0 and status == 206
+        length = int(resp.headers.get("Content-Length") or 0)
+        if resumed:
+            total = existing + length
+            content_range = resp.headers.get("Content-Range") or ""
+            if "/" in content_range and content_range.rsplit("/", 1)[1].isdigit():
+                total = int(content_range.rsplit("/", 1)[1])
+            done = existing
+            mode = "ab"
+            if show_progress:
+                print(f"  resuming at {existing / 1e6:.1f} MB")
+        else:
+            total = length
+            done = 0
+            mode = "wb"
+            if existing > 0 and show_progress:
+                print("  server did not honour the resume request; "
+                      "downloading from the start")
+        with open(dest, mode) as out:
+            block = 1 << 20
+            while True:
+                chunk = resp.read(block)
+                if not chunk:
+                    break
+                out.write(chunk)
+                done += len(chunk)
+                if show_progress and total > 0:
+                    pct = 100.0 * min(done, total) / total
+                    print(f"\r  {done / 1e6:6.1f} / {total / 1e6:.1f} MB "
+                          f"({pct:3.0f}%)", end="", flush=True)
     if show_progress:
         print()
 

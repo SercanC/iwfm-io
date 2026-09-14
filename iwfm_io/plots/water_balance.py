@@ -6,8 +6,8 @@
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from . import CUFT_TO_AF, excel_date_to_datetime, savefig
+from . import (CUFT_TO_AF, excel_date_to_datetime, _prepare_axes, _finish)
+from . import _plotly
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -16,7 +16,7 @@ from . import CUFT_TO_AF, excel_date_to_datetime, savefig
 
 def plot_water_balance_sankey(names, values, title="Water Balance",
                                ax=None, figsize=(14, 8),
-                               save_path=None):
+                               save_path=None, close=False):
     """Sankey diagram of water balance components.
 
     Parameters
@@ -27,10 +27,7 @@ def plot_water_balance_sankey(names, values, title="Water Balance",
         Average flows. Positive = inflow, negative = outflow.
     title : str
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     # Filter out near-zero flows and the Time column
     filtered = [(n, v) for n, v in zip(names, values)
@@ -140,24 +137,18 @@ def plot_water_balance_sankey(names, values, title="Water Balance",
     ax.set_title(title, fontsize=14, color=_INK, loc="left")
     ax.axis("off")
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
-# Validated categorical palette + chart chrome (see dataviz reference)
-_SANKEY_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#008300",
-                  "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"]
-_INK = "#0b0b0b"
-_INK_2 = "#52514e"
-_SURFACE = "#fcfcfb"
+# Palette + chart chrome shared with the plotly builders (``_plotly``);
+# the Sankeys index the first eight categorical slots.
+_SANKEY_COLORS = _plotly.CATEGORICAL
+_INK = _plotly.INK
+_INK_2 = _plotly.INK_2
+_SURFACE = _plotly.SURFACE
 _NODE_GRAY = "#c3c2b7"
-
-
-def _hex_to_rgba(hex_color, alpha):
-    h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha})"
+_hex_to_rgba = _plotly.rgba
 
 
 def _plotly_sankey(names, values, title, save_path, figsize=(14, 8)):
@@ -167,7 +158,7 @@ def _plotly_sankey(names, values, title, save_path, figsize=(14, 8)):
     ``save_path`` ending in ``.html`` writes an interactive page; other
     extensions use plotly's static export (requires *kaleido*).
     """
-    import plotly.graph_objects as go
+    go = _plotly._go()
 
     inflows = [(n, v) for n, v in zip(names, values) if v > 0]
     outflows = [(n, -v) for n, v in zip(names, values) if v < 0]
@@ -208,24 +199,9 @@ def _plotly_sankey(names, values, title, save_path, figsize=(14, 8)):
                   color=link_colors),
         valueformat=",.0f",
     ))
-    fig.update_layout(
-        title=dict(text=title, font=dict(color=_INK, size=18), x=0.02),
-        font=dict(family='"Segoe UI", system-ui, sans-serif',
-                  color=_INK_2, size=13),
-        paper_bgcolor=_SURFACE,
-        width=int(figsize[0] * 100),
-        height=int(figsize[1] * 100),
-        margin=dict(l=30, r=30, t=60, b=30),
-    )
-
-    if save_path:
-        sp = str(save_path)
-        if sp.lower().endswith(".html"):
-            fig.write_html(sp, include_plotlyjs="cdn")
-        else:
-            fig.write_image(sp, scale=2)  # needs kaleido
-        print(f"Saved: {sp}")
-    return fig, None
+    _plotly.apply_layout(fig, title, figsize)
+    fig.update_layout(margin=dict(l=30, r=30, t=60, b=30))
+    return _plotly.finish(fig, save_path)
 
 
 def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
@@ -314,7 +290,7 @@ def plot_budget_sankey(model, budget_type, location, begin_date, end_date,
 # ──────────────────────────────────────────────────────────────────
 
 def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
-                          ax=None, figsize=(10, 8), save_path=None):
+                          ax=None, figsize=(10, 8), save_path=None, close=False):
     """Mirrored horizontal bar chart: inflows left, outflows right.
 
     Parameters
@@ -323,10 +299,7 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
     values : list of float
         Positive = inflow, negative = outflow.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     # Separate inflows and outflows
     inflows = [(n, v) for n, v in zip(names, values)
@@ -380,8 +353,7 @@ def plot_butterfly_chart(names, values, title="Inflows vs Outflows",
     ax.legend(loc="lower right")
     ax.grid(True, axis="x", alpha=0.3)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -437,7 +409,7 @@ def plot_cumulative_departure(model, budget_type, location,
                                fact_vl=CUFT_TO_AF,
                                combine_storage=True,
                                ax=None, figsize=(12, 5),
-                               save_path=None):
+                               save_path=None, close=False):
     """Running sum of (total inflow − total outflow) over time.
 
     Upward trend = net storage gain.
@@ -449,10 +421,7 @@ def plot_cumulative_departure(model, budget_type, location,
         Column indices for inflows and outflows. If None, positive-mean
         columns are treated as inflows and negative-mean as outflows.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     titles = model.get_budget_column_titles(budget_type, location)
     n_cols = len(titles)
@@ -505,8 +474,7 @@ def plot_cumulative_departure(model, budget_type, location,
     ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 

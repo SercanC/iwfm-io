@@ -264,7 +264,15 @@ def water_year_totals(datetimes, values):
 # ──────────────────────────────────────────────────────────────────
 
 def _has_df_methods(source):
-    """True if *source* has the DataFrame-returning interface."""
+    """True if *source* has the DataFrame-returning interface.
+
+    That interface is spelled out by :class:`iwfm_io._protocols.ModelLike`
+    (``nodes_df``/``elements_df``/``stratigraphy_df``/``heads_df``/
+    ``budget_df``, the ``n_*`` counts, ...); both ``IOModelAdapter`` and
+    the DLL ``IWFMModel`` satisfy it.  The check stays duck-typed —
+    ``nodes_df`` is the one method every plot needs — so any object
+    exposing the same methods works without inheriting anything.
+    """
     return hasattr(source, "nodes_df") and callable(source.nodes_df)
 
 
@@ -311,10 +319,8 @@ def _get_element_configs(source):
     if _has_df_methods(source):
         edf = source.elements_df()
         elem_ids = edf["element_id"].values
-        configs = []
-        for _, row in edf.iterrows():
-            configs.append([int(row["node1"]), int(row["node2"]),
-                            int(row["node3"]), int(row["node4"])])
+        configs = (edf[["node1", "node2", "node3", "node4"]]
+                   .to_numpy(dtype=np.int64).tolist())
         return elem_ids, configs
     # Legacy
     elem_ids = source.get_element_ids()
@@ -479,6 +485,25 @@ def node_values_to_element(source, node_values):
 # Stream network
 # ──────────────────────────────────────────────────────────────────
 
+def _stream_node_positions(source):
+    """Return ``(node_xy, pos)`` for the DataFrame interface.
+
+    ``node_xy`` is the ``(n_nodes, 2)`` coordinate array; ``pos[i]`` is
+    the row of stream node *i*'s GW node in it, or -1 when the GW node
+    is not in the node table (a duplicated node ID resolves to its last
+    row, as a dict built from the rows would).
+    """
+    ndf = source.nodes_df()
+    sn_df = source.stream_nodes_df()
+    node_xy = ndf[["x", "y"]].to_numpy(dtype=float)
+    lookup = pd.Series(np.arange(len(ndf)),
+                       index=ndf["node_id"].to_numpy())
+    lookup = lookup[~lookup.index.duplicated(keep="last")]
+    pos = lookup.reindex(sn_df["gw_node_id"].to_numpy()).to_numpy()
+    pos = np.where(np.isnan(pos), -1, pos).astype(np.int64)
+    return node_xy, pos
+
+
 def get_stream_segments(source):
     """Extract stream network as polyline segments.
 
@@ -489,21 +514,20 @@ def get_stream_segments(source):
     reach_ids : np.ndarray
     """
     if _has_df_methods(source):
-        ndf = source.nodes_df()
-        coord = {int(r["node_id"]): (r["x"], r["y"]) for _, r in ndf.iterrows()}
+        xy, pos = _stream_node_positions(source)
         sn_df = source.stream_nodes_df()
         rdf = source.reaches_df()
         reach_ids = rdf["reach_id"].values
+        # row positions of each reach's stream nodes, in file order
+        groups = pd.Series(np.arange(len(sn_df))).groupby(
+            sn_df["reach_id"].to_numpy(), sort=False).indices
         segments = []
         for rid in reach_ids:
-            mask = sn_df["reach_id"] == rid
-            gw_nodes = sn_df.loc[mask, "gw_node_id"].values
-            pts = []
-            for gn in gw_nodes:
-                if int(gn) in coord:
-                    pts.append(coord[int(gn)])
-            if len(pts) >= 2:
-                segments.append(np.array(pts))
+            rows = groups.get(rid)
+            p = pos[rows] if rows is not None else np.empty(0, dtype=np.int64)
+            p = p[p >= 0]
+            if len(p) >= 2:
+                segments.append(xy[p])
             else:
                 segments.append(np.empty((0, 2)))
         return segments, reach_ids
@@ -530,15 +554,12 @@ def get_stream_node_xy(source):
     the reach connectivity.
     """
     if _has_df_methods(source):
-        ndf = source.nodes_df()
-        coord = {int(r["node_id"]): (r["x"], r["y"]) for _, r in ndf.iterrows()}
-        sn_df = source.stream_nodes_df()
-        sx = np.zeros(len(sn_df))
-        sy = np.zeros(len(sn_df))
-        for i, (_, row) in enumerate(sn_df.iterrows()):
-            gw_id = int(row["gw_node_id"])
-            if gw_id in coord:
-                sx[i], sy[i] = coord[gw_id]
+        xy, pos = _stream_node_positions(source)
+        sx = np.zeros(len(pos))
+        sy = np.zeros(len(pos))
+        found = pos >= 0
+        sx[found] = xy[pos[found], 0]
+        sy[found] = xy[pos[found], 1]
         return sx, sy
 
     # Legacy
@@ -564,6 +585,46 @@ def get_stream_node_xy(source):
 
 
 # ──────────────────────────────────────────────────────────────────
+# Figure lifecycle (shared by every plot function)
+# ──────────────────────────────────────────────────────────────────
+
+def _prepare_axes(ax=None, figsize=None, **subplot_kw):
+    """Return ``(fig, ax)``, creating a new figure when *ax* is None.
+
+    Extra keywords (e.g. ``projection="polar"``) are passed as
+    ``subplot_kw`` to :func:`matplotlib.pyplot.subplots` and ignored
+    when the caller supplied *ax*.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize,
+                               subplot_kw=subplot_kw or None)
+    else:
+        fig = ax.figure
+    return fig, ax
+
+
+def savefig(fig, path, dpi=150):
+    """Save figure with tight layout."""
+    fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    print(f"Saved: {path}")
+
+
+def _finish(fig, save_path=None, dpi=150, close=False):
+    """Save *fig* to *save_path* (when given) and optionally close it.
+
+    The one place plot functions release figures: with ``close=True``
+    the figure is closed (after saving), so batch callers that only
+    want the file on disk do not accumulate open figures. Returns
+    *fig*.
+    """
+    if save_path:
+        savefig(fig, save_path, dpi=dpi)
+    if close:
+        plt.close(fig)
+    return fig
+
+
+# ──────────────────────────────────────────────────────────────────
 # Reusable plotting primitives
 # ──────────────────────────────────────────────────────────────────
 
@@ -577,10 +638,7 @@ def plot_element_map(source, values, ax=None, cmap="viridis", label="",
     source : IWFMModel, IOModelAdapter, or object with nodes_df()/elements_df()
     values : array-like, shape ``(n_elements,)``
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
     polygons = build_element_polygons(source)
     values = np.asarray(values, dtype=float).ravel()
     if len(values) != len(polygons):
@@ -616,10 +674,7 @@ def plot_contour_map(source, node_values, ax=None, cmap="viridis",
     a node is masked out of the contour instead of being drawn at a
     substitute value.  Raises when no finite value is left.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
     tri = build_triangulation(source)
     vals = np.asarray(node_values, dtype=float).ravel()
     if len(vals) != len(tri.x):
@@ -698,12 +753,6 @@ def map_legend_outside(ax, handles=None, title=None, ncol=1):
     return fig.legend(handles=handles, title=title, ncol=ncol,
                       loc="center left", bbox_to_anchor=(0.98, 0.5),
                       fontsize="small", framealpha=0.9)
-
-
-def savefig(fig, path, dpi=150):
-    """Save figure with tight layout."""
-    fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor="white")
-    print(f"Saved: {path}")
 
 
 # ──────────────────────────────────────────────────────────────────

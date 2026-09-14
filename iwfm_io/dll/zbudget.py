@@ -1,17 +1,15 @@
 """Standalone IWFM zone-budget file reader."""
 
-import os
 from ctypes import c_int, c_double, c_char, byref
 import numpy as np
 
-from ._dll import load_dll
-from ._errors import IWFMError, _check_status
-from ._proxy import GuardedDLL
+from ._base import _DllFileReader, fortran_view
+from ._errors import IWFMError
 from ._validate import check_date, check_interval, check_window
 from ._marshal import str_to_c, c_to_str, c_to_str_list, alloc_int, alloc_char
 
 
-class IWFMZBudget:
+class IWFMZBudget(_DllFileReader):
     """Read an IWFM zone-budget HDF5 file.
 
     Parameters
@@ -26,61 +24,10 @@ class IWFMZBudget:
         *dll_version*.
     """
 
+    _OPEN_FN = "IW_ZBudget_OpenFile"
+    _CLOSE_FN = "IW_ZBudget_CloseFile"
     #: the file the DLL currently serves (process-global in the DLL)
     _current_path = None
-
-    def __init__(self, hdf_file, dll_version=None, dll_path=None):
-        self._open = False
-        self._path = os.path.abspath(str(hdf_file))
-        if not os.path.isfile(self._path):
-            raise FileNotFoundError(f"budget file not found: {self._path}")
-        raw = load_dll(version=dll_version, dll_path=dll_path)
-        self._dll = GuardedDLL(raw, before=self._before_call)
-        self._reopen()
-        self._open = True
-
-    _LIFECYCLE = frozenset({"IW_ZBudget_OpenFile", "IW_ZBudget_CloseFile", "IW_GetLastMessage"})
-
-    def _before_call(self, name):
-        if name in self._LIFECYCLE:
-            return
-        if not self._open:
-            raise IWFMError("IWFMZBudget is closed", -1)
-        if IWFMZBudget._current_path != self._path:
-            # another instance took the DLL's single file slot: reopen
-            # ours transparently (the DLL closes the other one)
-            self._reopen()
-
-    def _reopen(self):
-        c_len, c_name = str_to_c(self._path)
-        iStat = c_int(0)
-        self._dll.raw.IW_ZBudget_OpenFile(c_name, c_len, byref(iStat))
-        _check_status(iStat, self._dll.raw)
-        IWFMZBudget._current_path = self._path
-
-    def close(self):
-        """Close the Z-Budget file."""
-        if self._open:
-            try:
-                if IWFMZBudget._current_path == self._path:
-                    iStat = c_int(0)
-                    self._dll.IW_ZBudget_CloseFile(byref(iStat))
-                    _check_status(iStat, self._dll)
-                    IWFMZBudget._current_path = None
-            finally:
-                self._open = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
-
-    def __del__(self):
-        try:
-            self.close()
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     # Zone list generation
@@ -89,11 +36,7 @@ class IWFMZBudget:
     def generate_zone_list_from_file(self, zone_def_file):
         """Load zone definitions from an ASCII file."""
         c_len, c_name = str_to_c(zone_def_file)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GenerateZoneList_FromFile(
-            c_name, c_len, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_ZBudget_GenerateZoneList_FromFile", c_name, c_len)
         self._n_zones = getattr(self, '_n_zones', 0) or -1  # zone list ready
 
     def generate_zone_list(self, zone_extent, elements, layers, zones,
@@ -168,23 +111,16 @@ class IWFMZBudget:
             loc_array.append(pos)
             pos += len(name)
 
-        c_z_extent = c_int(zone_extent)
-        c_n_elems = c_int(n_elems)
         c_elems = (c_int * n_elems)(*elements)
         c_layers = (c_int * n_elems)(*layers)
         c_zones = (c_int * n_elems)(*zones_arr)
-        c_n_names = c_int(n_with_names)
         c_name_ids = (c_int * max(n_with_names, 1))(*zone_names_ids)
         names_len, c_names_buf = str_to_c(packed) if packed else (c_int(0), (c_char * 1)())
         c_loc = (c_int * max(n_with_names, 1))(*(loc_array or [0]))
-        iStat = c_int(0)
 
-        self._dll.IW_ZBudget_GenerateZoneList(
-            c_z_extent, c_n_elems, c_elems, c_layers, c_zones,
-            c_n_names, c_name_ids, names_len, c_names_buf, c_loc,
-            byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_ZBudget_GenerateZoneList",
+                   c_int(zone_extent), c_int(n_elems), c_elems, c_layers, c_zones,
+                   c_int(n_with_names), c_name_ids, names_len, c_names_buf, c_loc)
 
     # ------------------------------------------------------------------
     # Properties
@@ -193,29 +129,17 @@ class IWFMZBudget:
     @property
     def n_zones(self):
         """Number of zones (excluding undefined zone)."""
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetNZones(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_ZBudget_GetNZones")
 
     @property
     def n_timesteps(self):
         """Number of time steps."""
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetNTimeSteps(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_ZBudget_GetNTimeSteps")
 
     @property
     def n_title_lines(self):
         """Number of title lines."""
-        n = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetNTitleLines(byref(n), byref(iStat))
-        _check_status(iStat, self._dll)
-        return n.value
+        return self._scalar_int("IW_ZBudget_GetNTitleLines")
 
     # ------------------------------------------------------------------
     # Methods
@@ -223,26 +147,15 @@ class IWFMZBudget:
 
     def get_zone_list(self):
         """Return array of zone IDs."""
-        n = self.n_zones
-        zones = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetZoneList(c_int(n), zones, byref(iStat))
-        _check_status(iStat, self._dll)
-        return np.array(zones, dtype=np.int32)
+        return self._int_array("IW_ZBudget_GetZoneList", self.n_zones)
 
     def get_zone_names(self):
         """Return list of zone names."""
         n = self.n_zones
         buf_len = n * 60
-        c_n = c_int(n)
-        c_buf_len = c_int(buf_len)
         buf = alloc_char(buf_len)
         loc_arr = alloc_int(n)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetZoneNames(
-            c_n, c_buf_len, buf, loc_arr, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_ZBudget_GetZoneNames", c_int(n), c_int(buf_len), buf, loc_arr)
         return c_to_str_list(buf, loc_arr, n)
 
     def get_time_specs(self):
@@ -250,18 +163,12 @@ class IWFMZBudget:
         n_data = self.n_timesteps
         date_buf_len = n_data * 32
         intv_buf_len = 32
-        c_len_dates = c_int(date_buf_len)
-        c_len_intv = c_int(intv_buf_len)
-        c_n_data = c_int(n_data)
         date_buf = alloc_char(date_buf_len)
         intv_buf = alloc_char(intv_buf_len)
         loc_arr = alloc_int(n_data)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetTimeSpecs(
-            date_buf, c_len_dates, intv_buf, c_len_intv,
-            c_n_data, loc_arr, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_ZBudget_GetTimeSpecs",
+                   date_buf, c_int(date_buf_len), intv_buf, c_int(intv_buf_len),
+                   c_int(n_data), loc_arr)
         dates = c_to_str_list(date_buf, loc_arr, n_data)
         interval = c_to_str(intv_buf, intv_buf_len)
         return {"dates": dates, "interval": interval}
@@ -271,21 +178,14 @@ class IWFMZBudget:
         """Return title lines for a zone."""
         n_titles = self.n_title_lines
         title_len = n_titles * 500
-        c_n_titles = c_int(n_titles)
-        c_zone = c_int(zone)
-        c_fact = c_double(fact_ar)
         u_len, c_au = str_to_c(area_unit)
         _, c_vu = str_to_c(volume_unit)
-        c_total = c_int(title_len)
         title_buf = alloc_char(title_len)
         loc_arr = alloc_int(n_titles)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetTitleLines(
-            c_n_titles, c_zone, c_fact,
-            c_au, c_vu, u_len,
-            title_buf, c_total, loc_arr, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_ZBudget_GetTitleLines",
+                   c_int(n_titles), c_int(zone), c_double(fact_ar),
+                   c_au, c_vu, u_len,
+                   title_buf, c_int(title_len), loc_arr)
         return c_to_str_list(title_buf, loc_arr, n_titles)
 
     def get_column_headers_general(self, area_unit="SQ FT",
@@ -302,17 +202,12 @@ class IWFMZBudget:
         buf_len = max_columns * 200
         u_len, c_au = str_to_c(area_unit)
         _, c_vu = str_to_c(volume_unit)
-        c_max = c_int(max_columns)
-        c_buf_len = c_int(buf_len)
         col_buf = alloc_char(buf_len)
         n_cols = c_int(0)
         loc_arr = alloc_int(max_columns)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetColumnHeaders_General(
-            c_max, c_au, c_vu, u_len, c_buf_len,
-            col_buf, byref(n_cols), loc_arr, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_ZBudget_GetColumnHeaders_General",
+                   c_int(max_columns), c_au, c_vu, u_len, c_int(buf_len),
+                   col_buf, byref(n_cols), loc_arr)
         headers = c_to_str_list(col_buf, loc_arr, n_cols.value)
         self._n_columns = len(headers)
         return headers
@@ -356,24 +251,17 @@ class IWFMZBudget:
             columns_list = list(range(1, max_columns + 1))
         n_cols_list = len(columns_list)
         buf_len = max_columns * 200
-        c_zone = c_int(zone)
-        c_n_cols_list = c_int(n_cols_list)
         c_cols_list = (c_int * n_cols_list)(*columns_list)
-        c_max = c_int(max_columns)
         u_len, c_au = str_to_c(area_unit)
         _, c_vu = str_to_c(volume_unit)
-        c_buf_len = c_int(buf_len)
         col_buf = alloc_char(buf_len)
         n_cols = c_int(0)
         loc_arr = alloc_int(max_columns)
         div_cols = alloc_int(max_columns)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetColumnHeaders_ForAZone(
-            c_zone, c_n_cols_list, c_cols_list, c_max,
-            c_au, c_vu, u_len, c_buf_len,
-            col_buf, byref(n_cols), loc_arr, div_cols, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
+        self._call("IW_ZBudget_GetColumnHeaders_ForAZone",
+                   c_int(zone), c_int(n_cols_list), c_cols_list, c_int(max_columns),
+                   c_au, c_vu, u_len, c_int(buf_len),
+                   col_buf, byref(n_cols), loc_arr, div_cols)
         nc = n_cols.value
         headers = c_to_str_list(col_buf, loc_arr, nc)
         return headers, np.array(div_cols[:nc], dtype=np.int32)
@@ -417,27 +305,18 @@ class IWFMZBudget:
         interval = check_interval(interval)
         n_cols = len(columns)
         n_times = self.n_timesteps
-        c_zone = c_int(zone)
-        c_n_cols = c_int(n_cols)
         c_cols = (c_int * n_cols)(*columns)
         b_len, c_begin = str_to_c(begin_date)
         _, c_end = str_to_c(end_date)
         iv_len, c_intv = str_to_c(interval)
-        c_far = c_double(fact_ar)
-        c_fvl = c_double(fact_vl)
-        c_nt = c_int(n_times)
         values = (c_double * (n_cols * n_times))()
         nt_out = c_int(0)
-        iStat = c_int(0)
-        self._dll.IW_ZBudget_GetValues_ForAZone(
-            c_zone, c_n_cols, c_cols,
-            c_begin, c_end, b_len, c_intv, iv_len,
-            c_far, c_fvl, c_nt, values, byref(nt_out), byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        arr = np.frombuffer(values, dtype=np.float64).reshape(
-            (n_cols, n_times), order="F"
-        )
+        self._call("IW_ZBudget_GetValues_ForAZone",
+                   c_int(zone), c_int(n_cols), c_cols,
+                   c_begin, c_end, b_len, c_intv, iv_len,
+                   c_double(fact_ar), c_double(fact_vl), c_int(n_times),
+                   values, byref(nt_out))
+        arr = fortran_view(values, (n_cols, n_times))
         return arr[:, :nt_out.value].T.copy()
 
     def get_values_for_zones_interval(self, zones, columns_per_zone,
@@ -487,25 +366,16 @@ class IWFMZBudget:
         n_zones = len(zones_arr)
         n_cols_max = cols_arr.shape[0]
 
-        c_n_zones = c_int(n_zones)
         c_zones = (c_int * n_zones)(*zones_arr)
-        c_n_cols_max = c_int(n_cols_max)
         # Flatten column-major for Fortran
         flat_cols = cols_arr.flatten(order="F")
         c_cols = (c_int * len(flat_cols))(*flat_cols)
         b_len, c_begin = str_to_c(begin_date)
         iv_len, c_intv = str_to_c(interval)
-        c_far = c_double(fact_ar)
-        c_fvl = c_double(fact_vl)
         values = (c_double * (n_cols_max * n_zones))()
-        iStat = c_int(0)
 
-        self._dll.IW_ZBudget_GetValues_ForSomeZones_ForAnInterval(
-            c_n_zones, c_zones, c_n_cols_max, c_cols,
-            c_begin, b_len, c_intv, iv_len,
-            c_far, c_fvl, values, byref(iStat),
-        )
-        _check_status(iStat, self._dll)
-        return np.frombuffer(values, dtype=np.float64).reshape(
-            (n_cols_max, n_zones), order="F"
-        ).copy()
+        self._call("IW_ZBudget_GetValues_ForSomeZones_ForAnInterval",
+                   c_int(n_zones), c_zones, c_int(n_cols_max), c_cols,
+                   c_begin, b_len, c_intv, iv_len,
+                   c_double(fact_ar), c_double(fact_vl), values)
+        return fortran_view(values, (n_cols_max, n_zones)).copy()

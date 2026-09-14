@@ -156,6 +156,24 @@ def iwfm_day(times):
     return (idx - pd.Timedelta(seconds=1)).normalize()
 
 
+def _maybe_day_index(df, day_index):
+    """Optionally re-index a DatetimeIndex frame by the owning day.
+
+    IWFM stamps each value at the first instant after its period ends
+    (``24:00`` = next-day midnight); with ``day_index=True`` the frame
+    is re-indexed by :func:`iwfm_day` so calendar idioms —
+    ``resample("YE-SEP")``, ``.dt.year``, ``.dt.month`` — label periods
+    correctly. The underlying timestamps are unchanged elsewhere.
+    Shared by ``IOModelAdapter`` and the DLL ``IWFMModel`` ``*_df``
+    methods.
+    """
+    if not day_index:
+        return df
+    out = df.copy(deep=False)
+    out.index = iwfm_day(df.index)
+    return out
+
+
 def water_year(times):
     """Water year each timestamp belongs to (Oct 1 – Sep 30, labeled by
     the ending year), honoring the ``24:00`` convention via

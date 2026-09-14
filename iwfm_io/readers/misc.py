@@ -67,7 +67,7 @@ def read_swshed(path: str | Path) -> SWShedFile:
         ws_rows: list[dict] = []
         node_rows: list[dict] = []
         for _ in range(n_watersheds):
-            toks = tokenize_data_line(cursor.next())
+            toks = tokenize_data_line(cursor.next_data_line())
             ws_id = int(float(toks[0]))
             n_nodes = int(float(toks[3]))
             ws_rows.append({
@@ -83,7 +83,7 @@ def read_swshed(path: str | Path) -> SWShedFile:
                     "qmax": float(toks[5]),
                 })
                 for _ in range(n_nodes - 1):
-                    ctoks = tokenize_data_line(cursor.next())
+                    ctoks = tokenize_data_line(cursor.next_data_line())
                     node_rows.append({
                         "watershed_id": ws_id,
                         "gw_node": int(float(ctoks[0])),
@@ -103,7 +103,7 @@ def read_swshed(path: str | Path) -> SWShedFile:
                    "lambda", "root_depth", "soil_k", "rhc", "cn"]
         rz_rows = []
         for _ in range(n_watersheds):
-            toks = tokenize_data_line(cursor.next())
+            toks = tokenize_data_line(cursor.next_data_line())
             if len(toks) < len(rz_cols):
                 raise ValueError(
                     f"SWShed root-zone parameter row has {len(toks)} of "
@@ -123,7 +123,7 @@ def read_swshed(path: str | Path) -> SWShedFile:
                    "surface_flow_recession", "baseflow_recession"]
         aq_rows = []
         for _ in range(n_watersheds):
-            toks = tokenize_data_line(cursor.next())
+            toks = tokenize_data_line(cursor.next_data_line())
             if len(toks) < len(aq_cols):
                 raise ValueError(
                     f"SWShed aquifer parameter row has {len(toks)} of "
@@ -139,7 +139,7 @@ def read_swshed(path: str | Path) -> SWShedFile:
         ic_cols = ["id", "soil_moisture", "gw_storage"]
         ic_rows = []
         for _ in range(n_watersheds):
-            toks = tokenize_data_line(cursor.next())
+            toks = tokenize_data_line(cursor.next_data_line())
             if len(toks) < len(ic_cols):
                 raise ValueError(
                     f"SWShed initial condition row has {len(toks)} of "
@@ -216,13 +216,13 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
     try:
         ngroup = int(cursor.read_keyed_value()[0])
 
-        factor_vals = tokenize_data_line(cursor.next())
+        factor_vals = tokenize_data_line(cursor.next_data_line())
         for name, val in zip(("fx", "fd", "fk"), factor_vals):
             config[name] = float(val)
         if cursor.peek_keyword() == "TUNITZ":
             config["tunitz"] = cursor.read_keyed_value()[0]
         else:
-            nxt = cursor.peek()
+            nxt = cursor.peek_data_line()
             toks = tokenize_data_line(nxt) if nxt is not None else []
             if len(toks) == 1:
                 try:
@@ -235,16 +235,16 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
             # NDP/NEP keyed ints, NEP parametric elements, then the
             # parametric node table (ID PX PY + params per layer).
             for _ in range(ngroup):
-                line = cursor.peek()
+                line = cursor.peek_data_line()
                 if line is None:
                     break
                 elem_range = "".join(tokenize_data_line(line))
-                cursor.next()
+                cursor.next_data_line()
                 ndp = int(cursor.read_keyed_value()[0])
                 nep = int(cursor.read_keyed_value()[0])
                 element_rows = []
                 for _ in range(nep):
-                    toks = tokenize_data_line(cursor.next())
+                    toks = tokenize_data_line(cursor.next_data_line())
                     row = {"element_id": int(float(toks[0]))}
                     for i, v in enumerate(toks[1:5], start=1):
                         row[f"node_{i}"] = int(float(v))
@@ -267,15 +267,15 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
             # One row per element: IE + (PD PN PI PK PRHC) per layer.
             n_row_tokens = 1 + 5 * n_unsat_layers
             records = []
-            while not cursor.eof:
-                toks = tokenize_data_line(cursor.peek())
+            while not cursor.data_eof:
+                toks = tokenize_data_line(cursor.peek_data_line())
                 if len(toks) != n_row_tokens:
                     break
                 try:
                     vals = [float(t) for t in toks]
                 except ValueError:
                     break
-                cursor.next()
+                cursor.next_data_line()
                 elem = int(vals[0])
                 for layer in range(n_unsat_layers):
                     p = vals[1 + 5 * layer: 6 + 5 * layer]
@@ -289,23 +289,23 @@ def read_unsatzone(path: str | Path) -> UnsatZoneFile:
         # (IE = 0 applies the values to all elements).
         section = "initial moisture"
         ic_rows = []
-        while not cursor.eof:
-            toks = tokenize_data_line(cursor.peek())
+        while not cursor.data_eof:
+            toks = tokenize_data_line(cursor.peek_data_line())
             try:
                 vals = [float(t) for t in toks]
             except ValueError:
                 break
             if len(vals) != 1 + n_unsat_layers:
                 break
-            cursor.next()
+            cursor.next_data_line()
             row = {"element_id": int(vals[0])}
             for i, v in enumerate(vals[1:], start=1):
                 row[f"moisture_layer_{i}"] = v
             ic_rows.append(row)
         if ic_rows:
             initial_moisture = pd.DataFrame(ic_rows)
-        if not cursor.eof:
-            cursor.next()
+        if not cursor.data_eof:
+            cursor.next_data_line()
             with cursor.section(section):
                 cursor.degrade(
                     "UnsatZone: unrecognized content after the parsed "

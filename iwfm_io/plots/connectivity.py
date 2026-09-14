@@ -4,12 +4,17 @@
 53. Bypass flow diagram — bypass routing with loss fractions
 """
 
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from . import (get_stream_node_xy, get_element_centroids, overlay_grid,
-               overlay_streams, _has_df_methods, savefig,
-               style_map_axes, map_legend_outside)
+from . import (
+    get_stream_node_xy, get_element_centroids, overlay_grid,
+    overlay_streams, _has_df_methods, style_map_axes, map_legend_outside,
+    _prepare_axes, _finish,
+)
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -17,7 +22,7 @@ from . import (get_stream_node_xy, get_element_centroids, overlay_grid,
 # ──────────────────────────────────────────────────────────────────
 
 def plot_diversion_network(model, ax=None, figsize=(12, 10),
-                            save_path=None):
+                            save_path=None, close=False):
     """Graph visualization showing diversion flow paths.
 
     Stream export nodes are connected to their served elements via
@@ -27,10 +32,7 @@ def plot_diversion_network(model, ax=None, figsize=(12, 10),
     ----------
     model : IWFMModel (inquiry mode)
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     overlay_grid(model, ax, alpha=0.15)
     overlay_streams(model, ax, color="dodgerblue", linewidth=1.5)
@@ -86,7 +88,10 @@ def plot_diversion_network(model, ax=None, figsize=(12, 10),
                 elems = row["elements"]
             else:
                 elems = model.get_diversion_elements(div_idx)
-        except Exception:
+        except Exception as exc:  # table miss (KeyError/IndexError) or DLL IWFMError
+            logger.warning("diversion %s: served elements unavailable "
+                           "(%s: %s) -- not drawn", did,
+                           type(exc).__name__, exc)
             continue
 
         # Draw export node
@@ -124,8 +129,7 @@ def plot_diversion_network(model, ax=None, figsize=(12, 10),
     ]
     map_legend_outside(ax, handles=handles)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -134,7 +138,7 @@ def plot_diversion_network(model, ax=None, figsize=(12, 10),
 # ──────────────────────────────────────────────────────────────────
 
 def plot_bypass_flow_diagram(model, ax=None, figsize=(12, 10),
-                              save_path=None):
+                              save_path=None, close=False):
     """Bypass routing diagram with loss fractions.
 
     Shows bypass export nodes, outflow destinations, and
@@ -144,10 +148,7 @@ def plot_bypass_flow_diagram(model, ax=None, figsize=(12, 10),
     ----------
     model : IWFMModel (inquiry mode)
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     overlay_grid(model, ax, alpha=0.15)
     overlay_streams(model, ax, color="dodgerblue", linewidth=1.5)
@@ -205,7 +206,9 @@ def plot_bypass_flow_diagram(model, ax=None, figsize=(12, 10),
             else:
                 rec_loss = model.get_bypass_recoverable_loss_factor(byp_idx)
                 nonrec_loss = model.get_bypass_non_recoverable_loss_factor(byp_idx)
-        except Exception:
+        except Exception as exc:  # table miss (KeyError/IndexError) or DLL IWFMError
+            logger.warning("bypass %s: loss factors unavailable (%s: %s) "
+                           "-- shown as 0%%", bid, type(exc).__name__, exc)
             rec_loss, nonrec_loss = 0.0, 0.0
 
         # Export node marker
@@ -255,8 +258,7 @@ def plot_bypass_flow_diagram(model, ax=None, figsize=(12, 10),
     ]
     map_legend_outside(ax, handles=handles)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 

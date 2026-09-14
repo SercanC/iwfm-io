@@ -15,6 +15,7 @@ and warns (:class:`IWFMReadWarning`) in lenient mode; see
 from __future__ import annotations
 
 import os
+import re
 import warnings
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,6 +33,10 @@ from iwfm_io._tokens import (
     tokenize_data_line,
 )
 from iwfm_io.models.base import FileHeader, TimeSeriesSpec
+
+# Shape of an IWFM keyword: the first word after the ``/`` separator of a
+# ``VALUE / KEYWORD`` line (``NOUTF``, ``GWHYDOUTFL``, ``FACTXY``).
+_KEYWORD_RE = re.compile(r"[A-Z][A-Z0-9_]*")
 
 
 def resolve_child_path(value: str, base_dir: str | Path) -> str:
@@ -127,12 +132,47 @@ class IWFMFileReader:
     def __init__(self, path: str | Path, strict: bool | None = None) -> None:
         self.path = Path(path)
         self.strict = current_strict() if strict is None else bool(strict)
+        self._init_state()
+        self._read_all()
+
+    def _init_state(self, lineno0: int = 0) -> None:
         self._lines: list[str] = []
         self._pos: int = 0
+        #: number of file lines preceding ``_lines`` (non-zero for a
+        #: reader built over the tail of another file, see
+        #: :meth:`from_lines`), so ``lineno`` reports real line numbers
+        self.lineno0: int = lineno0
+        self._version_lineno: int | None = None
         self._comment_buffer: list[str] = []
         self._sections: list[str] = []
         self._warned: set[str] = set()
-        self._read_all()
+
+    @classmethod
+    def from_lines(cls, lines: list[str], *, path: str | Path | None = None,
+                   lineno0: int = 0,
+                   strict: bool | None = None) -> IWFMFileReader:
+        """Build a reader over raw *lines* (comments included) instead of
+        a file on disk.
+
+        Parameters
+        ----------
+        lines : list[str]
+            Raw lines — typically the remainder of another file (see
+            :meth:`tail_cursor`), or synthetic content in tests.
+        path : str or Path, optional
+            The file the lines came from, for error messages.
+        lineno0 : int
+            Number of file lines preceding *lines*, so :attr:`lineno`
+            and error messages report real file line numbers.
+        strict : bool, optional
+            Reader mode; ``None`` snapshots the mode in effect.
+        """
+        self = cls.__new__(cls)
+        self.path = Path(path) if path is not None else None
+        self.strict = current_strict() if strict is None else bool(strict)
+        self._init_state(lineno0)
+        self._lines = list(lines)
+        return self
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -162,15 +202,25 @@ class IWFMFileReader:
         return self._pos >= len(self._lines)
 
     @property
+    def data_eof(self) -> bool:
+        """True when no data line remains (only comments, or nothing)."""
+        return self.peek_data_line() is None
+
+    @property
     def lineno(self) -> int:
-        """1-based number of the most recently consumed line (0 before
-        any line was read)."""
-        return self._pos
+        """1-based file line number of the most recently consumed line
+        (:attr:`lineno0` before any line was read)."""
+        return self.lineno0 + self._pos
 
     @property
     def n_lines(self) -> int:
-        """Total number of lines in the file."""
+        """Number of lines held by this reader."""
         return len(self._lines)
+
+    @property
+    def _end_lineno(self) -> int | None:
+        """File line number of the last line held, for EOF errors."""
+        return (self.lineno0 + len(self._lines)) or None
 
     # ------------------------------------------------------------------
     # Context, errors and degradation
@@ -225,7 +275,68 @@ class IWFMFileReader:
         if key in self._warned:
             return
         self._warned.add(key)
-        warnings.warn(f"{self.path}: {msg}", IWFMReadWarning, stacklevel=2)
+        if self.path is not None:
+            msg = f"{self.path}: {msg}"
+        warnings.warn(msg, IWFMReadWarning, stacklevel=2)
+
+    def degrade_unknown_keyword(self, line: str, block: str, *,
+                                expected: tuple[str, ...] | set[str] = ()
+                                ) -> bool:
+        """Report a keyed line whose keyword a keyword-driven block does
+        not model.
+
+        Called by a block that stops at *line* (the next, unconsumed data
+        line) because its keyword is not one the block recognises.  When
+        the line has the ``VALUE / KEYWORD`` shape — a single value token
+        (or none) and an alphabetic keyword — and the keyword is not in
+        *expected* (the keywords that legitimately follow the block), the
+        line is consumed and reported through :meth:`degrade`
+        (``IWFMParseError`` in strict mode, :class:`IWFMReadWarning`
+        otherwise); the caller then keeps scanning.  Returns True in that
+        case.  Returns False, consuming nothing, for anything else —
+        keyword-less table rows, annotated rows (``1 2 3 / note``) and
+        the expected follow-on keywords — so the caller can stop.
+        """
+        value, keyword = split_keyed_line(line)
+        kw = keyword.split()[0].upper() if keyword else ""
+        if not kw or not _KEYWORD_RE.fullmatch(kw) or kw in expected:
+            return False
+        if len(value.split()) > 1:
+            return False
+        self.next_data_line()  # position the message on the line
+        self.degrade(
+            f"unrecognized keyword {kw!r} in {block}; not modeled and "
+            "will be missing from written output")
+        return True
+
+    def check_version(self, header: FileHeader, supported, *,
+                      known=(), what: str = "file") -> str | None:
+        """Gate a reader on the file's ``#version`` header.
+
+        Returns the version string when it is one of *supported* (a
+        mapping or collection of version strings the reader models).
+        A missing header returns None without complaint — the caller
+        keeps its content-driven fallback rules.  A header that is
+        present but not supported goes through :meth:`degrade` (the
+        message says whether IWFM itself knows the version, from
+        *known*) and returns None, so a lenient read still falls back.
+        """
+        version = header.version
+        if version is None:
+            return None
+        if version in supported:
+            return version
+        listed = ", ".join(supported)
+        if known and version in known:
+            msg = (f"{what} version {version!r} is not supported by this "
+                   f"reader (supported: {listed}); the layout of that "
+                   "version is not modeled, so the content may be misread "
+                   "and a written file may not match")
+        else:
+            msg = (f"unrecognized {what} version {version!r} (this reader "
+                   f"supports {listed}); the content may be misread")
+        self.degrade(msg, lineno=self._version_lineno)
+        return None
 
     # ------------------------------------------------------------------
     # Core iteration
@@ -235,7 +346,7 @@ class IWFMFileReader:
         """Return the next raw line (comment or data) and advance."""
         if self.eof:
             raise self.error("end of file reached while reading data",
-                             lineno=self.n_lines or None)
+                             lineno=self._end_lineno)
         line = self._lines[self._pos]
         self._pos += 1
         return line
@@ -256,7 +367,7 @@ class IWFMFileReader:
         raise self.error(
             "end of file reached while a data line was still expected — "
             "the file may be truncated or a section is missing",
-            lineno=self.n_lines or None)
+            lineno=self._end_lineno)
 
     def peek_data_line(self) -> str | None:
         """Peek at the next non-comment line without consuming it."""
@@ -269,6 +380,16 @@ class IWFMFileReader:
                 return line
             pos += 1
         return None
+
+    def peek_keyword(self) -> str:
+        """Uppercased first word of the next data line's ``/ keyword``
+        part, without consuming it (``""`` for a keyword-less line or at
+        the end of the data)."""
+        line = self.peek_data_line()
+        if line is None:
+            return ""
+        _, keyword = split_keyed_line(line)
+        return keyword.split()[0].upper() if keyword else ""
 
     def drain_comments(self) -> list[str]:
         """Return and clear accumulated comment lines."""
@@ -294,6 +415,7 @@ class IWFMFileReader:
             line = self._lines[self._pos]
             if is_version_header(line):
                 version = parse_version_header(line)
+                self._version_lineno = self.lineno0 + self._pos + 1
                 comments.append(line)
                 self._pos += 1
             elif is_comment(line):
@@ -605,11 +727,10 @@ class IWFMFileReader:
         self._pos = len(self._lines)
         return remaining
 
-    def tail_cursor(self):
-        """Consume the rest of the file into a
-        :class:`~iwfm_io.readers._param_blocks.LineCursor` that reports
-        this file's path, real line numbers and reader mode."""
-        from iwfm_io.readers._param_blocks import LineCursor
+    def tail_cursor(self) -> IWFMFileReader:
+        """Consume the rest of the file into a new :class:`IWFMFileReader`
+        (see :meth:`from_lines`) that reports this file's path, real
+        line numbers and reader mode."""
         lineno0 = self.lineno
-        return LineCursor(self.skip_to_end(), path=self.path,
-                          lineno0=lineno0, strict=self.strict)
+        return IWFMFileReader.from_lines(self.skip_to_end(), path=self.path,
+                                         lineno0=lineno0, strict=self.strict)

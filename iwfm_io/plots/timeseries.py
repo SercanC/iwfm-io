@@ -13,25 +13,18 @@ All functions follow a consistent interface:
   :func:`excel_date_to_datetime`.
 """
 
+import logging
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from . import CUFT_TO_AF, excel_date_to_datetime, savefig
+from . import (CUFT_TO_AF, excel_date_to_datetime, _prepare_axes, _finish)
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────
 # Internal helpers
 # ──────────────────────────────────────────────────────────────────
-
-def _prepare_axes(ax, figsize):
-    """Return (fig, ax), creating a new figure when *ax* is None."""
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
-    return fig, ax
-
 
 def _format_date_axis(ax, rotation=30):
     """Apply sensible date formatting to the x-axis."""
@@ -42,7 +35,8 @@ def _format_date_axis(ax, rotation=30):
         label.set_ha("right")
 
 
-def _finalise(fig, ax, title, ylabel, save_path, dpi, legend=True):
+def _finalise(fig, ax, title, ylabel, save_path, dpi, legend=True,
+              close=False):
     """Apply common finishing touches and optionally save."""
     if title:
         ax.set_title(title)
@@ -67,8 +61,7 @@ def _finalise(fig, ax, title, ylabel, save_path, dpi, legend=True):
                       fontsize="small", framealpha=0.8)
     _format_date_axis(ax)
     fig.tight_layout()
-    if save_path:
-        savefig(fig, save_path, dpi=dpi)
+    _finish(fig, save_path, dpi=dpi, close=close)
     return fig, ax
 
 
@@ -143,6 +136,7 @@ def plot_gw_head_hydrographs(
     figsize=(12, 5),
     save_path=None,
     dpi=150,
+    close=False,
 ):
     """Multi-line plot of groundwater head vs. time at selected nodes.
 
@@ -219,7 +213,8 @@ def plot_gw_head_hydrographs(
     for label, values in series:
         ax.plot(datetimes, values, label=label)
 
-    return _finalise(fig, ax, title, ylabel, save_path, dpi)
+    return _finalise(fig, ax, title, ylabel, save_path, dpi,
+                     close=close)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -241,6 +236,7 @@ def plot_stream_flow_hydrograph(
     figsize=(12, 5),
     save_path=None,
     dpi=150,
+    close=False,
 ):
     """Plot stream flow vs. time at selected stream nodes.
 
@@ -305,7 +301,8 @@ def plot_stream_flow_hydrograph(
     for label, values in series:
         ax.plot(datetimes, values, label=label)
 
-    return _finalise(fig, ax, title, ylabel, save_path, dpi)
+    return _finalise(fig, ax, title, ylabel, save_path, dpi,
+                     close=close)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -327,6 +324,7 @@ def plot_stream_stage_hydrograph(
     figsize=(12, 5),
     save_path=None,
     dpi=150,
+    close=False,
 ):
     """Plot stream stage (water surface elevation) vs. time.
 
@@ -389,7 +387,8 @@ def plot_stream_stage_hydrograph(
     for label, values in series:
         ax.plot(datetimes, values, label=label)
 
-    return _finalise(fig, ax, title, ylabel, save_path, dpi)
+    return _finalise(fig, ax, title, ylabel, save_path, dpi,
+                     close=close)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -418,6 +417,7 @@ def plot_budget_timeseries(
     figsize=(12, 6),
     save_path=None,
     dpi=150,
+    close=False,
 ):
     """Plot budget components as a stacked area chart or multi-line chart.
 
@@ -471,7 +471,10 @@ def plot_budget_timeseries(
     # integer type codes, not names)
     try:
         titles = list(model.get_budget_column_titles(budget_type, location))
-    except Exception:
+    except Exception as exc:  # budget absent, or DLL IWFMError
+        logger.warning("budget column titles unavailable for %s/%s "
+                       "(%s: %s) -- legend uses column numbers",
+                       budget_type, location, type(exc).__name__, exc)
         titles = None
 
     if columns is None:
@@ -530,7 +533,8 @@ def plot_budget_timeseries(
         for j in range(values.shape[1]):
             ax.plot(datetimes, values[:, j], label=col_names[j])
 
-    return _finalise(fig, ax, title, ylabel, save_path, dpi)
+    return _finalise(fig, ax, title, ylabel, save_path, dpi,
+                     close=close)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -561,6 +565,7 @@ def plot_zbudget_timeseries(
     figsize=(12, 6),
     save_path=None,
     dpi=150,
+    close=False,
 ):
     """Plot zone-budget components over time.
 
@@ -628,7 +633,10 @@ def plot_zbudget_timeseries(
                 zone_ids)
             col_names = [titles[c - 1] if 1 <= c <= len(titles)
                          else f"Column {c}" for c in columns]
-        except Exception:
+        except Exception as exc:  # zone-budget headers absent, or DLL IWFMError
+            logger.warning("zone-budget column titles unavailable for %s "
+                           "zone %s (%s: %s) -- legend uses column numbers",
+                           zbudget_type, zone_id, type(exc).__name__, exc)
             col_names = [f"Column {c}" for c in columns]
 
     if balance_only:
@@ -663,7 +671,8 @@ def plot_zbudget_timeseries(
         for j in range(values.shape[1]):
             ax.plot(datetimes, values[:, j], label=col_names[j])
 
-    return _finalise(fig, ax, title, ylabel, save_path, dpi)
+    return _finalise(fig, ax, title, ylabel, save_path, dpi,
+                     close=close)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -683,6 +692,7 @@ def plot_cumulative_gw_storage_change(
     figsize=(12, 5),
     save_path=None,
     dpi=150,
+    close=False,
 ):
     """Line chart of cumulative groundwater storage change.
 
@@ -725,7 +735,8 @@ def plot_cumulative_gw_storage_change(
 
     ax.axhline(0, color="black", linewidth=0.6, linestyle="--")
 
-    return _finalise(fig, ax, title, ylabel, save_path, dpi)
+    return _finalise(fig, ax, title, ylabel, save_path, dpi,
+                     close=close)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -744,6 +755,7 @@ def plot_land_use_area_timeseries(
     figsize=(12, 6),
     save_path=None,
     dpi=150,
+    close=False,
 ):
     """Stacked area chart of land-use categories over time.
 
@@ -828,7 +840,8 @@ def plot_land_use_area_timeseries(
         stacked = np.vstack(all_areas)
         ax.stackplot(datetimes, stacked, labels=labels, alpha=0.8)
 
-    return _finalise(fig, ax, title, ylabel, save_path, dpi)
+    return _finalise(fig, ax, title, ylabel, save_path, dpi,
+                     close=close)
 
 
 # ──────────────────────────────────────────────────────────────────

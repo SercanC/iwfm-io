@@ -7,8 +7,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from . import (frame_interval_ms, build_triangulation, excel_date_to_datetime,
-               _has_df_methods, savefig)
+from . import (
+    frame_interval_ms, build_triangulation, excel_date_to_datetime,
+    _has_df_methods, _finish,
+)
 
 
 def _sample_transect(model, points, n_samples):
@@ -147,7 +149,7 @@ def animate_cross_section(model, points, layer, begin_date, end_date,
 
 def plot_multi_layer_head_panel(model, points, begin_date, end_date,
                                   n_samples=80, time_index=0,
-                                  figsize=(14, 10), save_path=None):
+                                  figsize=(14, 10), save_path=None, close=False):
     """Same transect, one subplot per layer, showing how head
     responses differ by depth.
 
@@ -216,8 +218,7 @@ def plot_multi_layer_head_panel(model, points, begin_date, end_date,
                  f"{dt_objs[ti].strftime('%Y-%m')}", fontsize=13)
     fig.tight_layout()
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, axes
 
 

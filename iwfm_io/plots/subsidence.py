@@ -5,8 +5,10 @@
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from . import (plot_contour_map, overlay_streams, build_triangulation, _has_df_methods, savefig)
+from . import (
+    plot_contour_map, overlay_streams, build_triangulation,
+    _has_df_methods, _prepare_axes, _finish,
+)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -15,7 +17,7 @@ from . import (plot_contour_map, overlay_streams, build_triangulation, _has_df_m
 
 def plot_subsidence_bowl(model, subsidence_values, layer=None,
                           cmap="Reds", levels=20, ax=None,
-                          figsize=(10, 8), save_path=None):
+                          figsize=(10, 8), save_path=None, close=False):
     """Contour map of cumulative subsidence.
 
     Parameters
@@ -28,10 +30,7 @@ def plot_subsidence_bowl(model, subsidence_values, layer=None,
         If provided, show subsidence for this layer only from
         get_subsidence_all(). Ignored if subsidence_values is given.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     if subsidence_values is None:
         if _has_df_methods(model):
@@ -60,8 +59,7 @@ def plot_subsidence_bowl(model, subsidence_values, layer=None,
     ax.tricontour(tri, subsidence_values, levels=10, colors="darkred",
                   linewidths=0.5, alpha=0.6)
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
@@ -71,7 +69,7 @@ def plot_subsidence_bowl(model, subsidence_values, layer=None,
 
 def plot_subsidence_vs_head(heads_ts, subsidence_ts, dates=None,
                              node_label="", ax=None, figsize=(8, 6),
-                             save_path=None):
+                             save_path=None, close=False):
     """Cross-plot of subsidence vs head at a single node over time.
 
     Reveals the elastic (reversible) vs inelastic (irreversible)
@@ -87,10 +85,7 @@ def plot_subsidence_vs_head(heads_ts, subsidence_ts, dates=None,
     dates : list of datetime, optional
         For color-coding by time.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-    else:
-        fig = ax.figure
+    fig, ax = _prepare_axes(ax, figsize)
 
     heads_ts = np.asarray(heads_ts, dtype=float)
     subsidence_ts = np.asarray(subsidence_ts, dtype=float)
@@ -130,8 +125,7 @@ def plot_subsidence_vs_head(heads_ts, subsidence_ts, dates=None,
             transform=ax.transAxes, fontsize=8, va="top",
             style="italic", color="gray")
 
-    if save_path:
-        savefig(fig, save_path)
+    _finish(fig, save_path, close=close)
     return fig, ax
 
 
