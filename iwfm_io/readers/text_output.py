@@ -549,69 +549,124 @@ def read_velocity_out(path: Union[str, Path]) -> pd.DataFrame:
     return df
 
 
-def _budget_text_columns(header_lines: list, data_line: str) -> list:
+def _is_dash_line(line: str) -> bool:
+    """A budget separator: dashes and blanks only, nothing else.
+
+    Both the full-width rules around the header block and the shorter
+    per-group underlines match; the caller distinguishes them by
+    position.
+    """
+    t = line.strip()
+    return bool(t) and set(t) <= {"-", " "} and t.count("-") >= 5
+
+
+def _budget_title_lines(lines: list, data_start: int) -> tuple:
+    """``(title_lines, groups)`` for one budget section.
+
+    A section header is bracketed by dash rules.  A budget with column
+    *groups* (the Land & Water Use budget's "Agricultural Area" /
+    "Urban Area") carries an extra banner line underlined by its own
+    segmented rule::
+
+        ------------------------------------------   <- rule
+                    Agricultural Area                 <- group banner
+            --------------------    ------------      <- group underline
+              Potential   Agricultural                <- title lines
+        Time    CUAW        Supply       ...
+        ------------------------------------------   <- rule
+        10/31/1973_24:00   15918.6  ...               <- data
+
+    The per-column titles are the lines between the last two rules, so
+    the banner -- which spans many columns -- is not sliced into
+    nonsense.  It is returned separately as *groups*: ``(lo, hi,
+    label)`` per segment of the underline, so the caller can prefix the
+    columns it covers ("Agricultural Area (AC)" vs "Urban Area (AC)").
+    """
+    dashes = [i for i in range(data_start) if _is_dash_line(lines[i])]
+    if not dashes:
+        return [], []
+    lo = dashes[-2] if len(dashes) >= 2 else -1
+    titles = [lines[i].rstrip() for i in range(lo + 1, dashes[-1])
+              if not _is_dash_line(lines[i])]
+
+    groups: list = []
+    if len(dashes) >= 3:
+        rule = lines[dashes[-2]]
+        banner = " ".join(lines[i] for i in range(dashes[-3] + 1, dashes[-2])
+                          if not _is_dash_line(lines[i]))
+        segments = [(m.start(), m.end())
+                    for m in re.finditer(r"-{5,}", rule)]
+        if len(segments) > 1:
+            for seg_lo, seg_hi in segments:
+                label = " ".join(
+                    ph.group() for ph in re.finditer(r"\S+(?: \S+)*", banner)
+                    if seg_lo <= (ph.start() + ph.end()) / 2 < seg_hi)
+                if label:
+                    groups.append((seg_lo, seg_hi, label))
+    return titles, groups
+
+
+def _budget_text_columns(header_lines: list, data_line: str,
+                         groups: list = ()) -> list:
     """Column titles of a text budget, one per data column.
 
-    IWFM prints the titles right-aligned over fixed-width columns, over
-    as many lines as the longest title needs.  The column spans are
-    taken from the token ends of *data_line* (the first data row);
-    each title is the space-joined fragments of every header line
-    inside its span.  Duplicate names get a ``_2`` suffix so the frame
-    keeps one column per data column.
+    IWFM prints each title right-aligned over its fixed-width column,
+    across as many lines as the longest title needs.  Column spans come
+    from the tokens of *data_line* (the first data row); every *word* of
+    every header line is assigned to the column its midpoint falls in --
+    slicing the line by span instead would cut words whose title is
+    wider than the column it labels.  Duplicate names get a ``_2``
+    suffix so the frame keeps one name per data column.
     """
     if not header_lines or not data_line:
         return []
-    ends = [m.end() for m in re.finditer(r"\S+", data_line.rstrip("\n"))]
-    if not ends:
+    toks = list(re.finditer(r"\S+", data_line.rstrip("\n")))
+    if not toks:
         return []
-    spans = [(0 if i == 0 else ends[i - 1], e) for i, e in enumerate(ends)]
-    names = []
-    for lo, hi in spans:
-        frags = []
-        for ln in header_lines:
-            piece = ln[lo:hi].strip()
-            if piece:
-                frags.append(piece)
-        names.append(" ".join(frags))
-    if names and names[0].upper() == "TIME":
-        names[0] = "date"
-    seen: dict = {}
-    for i, n in enumerate(names):
-        if not n:
-            n = f"col_{i}"
-        if n in seen:
-            seen[n] += 1
-            n = f"{n}_{seen[n]}"
-        else:
-            seen[n] = 1
-        names[i] = n
-    return names
+    # column i owns everything from the end of column i-1 to its own end
+    spans = [(0 if i == 0 else toks[i - 1].end(), m.end())
+             for i, m in enumerate(toks)]
+    def _column_of(lo_hi):
+        """(column index, share of the piece that column covers)."""
+        lo, hi = lo_hi
+        best, best_ov = 0, -1
+        for i, (a, b) in enumerate(spans):
+            ov = min(hi, b) - max(lo, a)
+            if ov > best_ov:
+                best, best_ov = i, ov
+        return best, best_ov / max(hi - lo, 1)
 
-
-def _budget_text_columns(header_lines: list, data_line: str) -> list:
-    """Column titles of a text budget, one per data column.
-
-    IWFM prints the titles right-aligned over fixed-width columns, over
-    as many lines as the longest title needs.  The column spans are
-    taken from the token ends of *data_line* (the first data row);
-    each title is the space-joined fragments of every header line
-    inside its span.  Duplicate names get a ``_2`` suffix so the frame
-    keeps one column per data column.
-    """
-    if not header_lines or not data_line:
-        return []
-    ends = [m.end() for m in re.finditer(r"\S+", data_line.rstrip("\n"))]
-    if not ends:
-        return []
-    spans = [(0 if i == 0 else ends[i - 1], e) for i, e in enumerate(ends)]
-    names = []
-    for lo, hi in spans:
-        frags = []
-        for ln in header_lines:
-            piece = ln[lo:hi].strip()
-            if piece:
-                frags.append(piece)
-        names.append(" ".join(frags))
+    frags: list = [[] for _ in spans]
+    for ln in header_lines:
+        # A title is a phrase whose words are single-spaced, and two or
+        # more spaces separate one column's title from the next -- but
+        # neighbouring titles can also end up a single space apart
+        # ("inside Model outside Model" over two columns).  So a phrase
+        # is kept whole only when one column covers most of it;
+        # otherwise it really spans columns and is split word by word.
+        for phrase in re.finditer(r"\S+(?: \S+)*", ln):
+            col, share = _column_of((phrase.start(), phrase.end()))
+            if share >= 0.7:
+                frags[col].append(phrase.group())
+                continue
+            for w in re.finditer(r"\S+", phrase.group()):
+                lo = phrase.start() + w.start()
+                col, _ = _column_of((lo, lo + len(w.group())))
+                frags[col].append(w.group())
+    names = [" ".join(f) for f in frags]
+    # a grouped budget repeats plain titles ("Area (AC)") under each
+    # group; the banner is what tells them apart
+    for i, (lo, hi) in enumerate(spans):
+        mid = (lo + hi) / 2
+        for g_lo, g_hi, label in groups:
+            if g_lo <= mid < g_hi and names[i]:
+                title, lab = names[i].split(), label.split()
+                # "Agricultural Area" + "Area (AC)" reads better as
+                # "Agricultural Area (AC)"
+                if title and lab and title[0] in (lab[-1], lab[0]):
+                    title = title[1:]
+                names[i] = " ".join(lab + title)
+                break
     if names and names[0].upper() == "TIME":
         names[0] = "date"
     seen: dict = {}
@@ -666,8 +721,7 @@ def read_budget_text(path: Union[str, Path]) -> dict:
         # Find section name from the BUDGET line
         section_name = ""
         col_header_lines: list[str] = []   # raw (un-stripped) lines
-        data_start = 0
-        dash_count = 0
+        data_start = len(lines)
 
         for i, line in enumerate(lines):
             stripped = line.strip()
@@ -679,17 +733,14 @@ def read_budget_text(path: Union[str, Path]) -> dict:
             elif "BUDGET" in stripped.upper() and not section_name:
                 section_name = stripped
 
-            # Count dashed separators
-            if re.match(r"^-{5,}", stripped):
-                dash_count += 1
-                if dash_count == 1:
-                    # Collect column header lines between dashes
-                    col_header_lines = []
-                elif dash_count == 2:
-                    data_start = i + 1
-                    break
-            elif dash_count == 1:
-                col_header_lines.append(line.rstrip())
+            # The data starts at the first dated row; the header block
+            # is everything above it (a group underline is a dash line
+            # too, so counting rules cannot delimit it -- see
+            # _budget_title_lines).
+            if stripped and "/" in stripped.split()[0] \
+                    and "_" in stripped.split()[0]:
+                data_start = i
+                break
 
         if not section_name:
             section_name = f"section_{len(sections) + 1}"
@@ -697,6 +748,7 @@ def read_budget_text(path: Union[str, Path]) -> dict:
         # Column titles span several header lines, right-aligned over
         # their fixed-width data column; they are assembled per column
         # from the spans of the first data row (see _budget_text_columns)
+        col_header_lines, col_groups = _budget_title_lines(lines, data_start)
         col_names: list[str] = []
 
         # Parse data rows
@@ -728,7 +780,8 @@ def read_budget_text(path: Union[str, Path]) -> dict:
         first_data = next(
             (lines[i] for i in range(data_start, len(lines))
              if lines[i].strip() and "/" in lines[i].split()[0]), "")
-        col_names = _budget_text_columns(col_header_lines, first_data)
+        col_names = _budget_text_columns(col_header_lines, first_data,
+                                         col_groups)
         # Use generic column names if header parsing didn't provide enough
         if len(col_names) < n_data_cols + 1:  # +1 for date
             data_col_names = [f"col_{i + 1}" for i in range(n_data_cols)]

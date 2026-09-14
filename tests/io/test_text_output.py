@@ -129,3 +129,51 @@ class TestBudgetText:
         if path.exists():
             result = read_budget_text(path)
             assert len(result) > 0
+
+
+class TestBudgetTextColumnTitles:
+    """Column titles are reconstructed from IWFM's fixed-width header.
+
+    Regression for the 2.15.0 reader: group banners were sliced per
+    column ("A" / "gricultural A" / "rea"), a group underline ended the
+    header block early, and neighbouring titles a single space apart
+    were glued together.
+    """
+
+    def _first(self, name):
+        from iwfm_io.readers.text_output import read_budget_text
+        import pytest
+        path = BUDGET_DIR / name
+        if not path.exists():
+            pytest.skip(f"{name} not present")
+        return next(iter(read_budget_text(path).values()))
+
+    def test_no_generic_column_names(self):
+        for name in ("GW.bud", "Strm.bud", "LWU.bud", "RootZone.bud",
+                     "DiverDetail.bud"):
+            df = self._first(name)
+            generic = [c for c in df.columns if c.startswith("col_")]
+            assert not generic, f"{name}: unrecovered titles {generic}"
+            assert df.columns.is_unique, name
+
+    def test_group_banner_disambiguates_repeated_titles(self):
+        # the L&WU budget prints "Area" once per group; the banner is
+        # what separates the agricultural one from the urban one
+        cols = list(self._first("LWU.bud").columns)
+        ag = [c for c in cols if c.startswith("Agricultural Area")]
+        urban = [c for c in cols if c.startswith("Urban Area")]
+        assert ag and urban, cols
+        assert "Agricultural Area (acres)" in cols, cols
+        # the banner must not be sliced into fragments
+        assert not any(c.strip() in ("A", "rea", "Urba") for c in cols), cols
+
+    def test_titles_one_space_apart_are_not_glued(self):
+        # "inside Model outside Model" sits over two columns
+        cols = list(self._first("Strm.bud").columns)
+        assert "Gain from GW inside Model (+)" in cols, cols
+        assert "Gain from GW outside Model (+)" in cols, cols
+
+    def test_multi_word_titles_stay_with_their_column(self):
+        cols = list(self._first("DiverDetail.bud").columns)
+        assert "Actual Delivery to Subreg. 2" in cols, cols
+        assert "Delivery Shortage for Subreg. 2" in cols, cols

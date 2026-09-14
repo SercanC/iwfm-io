@@ -4,9 +4,12 @@ of being discarded (delivery area names, station details, well names)."""
 
 import pandas as pd
 import pytest
-from pathlib import Path
 
-C2VSIMFG = Path(r"C:\Projects\iwfm-io\.assets\c2vsimfg_v1.5\Simulation")
+# Real validation model (~35 GB): .assets/c2vsimfg_v1.5 by default, or
+# wherever IWFM_C2VSIMFG_DIR points.
+from tests.conftest import C2VSIMFG_DIR
+
+C2VSIMFG = C2VSIMFG_DIR / "Simulation"
 
 
 class TestElementGroupNames:

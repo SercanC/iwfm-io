@@ -10,11 +10,13 @@ lakes.
 All tests skip when the model folder is absent (it is too large to ship).
 """
 
-from pathlib import Path
 
 import pytest
 
-C2VSIMFG = Path(__file__).resolve().parent.parent.parent / ".assets" / "c2vsimfg_v1.5"
+# Location of the real validation model: .assets/c2vsimfg_v1.5 by
+# default, or wherever IWFM_C2VSIMFG_DIR points (the model is ~35 GB,
+# so keeping it outside the repo is normal).
+from tests.conftest import C2VSIMFG_DIR as C2VSIMFG
 
 pytestmark = pytest.mark.skipif(
     not C2VSIMFG.is_dir(), reason="C2VSimFG v1.5 model not present in .assets/"
