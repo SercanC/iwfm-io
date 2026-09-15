@@ -234,3 +234,55 @@ def test_element_configs_vectorised_ints():
     np.testing.assert_array_equal(eids, [7, 8])
     assert cfgs == [[1, 2, 3, 4], [1, 2, 3, 0]]
     assert all(type(v) is int for cfg in cfgs for v in cfg)
+
+
+class TestStreamHydrographIndexing:
+    """``get_hydrograph`` takes the 1-based POSITION in the hydrograph
+    list, not the hydrograph's id.
+
+    Regression: both stream hydrograph plots passed the id, which only
+    works when ids happen to run 1..n. C2VSimFG's stream hydrograph ids
+    are stream node numbers, so the call was rejected as out of range.
+    """
+
+    class _Recorder:
+        """Minimal model: ids deliberately are not 1..n."""
+
+        IDS = [101, 202, 303]
+
+        def __init__(self):
+            self.calls = []
+
+        def get_time_specs(self):
+            return {"dates": ["10/01/1990_24:00", "09/30/1991_24:00"],
+                    "interval": "1MON"}
+
+        def get_hydrograph_type_list(self):
+            return [{"name": "Stream Flow", "location_type": 12},
+                    {"name": "Stream Stage", "location_type": 13}]
+
+        def get_hydrograph_ids(self, location_type):
+            return list(self.IDS)
+
+        def get_hydrograph(self, hyd_type, index, layer, begin_date,
+                           end_date, interval, fact_lt=1.0, fact_vl=1.0):
+            import numpy as np
+            self.calls.append(index)
+            return np.array([33970.0, 34000.0]), np.array([1.0, 2.0])
+
+    def _check(self, fn):
+        import matplotlib.pyplot as plt
+        m = self._Recorder()
+        fig, ax = fn(m, stream_node_indices=[0, 2])
+        plt.close(fig)
+        # positions 0 and 2 -> 1-based 1 and 3, never the ids 101 / 303
+        assert m.calls == [1, 3], m.calls
+        assert not set(m.calls) & set(self._Recorder.IDS), m.calls
+
+    def test_flow_hydrograph_passes_position(self):
+        from iwfm_io.plots.timeseries import plot_stream_flow_hydrograph
+        self._check(plot_stream_flow_hydrograph)
+
+    def test_stage_hydrograph_passes_position(self):
+        from iwfm_io.plots.timeseries import plot_stream_stage_hydrograph
+        self._check(plot_stream_stage_hydrograph)

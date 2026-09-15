@@ -158,4 +158,4 @@ python examples/test_plots.py
 # Output PNGs saved to test_output/
 ```
 
-See [TEST_PLOTS_RESULTS.md](TEST_PLOTS_RESULTS.md) for pass/fail details. 48 of the 58 DLL test cases pass on the sample model; the 10 failures are DLL inquiry-mode limitations (not code bugs), and every one of those functions renders DLL-free through `IOModelAdapter` (`tests/io/test_plots_smoke.py` covers all 66 functions in CI).
+See [TEST_PLOTS_RESULTS.md](TEST_PLOTS_RESULTS.md) for pass/fail details. 45 of the 58 DLL test cases pass on the sample model; the 10 failures are DLL inquiry-mode limitations (not code bugs), and every one of those functions renders DLL-free through `IOModelAdapter` (`tests/io/test_plots_smoke.py` covers all 66 functions in CI).

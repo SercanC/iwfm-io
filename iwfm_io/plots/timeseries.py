@@ -285,8 +285,11 @@ def plot_stream_flow_hydrograph(
                 f"stream hydrograph index {sn_idx} out of range "
                 f"[0, {len(hyd_ids) - 1}]")
         hyd_id = hyd_ids[sn_idx]
+        # get_hydrograph takes the 1-based POSITION in the hydrograph
+        # list, not the hydrograph's id -- they coincide only when the
+        # ids happen to run 1..n (C2VSimFG's are stream node numbers)
         dates_arr, values = model.get_hydrograph(
-            flow_type, hyd_id, 1, begin_date, end_date, interval,
+            flow_type, sn_idx + 1, 1, begin_date, end_date, interval,
             fact_lt=fact_lt, fact_vl=fact_vl,
         )
         datetimes = excel_date_to_datetime(dates_arr)
@@ -371,8 +374,11 @@ def plot_stream_stage_hydrograph(
                 f"stream hydrograph index {sn_idx} out of range "
                 f"[0, {len(hyd_ids) - 1}]")
         hyd_id = hyd_ids[sn_idx]
+        # get_hydrograph takes the 1-based POSITION in the hydrograph
+        # list, not the hydrograph's id -- they coincide only when the
+        # ids happen to run 1..n (C2VSimFG's are stream node numbers)
         dates_arr, values = model.get_hydrograph(
-            stage_type, hyd_id, 1, begin_date, end_date, interval,
+            stage_type, sn_idx + 1, 1, begin_date, end_date, interval,
             fact_lt=fact_lt, fact_vl=fact_vl,
         )
         datetimes = excel_date_to_datetime(dates_arr)

@@ -284,7 +284,7 @@ with iwfm_io.dll.IWFMModel(
         zt = zbudgets[0]["zbudget_type"] if zbudgets else None
         fig, ax = plot_zbudget_timeseries(
             m, zbudget_type=zt, zone_id=1,
-            columns=[0, 1, 2], zone_extent="Zone",
+            columns=[1, 2, 3], zone_extent="Zone",
             elements=None, layers=None, zone_ids=None,
             begin_date=bd, end_date=ed,
             save_path=os.path.join(OUT, "18_zbudget_ts.png"))
@@ -571,20 +571,21 @@ with iwfm_io.dll.IWFMModel(
 
     # --- 41. Water balance Sankey (raw data) ---
     from iwfm_io.plots.water_balance import plot_water_balance_sankey
-    try:
-        # Use budget column names and synthetic mean values
-        if bt is not None:
+    # Budget column names + mean magnitudes, shared with case 43 (built
+    # outside the try so a failure here cannot leave 43 undefined).
+    # Budget columns are 1-based.
+    sankey_names = ["Inflow A", "Inflow B", "Outflow A", "Outflow B"]
+    sankey_values = [100, 80, -90, -70]
+    if bt is not None:
+        try:
             titles = m.get_budget_column_titles(bt, 1)
-            n_cols = len(titles)
-            cols = list(range(n_cols))
             ts = m.get_budget_timeseries(
-                bt, 1, cols, bd, ed, "1MON")
-            col_means = np.abs(ts["values"]).mean(axis=0)
+                bt, 1, list(range(1, len(titles) + 1)), bd, ed, "1MON")
             sankey_names = titles
-            sankey_values = col_means
-        else:
-            sankey_names = ["Inflow A", "Inflow B", "Outflow A", "Outflow B"]
-            sankey_values = [100, 80, -90, -70]
+            sankey_values = np.abs(ts["values"]).mean(axis=0)
+        except Exception as e:
+            print(f"41 budget columns unavailable, using synthetic data: {e}")
+    try:
         fig, ax = plot_water_balance_sankey(
             sankey_names, sankey_values,
             save_path=os.path.join(OUT, "41_sankey_raw.png"))
@@ -736,7 +737,7 @@ with iwfm_io.dll.IWFMModel(
         # Use first two budget columns as supply/demand proxies
         fig, ax = plot_budget_supply_gap(
             m, budget_type=bt, location=1,
-            supply_col=0, demand_col=1,
+            supply_col=1, demand_col=2,
             begin_date=bd, end_date=ed,
             save_path=os.path.join(OUT, "52_budget_supply_gap.png"))
         print("52 budget supply gap OK")

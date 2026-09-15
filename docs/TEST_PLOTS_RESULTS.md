@@ -35,6 +35,18 @@
 
 ## Executive Summary
 
+> **Re-run 2026-09-14 (iwfm-io 2.15.x):** the sample-model figure is now
+> **45 of 58**. Three cases that used to "pass" (supply/demand, stream
+> gain/loss, stream–aquifer exchange and friends) are refused up front
+> since 2.13.0, because in inquiry mode the DLL returns zero-filled
+> arrays for them rather than real data. Four others (sankey, budget
+> sankey, butterfly, budget supply gap) were fixed on 2026-09-14 — the
+> example script had been passing 0-based column indices — and the two
+> stream hydrograph cases were fixed by a real library bug: the plots
+> passed a hydrograph *id* where the DLL wants its 1-based *position*.
+> Against C2VSimFG v1.5 the split is 44 through the DLL and 13 DLL-free;
+> see [GALLERY.md](GALLERY.md).
+
 The 58 DLL test cases (covering the plot functions across the plotting modules) are exercised against the sample
 model through the DLL wrapper in inquiry mode. **Every failure is a DLL or
 inquiry-mode limitation, not a bug in the plotting library or the sample

@@ -3,10 +3,21 @@
 Every plot below was produced by `iwfm_io.plots` from **C2VSimFG v1.5**,
 DWR's fine-grid groundwater–surface water model of California's
 Central Valley (30,179 nodes, 32,537 elements, 4 layers, water years
-1974–2021). Static maps and charts come from the 58-case DLL test
-suite (`examples/test_plots.py .assets/c2vsimfg_v1.5`); the plots the
-DLL cannot serve in inquiry mode were rendered DLL-free through
-`IOModelAdapter` (`examples/test_plots_dllfree.py`).
+1974–2021), against a full simulation run of that model.
+
+44 of the images come from the DLL plot suite
+(`examples/test_plots.py .assets/c2vsimfg_v1.5`, using the model's own
+IWFM 2024.2.1594 build); the 13 plots the DLL cannot serve in inquiry
+mode — aquifer parameters, tile drains, cross-sections, zone budgets,
+land use, supply/demand, stream–aquifer exchange, bypasses — were
+rendered DLL-free through `IOModelAdapter`
+(`examples/test_plots_dllfree.py .assets/c2vsimfg_v1.5`).
+
+One plot of the 58 is missing on purpose: the **subsidence bowl** needs
+per-node subsidence, which exists only as live simulation state. In
+inquiry mode the DLL hands back an all-zero array, so the wrapper
+refuses the call rather than draw a blank map, and no output file
+carries per-node values.
 
 ## Maps
 
@@ -179,9 +190,6 @@ DLL cannot serve in inquiry mode were rendered DLL-free through
 ![anim dtw](gallery/c2vsimfg/48_anim_dtw.gif)
 
 ## Subsidence
-
-### 49 — subsidence bowl
-![subsidence bowl](gallery/c2vsimfg/49_subsidence_bowl.png)
 
 ### 50 — subsidence vs head
 ![subsidence vs head](gallery/c2vsimfg/50_subsidence_vs_head.png)

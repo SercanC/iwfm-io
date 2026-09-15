@@ -1,4 +1,4 @@
-"""Exercise the nine plots that used to require the DLL, DLL-free.
+"""Exercise the plots the DLL cannot serve in inquiry mode, DLL-free.
 
 These plot functions fail through the DLL wrapper in inquiry mode (see
 docs/TEST_PLOTS_RESULTS.md); IOModelAdapter serves the same data from
@@ -23,13 +23,21 @@ os.makedirs(OUT, exist_ok=True)
 
 m = open_model(ROOT)
 n_sub = len(m.subregions_df())
+_n = m.nodes_df()
+_p1 = (float(_n["x"].min()), float(_n["y"].mean()))
+_p2 = (float(_n["x"].max()), float(_n["y"].mean()))
+_sim = m.describe()["simulation"]
+_bd, _ed = _sim["begins"], _sim["ends"]
+
 results = []
 
 def run(tag, fn):
     try:
         out = fn()
         fig = out[0] if isinstance(out, tuple) else out
-        plt.close(fig)
+        # animations return a FuncAnimation, not a Figure
+        plt.close(getattr(fig, "_fig", fig) if not hasattr(fig, "savefig")
+                  else fig)
         results.append((tag, "OK"))
         print(f"[OK]   {tag}")
     except Exception as e:
@@ -65,5 +73,26 @@ run("54 subregion depth vs shortage", lambda: plot_subregion_depth_vs_shortage(
 run("58 bypass flow diagram", lambda: plot_bypass_flow_diagram(
     m, save_path=os.path.join(OUT, "58_bypass.png")))
 
-ok = sum(1 for _, s in results if s == "OK")
+from iwfm_io.plots.profiles import plot_stratigraphic_cross_section
+run("12 stratigraphic cross-section", lambda: plot_stratigraphic_cross_section(
+    m, [_p1, _p2], save_path=os.path.join(OUT, "12_xsec.png")))
+
+from iwfm_io.plots.timeseries import plot_zbudget_timeseries
+run("18 zbudget timeseries", lambda: plot_zbudget_timeseries(
+    m, zbudget_type="GW_ZBud", zone_id=1, columns=[1, 2, 3],
+    zone_extent="Zone", elements=None, layers=None, zone_ids=None,
+    begin_date=_bd, end_date=_ed,
+    save_path=os.path.join(OUT, "18_zbudget_ts.png")))
+
+from iwfm_io.plots.cross_sections import plot_multi_layer_head_panel
+run("55 multi-layer head panel", lambda: plot_multi_layer_head_panel(
+    m, points=[_p1, _p2], begin_date=_bd, end_date=_ed, time_index=0,
+    save_path=os.path.join(OUT, "55_multi_layer_panel.png")))
+
+from iwfm_io.plots.cross_sections import animate_cross_section
+run("56 animate cross-section", lambda: animate_cross_section(
+    m, points=[_p1, _p2], layer=1, begin_date=_bd, end_date=_ed,
+    interval_frames=6, save_path=os.path.join(OUT, "56_anim_xsec.gif")))
+
+ok = sum(1 for _, st in results if st == "OK")
 print(f"\n{ok}/{len(results)} passed  ({os.path.basename(ROOT)})")
