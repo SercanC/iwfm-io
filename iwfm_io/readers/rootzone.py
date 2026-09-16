@@ -18,6 +18,7 @@ import warnings
 
 from iwfm_io._parser import IWFMFileReader, IWFMReadWarning
 from iwfm_io._tokens import (
+    keyword_name,
     is_comment,
     is_iwfm_date,
     split_keyed_line,
@@ -68,6 +69,15 @@ _SOIL_COLS_V411 = [
     "element_id", "wp", "fc", "tn", "lambda", "k", "rhc", "cap_rise",
     "irne", "frne", "imsrc", "typdest", "dest", "k_ponded",
 ]
+def _is_number(tok: str) -> bool:
+    """True for a Fortran-readable number (``1.5``, ``2E-3``, ``1.0d0``)."""
+    try:
+        float(tok.replace("d", "e").replace("D", "E"))
+    except ValueError:
+        return False
+    return True
+
+
 _SOIL_INT_COLS = {
     "element_id", "rhc", "irne", "imsrc", "typdest", "dest",
     "icdstag", "icdsturbin", "icdsturbout", "icdstnvrv",
@@ -89,12 +99,20 @@ SUPPORTED_ROOTZONE_VERSIONS = {
 }
 
 
-def read_rootzone_main(path: str | Path) -> RootZoneMain:
+def read_rootzone_main(path: str | Path,
+                       n_elements: int | None = None) -> RootZoneMain:
     """Read the IWFM root zone component main file.
 
     Parameters
     ----------
     path : str or Path
+    n_elements : int, optional
+        The model's element count (NE).  IWFM reads exactly that many
+        soil-parameter rows and ignores anything after them, so when it
+        is known the table is read to that count -- a short table raises.
+        ``open_model`` passes it automatically.  Without it the table
+        runs until the data ends or a keyed ``VALUE / KEYWORD`` line
+        that cannot be a soil row.
 
     Returns
     -------
@@ -130,7 +148,7 @@ def read_rootzone_main(path: str | Path) -> RootZoneMain:
         if line is None:
             break
         value, keyword = split_keyed_line(line)
-        kw = keyword.split()[0].upper() if keyword else ""
+        kw = keyword_name(keyword)
         if kw in _PATH_KEYWORDS:
             reader.next_data_line()
             role = _PATH_KEYWORDS[kw]
@@ -157,10 +175,17 @@ def read_rootzone_main(path: str | Path) -> RootZoneMain:
     columns: list[str] | None = None
     with reader.section("soil parameter table"):
         while True:
+            if n_elements is not None and len(rows) >= n_elements:
+                break                  # IWFM reads exactly NE rows
             line = reader.peek_data_line()
             if line is None:
                 break
             toks = tokenize_data_line(line)
+            if n_elements is None and toks and not _is_number(toks[0]):
+                value, keyword = split_keyed_line(line)
+                if keyword_name(keyword):
+                    # a keyed line is never a soil row: the table ended
+                    break
             if columns is None:
                 if version_layout is not None:
                     columns = version_layout
@@ -193,6 +218,10 @@ def read_rootzone_main(path: str | Path) -> RootZoneMain:
                     "NaN)")
             vals += [float("nan")] * (len(columns) - len(vals))
             rows.append(vals)
+    if n_elements is not None and len(rows) < n_elements:
+        raise reader.error(
+            f"soil parameter table has {len(rows)} rows but the model has "
+            f"{n_elements} elements (IWFM reads one row per element)")
     if rows and columns is not None:
         element_params = pd.DataFrame(rows, columns=columns)
         for col in _SOIL_INT_COLS & set(columns):
@@ -520,7 +549,7 @@ def read_ponded_ag_main(path: str | Path, n_elements: int | None = None) -> Pond
     root_depths: dict[str, float] = {}
     for _ in range(len(PONDED_CROP_TYPES)):
         value, keyword = reader.read_keyed_value()
-        kw = keyword.split()[0].upper() if keyword else ""
+        kw = keyword_name(keyword)
         root_depths[root_key.get(kw, kw.lower())] = float(value)
 
     type_cols = list(PONDED_CROP_TYPES)

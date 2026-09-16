@@ -12,7 +12,8 @@ from pathlib import Path
 import pandas as pd
 
 from iwfm_io._parser import IWFMFileReader, IWFMParseError
-from iwfm_io._tokens import _KEYED_SEP_RE, split_keyed_line, tokenize_data_line
+from iwfm_io._tokens import (_KEYED_SEP_RE, keyword_name, split_keyed_line,
+                             tokenize_data_line)
 from iwfm_io.models.base import TimeSeriesSpec
 from iwfm_io.readers._param_blocks import parse_param_block
 from iwfm_io.models.groundwater import (
@@ -219,7 +220,7 @@ def read_gw_main(
         if line is None:
             break
         value, keyword = split_keyed_line(line)
-        kw = keyword.split()[0].upper() if keyword else ""
+        kw = keyword_name(keyword)
         if kw == "GWHYDOUTFL":
             reader.next_data_line()
             hydrograph_out_file = _resolve(value)
@@ -266,7 +267,7 @@ def read_gw_main(
         if line is None:
             break
         value, keyword = split_keyed_line(line)
-        kw = keyword.split()[0].upper() if keyword else ""
+        kw = keyword_name(keyword)
         if kw == "NOUTF":
             reader.next_data_line()
             n_face_flows = int(value)
@@ -865,7 +866,7 @@ def read_well_spec(path: str | Path) -> WellSpecFile:
         except IWFMParseError:
             break
         value, keyword = split_keyed_line(line)
-        kw = keyword.split()[0].upper() if keyword else ""
+        kw = keyword_name(keyword)
         if kw == "NGRP":
             try:
                 n_groups = int(value)
@@ -1181,7 +1182,7 @@ def read_subsidence(path: str | Path) -> SubsidenceFile:
         if line is None:
             break
         value, keyword = split_keyed_line(line)
-        kw = keyword.split()[0].upper() if keyword else ""
+        kw = keyword_name(keyword)
         if kw == "SUBHYDOUTFL":
             reader.next_data_line()
             hydrograph_out_file = _resolve(value)

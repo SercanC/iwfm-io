@@ -299,6 +299,24 @@ def expand_recurring(data, begin, end):
 _KEYED_SEP_RE = re.compile(r"\s+/|(?<=\d)/(?=\s)")
 
 
+_KEYWORD_NAME_RE = re.compile(r"[^\s/]+")
+
+
+def keyword_name(keyword: str) -> str:
+    """Dispatch name of a keyed line's keyword tag.
+
+    IWFM reads a ``VALUE / KEYWORD`` line list-directed and stops at the
+    first ``/``, so the tag is only a comment to the executable and decks
+    spell it several ways: ``/ ZRZBUDFL``, ``/ZRZBUDFL``, ``/ ZRZBUDFL/``
+    or ``/ FACTK   (cm -> ft)``.  The name is the first word, cut at any
+    further slash, upper-cased -- ``""`` when there is no tag.  Readers
+    that dispatch on the tag must use this, never ``keyword.split()[0]``,
+    or a trailing slash silently ends their keyword block.
+    """
+    m = _KEYWORD_NAME_RE.search(keyword or "")
+    return m.group(0).upper() if m else ""
+
+
 def split_keyed_line(line: str) -> tuple[str, str]:
     """Split a key-value line on the keyword ``/`` separator.
 

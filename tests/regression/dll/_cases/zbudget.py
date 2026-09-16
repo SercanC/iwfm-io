@@ -4,7 +4,7 @@
 case returns ``skipped`` when the copy does not carry it. Reproduces the
 ``generate_zone_list`` default (``nZonesWithNames=0``) out-of-bounds read,
 garbage from unknown zone numbers, and the ``get_column_headers_for_zone``
-hang.
+out-of-bounds read (its default column list ran past the general headers).
 """
 from __future__ import annotations
 
@@ -309,7 +309,9 @@ def case_headers_general_max_columns_0(model_dir):
 
 
 def case_headers_for_zone(model_dir):
-    """``IW_ZBudget_GetColumnHeaders_ForAZone`` hangs in 2025.0.1747."""
+    """Default column list: once 1..500, an out-of-bounds read of the
+    general headers that crashed or hung 2025.0.1747; now every general
+    column."""
     return _with_zones(model_dir, lambda z: z.get_column_headers_for_zone(1)[0][:3])
 
 

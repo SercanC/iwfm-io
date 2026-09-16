@@ -38,6 +38,7 @@ class IWFMZBudget(_DllFileReader):
         c_len, c_name = str_to_c(zone_def_file)
         self._call("IW_ZBudget_GenerateZoneList_FromFile", c_name, c_len)
         self._n_zones = getattr(self, '_n_zones', 0) or -1  # zone list ready
+        self._zone_ncols = {}   # adjacency, hence diversified counts, changed
 
     def generate_zone_list(self, zone_extent, elements, layers, zones,
                            zone_names_ids=None, zone_names=None):
@@ -102,6 +103,7 @@ class IWFMZBudget(_DllFileReader):
             zone_names = zone_names + [f"Zone {z}" for z in unnamed]
         n_with_names = len(zone_names_ids)
         self._n_zones = len(zone_ids_present)
+        self._zone_ncols = {}   # adjacency, hence diversified counts, changed
 
         # Pack zone names into a single buffer with offset array
         packed = "".join(zone_names)
@@ -241,14 +243,48 @@ class IWFMZBudget(_DllFileReader):
                                     max_columns=500):
         """Return column headers diversified for a specific zone.
 
+        The general column list carries one lumped pair, "Inflow from" /
+        "Outflow to adjacent zones".  For a zone that pair is replaced by
+        an inflow/outflow pair **per adjacent zone**, so a zone with *k*
+        neighbours has ``len(general) - 2 + 2 * k`` columns -- more than
+        the general list whenever *k* > 1.  Those diversified indices are
+        what :meth:`get_values_for_zone` and
+        :meth:`get_values_for_zones_interval` take.
+
+        Parameters
+        ----------
+        zone : int
+        columns_list : list[int], optional
+            **General** column indices (``1..len(general)``) to diversify;
+            default all of them.
+        max_columns : int
+            Minimum size of the receiving buffers; raised automatically to
+            fit the zone's diversified columns.
+
         Returns
         -------
         headers : list[str]
         diversified_columns : np.ndarray
-            Mapping from diversified column index to general column index.
+            The diversified column index of each header.
         """
+        n_general = self._column_count()
         if columns_list is None:
-            columns_list = list(range(1, max_columns + 1))
+            # every general column.  (The old default, 1..500, handed the
+            # Fortran general indices past the end of its header array --
+            # it indexes that array unchecked, which crashed or hung the
+            # 2025.0.1747 build.)
+            columns_list = list(range(1, n_general + 1))
+        columns_list = [int(c) for c in columns_list]
+        if not columns_list or min(columns_list) < 1 \
+                or max(columns_list) > n_general:
+            raise ValueError(
+                f"columns_list holds general column indices, which run "
+                f"1..{n_general} for this Z-Budget (1 = Time); got "
+                f"{columns_list[:5]}{'...' if len(columns_list) > 5 else ''}")
+        self._check_zone_ids([zone])
+        # a zone can have at most one neighbour per other zone
+        n_zones = max(int(getattr(self, "_n_zones", 0) or 0), len(self.get_zone_list()))
+        max_columns = max(int(max_columns), n_general + 2 * n_zones)
         n_cols_list = len(columns_list)
         buf_len = max_columns * 200
         c_cols_list = (c_int * n_cols_list)(*columns_list)
@@ -264,7 +300,23 @@ class IWFMZBudget(_DllFileReader):
                    col_buf, byref(n_cols), loc_arr, div_cols)
         nc = n_cols.value
         headers = c_to_str_list(col_buf, loc_arr, nc)
+        if n_cols_list == n_general:
+            # the full list diversifies to the zone's complete column set
+            self._zone_ncols = getattr(self, "_zone_ncols", {})
+            self._zone_ncols[int(zone)] = nc
         return headers, np.array(div_cols[:nc], dtype=np.int32)
+
+    def _zone_column_count(self, zone):
+        """Diversified column count of *zone* (incl. Time), cached per
+        zone list.  This is the only safe bound for the single-zone read,
+        which allocates the zone's flow array to exactly this size and
+        indexes it unchecked."""
+        cache = getattr(self, "_zone_ncols", None)
+        if cache is None:
+            cache = self._zone_ncols = {}
+        if int(zone) not in cache:
+            self.get_column_headers_for_zone(int(zone))
+        return cache[int(zone)]
 
     def get_values_for_zone(self, zone, columns, begin_date, end_date,
                             interval, fact_ar=1.0, fact_vl=1.0):
@@ -275,7 +327,10 @@ class IWFMZBudget(_DllFileReader):
         zone : int
             Zone number.
         columns : list[int]
-            1-based column indices (must include Time as column 1).
+            1-based **diversified** column indices for this zone (must
+            start with Time, column 1) -- see
+            :meth:`get_column_headers_for_zone`.  A zone with more than
+            one neighbour has more columns than the general header list.
         begin_date, end_date : str
             Date-time strings.
         interval : str
@@ -293,12 +348,14 @@ class IWFMZBudget(_DllFileReader):
         if not cols or cols[0] != 1 or min(cols) < 1:
             raise ValueError("columns must start with 1 (the Time column) "
                              "and be >= 1")
-        n_avail = self._column_count()
+        self._check_zone_ids([zone])
+        n_avail = self._zone_column_count(zone)
         if max(cols) > n_avail:
             raise ValueError(
-                f"column {max(cols)} is out of range: this Z-Budget has "
-                f"{n_avail} columns (1 = Time)")
-        self._check_zone_ids([zone])
+                f"column {max(cols)} is out of range for zone {zone}: it has "
+                f"{n_avail} diversified columns (1 = Time, then one "
+                "inflow/outflow pair per adjacent zone -- see "
+                "get_column_headers_for_zone)")
         if not isinstance(begin_date, str) or not isinstance(end_date, str):
             raise TypeError("begin_date/end_date must be IWFM date strings")
         check_window(begin_date, end_date, self._sim_window())
@@ -329,8 +386,11 @@ class IWFMZBudget(_DllFileReader):
         zones : list[int]
             Zone numbers.
         columns_per_zone : np.ndarray
-            2D array of column indices, shape ``(max_cols, n_zones)``.
-            First row should be the Time column (1).
+            2D array of **diversified** column indices, shape
+            ``(max_cols, n_zones)``.  First row is the Time column (1).
+            Zones have different column counts; pad a shorter zone's
+            column with 0 -- IWFM stops that zone at the first index
+            below 2, and those rows of the result are not filled.
         begin_date : str
             Date-time string for the interval.
         interval : str
@@ -349,15 +409,26 @@ class IWFMZBudget(_DllFileReader):
             raise ValueError(
                 "columns_per_zone must be a 2-D array of shape "
                 f"(max_cols, n_zones={len(zones_arr)}), got {cols_arr.shape}")
-        if (cols_arr[0] != 1).any() or (cols_arr < 1).any():
+        if (cols_arr[0] != 1).any() or (cols_arr < 0).any():
             raise ValueError("columns_per_zone: first row must be 1 (Time) "
-                             "and every column index >= 1")
-        n_avail = self._column_count()
-        if cols_arr.max() > n_avail:
-            raise ValueError(
-                f"column {int(cols_arr.max())} is out of range: this "
-                f"Z-Budget has {n_avail} columns (1 = Time)")
+                             "and no column index may be negative")
         self._check_zone_ids(zones_arr.tolist())
+        # Zones have different diversified column counts, so shorter lists
+        # are padded: the Fortran stops a zone's list at the first index
+        # below 2 (0 is the usual pad).  Only the part before that
+        # terminator is read, and each zone is checked against its own
+        # count.
+        for j, zone in enumerate(zones_arr.tolist()):
+            col = cols_arr[1:, j]
+            stop = np.flatnonzero(col < 2)
+            used = col[: stop[0]] if len(stop) else col
+            if len(used):
+                n_avail = self._zone_column_count(zone)
+                if int(used.max()) > n_avail:
+                    raise ValueError(
+                        f"column {int(used.max())} is out of range for zone "
+                        f"{zone}: it has {n_avail} diversified columns "
+                        "(pad shorter zones with 0)")
         begin_date = check_date("begin_date", begin_date)
         window = self._sim_window()
         if window is not None:

@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from iwfm_io._parser import IWFMFileReader
-from iwfm_io._tokens import is_iwfm_date, split_keyed_line
+from iwfm_io._tokens import is_iwfm_date, keyword_name, split_keyed_line
 from iwfm_io.models.base import TimeSeriesSpec
 from iwfm_io.models.timeseries import (
     ETFile,
@@ -83,7 +83,7 @@ def read_timeseries_file(
     if has_factor is None:
         line = reader.peek_data_line()
         _, kw = split_keyed_line(line) if line is not None else ("", "")
-        has_factor = bool(kw) and kw.split()[0].upper().startswith("FACT")
+        has_factor = keyword_name(kw).startswith("FACT")
     factor = None
     if has_factor:
         raw = _keyed()
@@ -105,7 +105,7 @@ def read_timeseries_file(
         line = reader.peek_data_line()
         if line is not None:
             value, kw = split_keyed_line(line)
-            kw1 = kw.split()[0].upper() if kw else ""
+            kw1 = keyword_name(kw)
             first_tok = value.split()[0] if value.split() else ""
             looks_like_date = is_iwfm_date(first_tok)
             if kw1.startswith("DSS") or (not kw and not looks_like_date):

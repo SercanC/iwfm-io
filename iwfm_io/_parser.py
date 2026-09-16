@@ -25,6 +25,7 @@ import pandas as pd
 
 from iwfm_io._strict import current_strict
 from iwfm_io._tokens import (
+    keyword_name,
     is_comment,
     is_iwfm_date,
     is_version_header,
@@ -298,7 +299,7 @@ class IWFMFileReader:
         the expected follow-on keywords — so the caller can stop.
         """
         value, keyword = split_keyed_line(line)
-        kw = keyword.split()[0].upper() if keyword else ""
+        kw = keyword_name(keyword)
         if not kw or not _KEYWORD_RE.fullmatch(kw) or kw in expected:
             return False
         if len(value.split()) > 1:
@@ -389,7 +390,7 @@ class IWFMFileReader:
         if line is None:
             return ""
         _, keyword = split_keyed_line(line)
-        return keyword.split()[0].upper() if keyword else ""
+        return keyword_name(keyword)
 
     def drain_comments(self) -> list[str]:
         """Return and clear accumulated comment lines."""

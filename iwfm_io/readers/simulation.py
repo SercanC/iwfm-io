@@ -9,7 +9,7 @@ from pathlib import Path
 
 from iwfm_io._parser import IWFMFileReader
 from iwfm_io._strict import strict_mode
-from iwfm_io._tokens import split_keyed_line
+from iwfm_io._tokens import keyword_name, split_keyed_line
 from iwfm_io.models.simulation import SimulationMain
 
 # File-list entries are keyed "/ N: DESCRIPTION"
@@ -134,7 +134,7 @@ def read_simulation_main(
                     "not modeled and will be missing from written output")
                 break
             reader.next_data_line()
-            key = keyword.split()[0].upper()
+            key = keyword_name(keyword)
             if key not in _KNOWN_SCALARS:
                 reader.degrade(
                     f"unrecognized keyed value {key!r} in the simulation "

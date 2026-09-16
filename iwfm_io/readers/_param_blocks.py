@@ -31,7 +31,7 @@ from __future__ import annotations
 import pandas as pd
 
 from iwfm_io._parser import IWFMFileReader
-from iwfm_io._tokens import tokenize_data_line
+from iwfm_io._tokens import keyword_name, tokenize_data_line
 
 
 def expand_node_range(spec: str) -> list[int]:
@@ -171,7 +171,7 @@ def parse_param_block(
     time_units: dict[str, str] = {}
     while reader.peek_keyword().startswith("TUNIT"):
         value, keyword = reader.read_keyed_value()
-        time_units[keyword.split()[0].upper()] = value
+        time_units[keyword_name(keyword)] = value
 
     node_params = None
     parametric_grids: list[dict] = []

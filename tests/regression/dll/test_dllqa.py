@@ -579,8 +579,9 @@ CASES = [
     Case("zbudget", "headers_general", ok, copy="zbudget"),
     Case("zbudget", "headers_general_max_columns_1", ok, copy="zbudget"),   # a floor, all headers returned
     Case("zbudget", "headers_general_max_columns_0", raised, copy="zbudget"),
-    Case("zbudget", "headers_for_zone", ok, "dll#10: IW_ZBudget_GetColumnHeaders_ForAZone hangs / faults in 2025.0.1747",
-         copy="zbudget", timeout=HANG_TIMEOUT),
+    # long recorded as a DLL hang: it was the wrapper's own default column
+    # list (1..500) indexing the general headers out of bounds -- fixed 2.15.3
+    Case("zbudget", "headers_for_zone", ok, copy="zbudget", timeout=HANG_TIMEOUT),
     Case("zbudget", "title_lines_zone_1", ok, copy="zbudget"),
     Case("zbudget", "title_lines_zone_999", raised, copy="zbudget"),
     Case("zbudget", "zones_interval_control", ok, copy="zbudget"),

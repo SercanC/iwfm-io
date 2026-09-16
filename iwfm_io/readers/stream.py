@@ -459,14 +459,14 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
     n_groups = 0
     delivery_groups: list = []
     recharge_zones: list = []
-    from iwfm_io._tokens import split_keyed_line
+    from iwfm_io._tokens import keyword_name, split_keyed_line
     from iwfm_io.readers._element_groups import parse_element_groups
     ngrp_idx = None
     for i, line in enumerate(raw_data):
         if is_comment(line):
             continue
         value, keyword = split_keyed_line(line)
-        kw = keyword.split()[0].upper() if keyword else ""
+        kw = keyword_name(keyword)
         if kw == "NGRP":
             n_groups = int(value)
             ngrp_idx = i
