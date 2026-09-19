@@ -11,7 +11,7 @@ import pandas as pd
 from iwfm_io._parser import IWFMFileReader
 import re
 
-from iwfm_io._tokens import tokenize_data_line
+from iwfm_io._tokens import split_name_notes, tokenize_data_line
 from iwfm_io.models.lake import LakeMain
 from iwfm_io.models.timeseries import TimeSeriesFile
 
@@ -66,6 +66,9 @@ def read_lake_main(path: str | Path) -> LakeMain:
             lake_id = reader.to_ints(tokens[:1], what)[0]
             cond, thick = reader.to_floats(tokens[1:3], what)
             cols = reader.to_ints(tokens[3:6], what)
+            lake_name, lake_note = split_name_notes(
+                " ".join(tokens[6:]),
+                m.group(1).strip().lstrip("/").strip() if m else "")
             lake_rows.append({
                 "lake_id": lake_id,
                 "conductance": cond,
@@ -73,9 +76,8 @@ def read_lake_main(path: str | Path) -> LakeMain:
                 "max_elev_col": cols[0],
                 "et_col": cols[1],
                 "precip_col": cols[2],
-                "name": " ".join(tokens[6:]),
-                "notes": (m.group(1).strip().lstrip("/").strip()
-                          if m else ""),
+                "name": lake_name,
+                "notes": lake_note,
             })
     lake_params = pd.DataFrame(lake_rows) if lake_rows else None
 

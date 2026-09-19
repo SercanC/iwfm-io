@@ -32,6 +32,7 @@ from iwfm_io.writers._param_blocks import (
     check_count,
     fmt_int,
     fmt_name,
+    fmt_note,
     fmt_num,
     write_element_groups,
     write_param_block,
@@ -114,6 +115,15 @@ def write_gw_main(
     if cfg.get("ihtpflag") is not None:
         # IHTPFLAG is absent from newer (2024.x) GW main files
         w.write_keyed_value(cfg["ihtpflag"], "IHTPFLAG")
+
+    # Terminating comment for the output-file list. IWFM decides whether
+    # IHTPFLAG is present by counting the data lines of this block
+    # (Class_AppGW::New -- 19 entries means "no IHTPFLAG", anything else
+    # means it is there), so without a comment here KDEB and everything
+    # after it are swallowed by the count and the file is read one entry
+    # out of step.
+    w.write_comment("C  end of output file list")
+
     w.write_keyed_value(cfg.get("kdeb", 0), "KDEB")
 
     # Hydrograph output block
@@ -631,7 +641,7 @@ def write_constrained_head_bc(
             ]
             widths = [10, 8, 8, 14, 14, 14, 10, 14]
             w.write_data_line(values, widths,
-                              note=fmt_name(row.get("name"), f"{what} name"))
+                              note=fmt_note(row.get("name"), f"{what} name"))
 
     w.flush()
 
@@ -748,7 +758,7 @@ def write_elem_pump(ep: ElemPumpFile, path: str | Path) -> None:
                     val, what=f"elem-pump column {col!r}",
                     integer=col in int_cols))
             w.write_data_line(tokens, widths[:n_valid],
-                              note=fmt_name(row.get("name"),
+                              note=fmt_note(row.get("name"),
                                             "elem-pump name"))
 
     check_count(ep.n_groups, len(ep.element_groups),
@@ -791,7 +801,7 @@ def write_well_spec(ws: WellSpecFile, path: str | Path) -> None:
                 fmt_num(row["perf_bot"], what="well perf_bot"),
             ]
             w.write_data_line(line_vals, [8, 16, 16, 10, 12, 12],
-                              note=fmt_name(row.get("name"), "well name"))
+                              note=fmt_note(row.get("name"), "well name"))
 
     w.write_comment("C  Well Pumping Configuration")
     if ws.pump_config is not None:

@@ -53,6 +53,17 @@ def fmt_name(value, what: str = "name") -> str:
     return text
 
 
+def fmt_note(value, what: str = "note") -> str:
+    """Format an end-of-line annotation cell.
+
+    Like :func:`fmt_name` but without the ``/`` guard: a note is written
+    after the row's ``/`` separator, where IWFM's list-directed read has
+    already stopped, so further slashes are invisible to the model and
+    come back intact on the next read.
+    """
+    return format_cell(value, what=what, allow_blank=True)
+
+
 def write_titles(w: IWFMFileWriter, titles, what: str = "titles") -> None:
     """Write the three positional title lines of a main file.
 

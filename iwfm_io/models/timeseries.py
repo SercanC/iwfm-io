@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from iwfm_io.models.base import FileHeader, TimeSeriesSpec
+from iwfm_io.models.base import (FileHeader, FlatTimeSeriesSpecMixin,
+                                 TimeSeriesSpec, TimeSeriesSpecAccessMixin)
 
 
 @dataclass
-class TimeSeriesFile:
+class TimeSeriesFile(TimeSeriesSpecAccessMixin):
     """Generic time-series file container.
 
     Attributes
@@ -34,7 +35,7 @@ ETFile = TimeSeriesFile
 
 
 @dataclass
-class TimeSeriesDataFile:
+class TimeSeriesDataFile(FlatTimeSeriesSpecMixin):
     """Generic IWFM time-series data file.
 
     Covers every input file with the standard layout — a spec block of
@@ -79,7 +80,7 @@ class TimeSeriesDataFile:
 
 
 @dataclass
-class IrigFracFile:
+class IrigFracFile(FlatTimeSeriesSpecMixin):
     """Irrigation fractions file (e.g. ``IrigFrac.dat``).
 
     Has a 4-param spec: NCOLIRF, NSPIRF, NFQIRF, DSSFL (no FACT).
@@ -107,7 +108,7 @@ class IrigFracFile:
 
 
 @dataclass
-class IrrPeriodFile:
+class IrrPeriodFile(FlatTimeSeriesSpecMixin):
     """Irrigation period data file (IPFL, e.g. ``IrigPeriod.dat``).
 
     Has a 4-param spec: NCOLIP, NSPIP, NFQIP, DSSFL (no FACT).
@@ -142,7 +143,7 @@ class IrrPeriodFile:
 
 
 @dataclass
-class SupplyAdjustFile:
+class SupplyAdjustFile(FlatTimeSeriesSpecMixin):
     """Supply adjustment file (e.g. ``SupplyAdjust.dat``).
 
     Has a 4-param spec: NCOLADJ, NSPADJ, NFQADJ, DSSFL (no FACT).

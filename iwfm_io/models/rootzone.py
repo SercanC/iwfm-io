@@ -11,11 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from iwfm_io.models.base import FileHeader
+from iwfm_io.models.base import FileHeader, FlatTimeSeriesSpecMixin
 
 
 @dataclass
-class SurfaceFlowDestFile:
+class SurfaceFlowDestFile(FlatTimeSeriesSpecMixin):
     """Surface flow destination file (DESTFL, e.g. ``SurfaceFlowDest.dat``).
 
     v4.12+ root zones route runoff/return flow through this file; the

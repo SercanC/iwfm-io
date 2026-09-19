@@ -376,6 +376,57 @@ class TestAdapterDllFree:
         assert d.iloc[0]["name"] == "DIV_001"
         assert (d["export_node"] >= 0).all()
 
+    def test_diversion_named_n_slash_a_round_trips(self, tmp_path):
+        """Issue #39: DWR names diversion 498 ``N/A``.
+
+        IWFM cuts the row at the first ``/`` whatever precedes it, so it
+        reads ``N`` -- and the writer refuses a ``/`` inside a NAME, so
+        keeping the raw text made a plain read -> write of the stock
+        deck raise.
+        """
+        from iwfm_io import read_diver_specs, write_diver_specs
+
+        src = C2VSIMFG / "Simulation" / "Streams" / "C2VSimFG_DiversionSpec.DAT"
+        ds = read_diver_specs(src)
+        row = ds.data.loc[ds.data["diversion_id"] == 498].iloc[0]
+        assert row["name"] == "N"
+        assert row["notes"] == "A"
+        assert not ds.data["name"].astype(str).str.contains("/").any()
+
+        out = tmp_path / "DiversionSpec.DAT"
+        write_diver_specs(ds, out)
+        again = read_diver_specs(out)
+        assert again.data["name"].tolist() == ds.data["name"].tolist()
+        assert again.data["notes"].tolist() == ds.data["notes"].tolist()
+
+    def test_gw_main_file_list_keeps_its_19_entries(self, tmp_path):
+        """Issue #38: the output-file list must stay a 19-line block.
+
+        C2VSimFG has no IHTPFLAG, and IWFM tells that from the block's
+        data-line count -- 19 means "no flag".  Regenerating without the
+        terminating comment let the count run into KDEB/NOUTH/FACTXY and
+        IWFM 2024.2 refused the deck.
+        """
+        from iwfm_io import read_gw_main, write_gw_main
+        from iwfm_io._tokens import is_comment
+
+        sim = C2VSIMFG / "Simulation"
+        src = sim / "Groundwater" / "C2VSimFG_Groundwater1974.dat"
+        gw = read_gw_main(src)
+        assert gw.config.get("ihtpflag") is None
+        out = tmp_path / "gw.dat"
+        write_gw_main(gw, out, base_dir=sim)
+
+        runs, n = [], 0
+        for line in out.read_text(errors="replace").splitlines():
+            if not line.strip() or is_comment(line):
+                if n:
+                    runs.append(n)
+                    n = 0
+            else:
+                n += 1
+        assert runs[1] == 19
+
     def test_element_groups(self, model):
         # Delivery destinations resolved from TYPDSTDL/DSTDL (tail-anchored,
         # so the optional spill columns of older formats don't matter)

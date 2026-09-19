@@ -67,6 +67,9 @@ from iwfm_io._tokens import (
     expand_recurring,
 )
 from iwfm_io._parser import IWFMFileReader, IWFMParseError, IWFMReadWarning
+from iwfm_io.models.base import (ConversionFactor, FileHeader, TimeSeriesSpec,
+                                 ZoneDefinition)
+from iwfm_io.models.timeseries import TimeSeriesDataFile, TimeSeriesFile
 from iwfm_io._strict import strict_mode
 from iwfm_io._writer import IWFMFileWriter
 from iwfm_io.model_adapter import IOModelAdapter, open_model
@@ -352,6 +355,13 @@ __all__ = [
     "IWFMParseError",
     "IWFMReadWarning",
     "strict_mode",
+    # Shared data models
+    "FileHeader",
+    "TimeSeriesSpec",
+    "ConversionFactor",
+    "ZoneDefinition",
+    "TimeSeriesFile",
+    "TimeSeriesDataFile",
     # Preprocessor readers
     "read_preprocessor",
     "read_nodes",

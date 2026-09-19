@@ -365,3 +365,40 @@ def tokenize_data_line(line: str) -> list[str]:
     if m:
         line = line[: m.start()]
     return line.split()
+
+
+def split_name_notes(text: str, note: str = "") -> tuple[str, str]:
+    """Split a positional NAME field at the first ``/``.
+
+    Name-bearing rows are read by IWFM with
+    ``StripTextUntilCharacter(ALine, '/')`` (see
+    ``Class_Diversion.f90``), which cuts the line at the first ``/``
+    *whatever precedes it* -- unlike :data:`_KEYED_SEP_RE`, which needs
+    whitespace (or a digit) in front.  So a name glued to a slash is
+    truncated by the executable, and the reader has to report the same
+    thing: DWR ships diversion 498 of C2VSimFG v1.5 named ``N/A``, which
+    IWFM reads as ``N``.
+
+    Returns ``(name, notes)``.  Text cut off the name is prepended to
+    *note* -- the annotation already recovered from a
+    ``<whitespace>/ comment`` tail -- so nothing on the line is lost and
+    the writer can re-emit it as ``/ notes``.
+
+    First-``/`` is what IWFM does for diversion specs, every hydrograph
+    table (``Class_BaseHydrograph.f90``, ``GWHydrograph.f90``), lake
+    rows (``Class_AppLake_v40.f90``) and subregion names
+    (``Class_AppGrid.f90``).  Bypass and stream-reach rows instead reach
+    their name through ``GetArrayData``, which strips at the *last*
+    ``/`` (``Back=.TRUE.``), so those two keep a ``/`` in the name when
+    a row carries both a glued slash and a later annotation -- a shape
+    the readers have always split at the first ``/`` anyway, and one the
+    writers could not reproduce (``fmt_name`` refuses a ``/``).
+    """
+    name, sep, rest = (text or "").partition("/")
+    name = name.strip()
+    if not sep:
+        return name, note
+    rest = rest.strip().lstrip("/").strip()
+    if rest and note:
+        return name, f"{rest} / {note}"
+    return name, rest or note

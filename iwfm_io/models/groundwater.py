@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from iwfm_io.models.base import FileHeader, TimeSeriesSpec
+from iwfm_io.models.base import TimeSeriesSpecAccessMixin
 
 
 @dataclass
@@ -236,7 +237,7 @@ class ConstrainedHeadBCFile:
 
 
 @dataclass
-class BoundaryTSFile:
+class BoundaryTSFile(TimeSeriesSpecAccessMixin):
     """Parsed time-series boundary condition file (e.g. ``BoundTSD.dat``).
 
     Attributes
@@ -357,7 +358,7 @@ class WellSpecFile:
 
 
 @dataclass
-class TSPumpingFile:
+class TSPumpingFile(TimeSeriesSpecAccessMixin):
     """Parsed time-series pumping data file (e.g. ``TSPumping.dat``).
 
     Attributes

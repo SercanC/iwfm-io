@@ -15,6 +15,7 @@ from iwfm_io.writers._param_blocks import (
     check_count,
     fmt_int,
     fmt_name,
+    fmt_note,
     fmt_num,
     write_element_groups,
 )
@@ -243,7 +244,7 @@ def write_diver_specs(ds: DiverSpecsFile, path: str | Path) -> None:
                 tokens.append(name)
                 widths.append(len(name) + 4)
             w.write_data_line(tokens, widths,
-                              note=fmt_name(row.get("notes"),
+                              note=fmt_note(row.get("notes"),
                                             f"{what} notes"))
 
     w.write_comment("C  Delivery Element Groups")

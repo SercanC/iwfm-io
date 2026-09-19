@@ -27,7 +27,7 @@ def _geo():
 
 from iwfm_io._parser import IWFMFileReader, IWFMParseError
 from iwfm_io._strict import strict_mode
-from iwfm_io._tokens import tokenize_data_line
+from iwfm_io._tokens import split_name_notes, tokenize_data_line
 from iwfm_io.models.base import ConversionFactor
 from iwfm_io.models.preprocessor import (
     ElementFile,
@@ -124,7 +124,7 @@ def read_elements(path: str | Path, node_file: NodeFile | None = None) -> Elemen
         name_str, kw = reader.read_keyed_value()
         m = re.search(r"(\d+)", kw.split()[0]) if kw else None
         sub_ids.append(int(m.group(1)) if m else i + 1)
-        sub_names.append(name_str)
+        sub_names.append(split_name_notes(name_str)[0])
     subregions = pd.DataFrame({"subregion_id": sub_ids, "name": sub_names})
 
     # Read element table: IE  IDE(1) IDE(2) IDE(3) IDE(4) IRGE
@@ -321,6 +321,8 @@ def read_stream_geom(path: str | Path, node_file: NodeFile | None = None) -> Str
             reach_id, n_nodes_in_reach, outflow_dest = reader.to_ints(
                 parts[:3], "reach row")
             name = parts[3].rstrip() if len(parts) > 3 else ""
+            # IWFM cuts the row at the first "/", glued or not
+            name, _ = split_name_notes(name)
         reach_data.append({
             "reach_id": reach_id,
             "n_nodes": n_nodes_in_reach,

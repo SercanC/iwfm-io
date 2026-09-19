@@ -138,6 +138,26 @@ m.bc_series(1, layer=1)                    # the BC at node 1, layer 1
 | `read_supply_adjust(path)` | `SupplyAdjust.dat` | Supply adjustment specs (incl. DSS mode) |
 | `read_timeseries_file(path, has_factor=None)` | Any standard IWFM time-series data file (3/4/5-param spec auto-detected from keywords) | `TimeSeriesDataFile` — covers the root-zone leaf files: RootDepthFrac, MinMoist, PondDepth, RiceOps, Population, PerCapWaterUse, UrbanWaterUseSpecs, ReturnFlowFrac, ReuseFrac |
 
+#### Time-series file objects
+
+Every time-series object answers to `.spec` — a `TimeSeriesSpec` with
+`n_columns`, `factor`, `n_steps_update`, `repeat_freq` and `dss_file` —
+and, where the file format has the parameter at all, to those five names
+directly:
+
+```python
+from iwfm_io import read_ts_pumping, read_timeseries_file, TimeSeriesSpec
+
+read_ts_pumping(pump_file).spec.factor       # works on every TS object
+read_timeseries_file(star_file).factor       # flat access where the field exists
+```
+
+Reading `.spec` on a class that stores the parameters flat builds a
+snapshot, so assign a whole spec back (`obj.spec = TimeSeriesSpec(...)`)
+to change the fields.  A format with no `FACT` line (the 4-parameter
+files) or no `DSSFL` (`SurfaceFlowDestFile`) has no such field, and the
+spec reports the neutral default.
+
 ### Groundwater Readers
 
 | Function | Input file |

@@ -67,6 +67,96 @@ class TimeSeriesSpec:
     dss_file: str = ""
 
 
+#: The five spec parameters, in :class:`TimeSeriesSpec` field order.
+TS_SPEC_FIELDS = ("n_columns", "factor", "n_steps_update", "repeat_freq",
+                  "dss_file")
+
+
+class FlatTimeSeriesSpecMixin:
+    """``.spec`` view for time-series files that store the spec flat.
+
+    Some time-series dataclasses hold a :class:`TimeSeriesSpec`
+    (``obj.spec.factor``), others carry the five parameters as their own
+    fields (``obj.factor``) because they also need ``has_dssfl`` /
+    ``keywords`` alongside them.  This mixin gives the flat ones a
+    ``spec`` property so code that handles "any time-series file" can
+    use one idiom; :class:`TimeSeriesSpecAccessMixin` does the reverse
+    for the others.
+
+    Reading builds a fresh :class:`TimeSeriesSpec` **snapshot**, so
+    mutating it in place changes nothing -- assign a whole spec back
+    (``obj.spec = spec``) to write the fields.  Parameters the class
+    does not carry (``SurfaceFlowDestFile`` has no ``dss_file``, for
+    instance) keep the spec's default on read and are ignored on write.
+    """
+
+    __slots__ = ()
+
+    @property
+    def spec(self) -> "TimeSeriesSpec":
+        """The five spec parameters as a :class:`TimeSeriesSpec` snapshot."""
+        return TimeSeriesSpec(**{name: getattr(self, name)
+                                 for name in TS_SPEC_FIELDS
+                                 if hasattr(self, name)})
+
+    @spec.setter
+    def spec(self, value: "TimeSeriesSpec") -> None:
+        for name in TS_SPEC_FIELDS:
+            if hasattr(self, name) and hasattr(value, name):
+                setattr(self, name, getattr(value, name))
+
+
+class TimeSeriesSpecAccessMixin:
+    """Flat ``n_columns`` / ``factor`` / ... access for ``.spec`` files.
+
+    The mirror of :class:`FlatTimeSeriesSpecMixin`: files that store a
+    :class:`TimeSeriesSpec` in ``self.spec`` also answer to the five
+    parameter names directly, reading and writing through to the spec.
+    """
+
+    __slots__ = ()
+
+    @property
+    def n_columns(self) -> int:
+        return self.spec.n_columns
+
+    @n_columns.setter
+    def n_columns(self, value) -> None:
+        self.spec.n_columns = value
+
+    @property
+    def factor(self):
+        return self.spec.factor
+
+    @factor.setter
+    def factor(self, value) -> None:
+        self.spec.factor = value
+
+    @property
+    def n_steps_update(self) -> int:
+        return self.spec.n_steps_update
+
+    @n_steps_update.setter
+    def n_steps_update(self, value) -> None:
+        self.spec.n_steps_update = value
+
+    @property
+    def repeat_freq(self) -> int:
+        return self.spec.repeat_freq
+
+    @repeat_freq.setter
+    def repeat_freq(self, value) -> None:
+        self.spec.repeat_freq = value
+
+    @property
+    def dss_file(self) -> str:
+        return self.spec.dss_file
+
+    @dss_file.setter
+    def dss_file(self, value) -> None:
+        self.spec.dss_file = value
+
+
 @dataclass
 class ZoneDefinition:
     """Zone definition for IWFM Z-Budget aggregation.

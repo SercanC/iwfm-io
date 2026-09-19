@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from iwfm_io.models.base import FileHeader, TimeSeriesSpec
+from iwfm_io.models.base import TimeSeriesSpecAccessMixin
 
 
 @dataclass
@@ -57,7 +58,7 @@ class StreamMain:
 
 
 @dataclass
-class StreamInflowFile:
+class StreamInflowFile(TimeSeriesSpecAccessMixin):
     """Parsed stream inflow file (e.g. ``StreamInflow.dat``).
 
     Attributes
@@ -184,7 +185,7 @@ class BypassSpecsFile:
 
 
 @dataclass
-class DiversionsFile:
+class DiversionsFile(TimeSeriesSpecAccessMixin):
     """Parsed surface water diversion data file (e.g. ``Diversions.dat``).
 
     Attributes

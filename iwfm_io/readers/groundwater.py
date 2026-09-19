@@ -12,7 +12,8 @@ from pathlib import Path
 import pandas as pd
 
 from iwfm_io._parser import IWFMFileReader, IWFMParseError
-from iwfm_io._tokens import (_KEYED_SEP_RE, keyword_name, split_keyed_line,
+from iwfm_io._tokens import (_KEYED_SEP_RE, keyword_name,
+                             split_keyed_line, split_name_notes,
                              tokenize_data_line)
 from iwfm_io.models.base import TimeSeriesSpec
 from iwfm_io.readers._param_blocks import parse_param_block
@@ -137,6 +138,14 @@ def _read_hydrograph_table(
                 row[col] = parts[k] if k < len(parts) else None
             row[col_names[-1]] = (parts[n_cols - 1].strip()
                                   if len(parts) >= n_cols else None)
+
+        # IWFM cuts the row at the FIRST "/" whatever precedes it, so a
+        # name glued to a slash (``N/A``) is truncated for the model
+        # too; the cut-off text joins the annotation.
+        if row[col_names[-1]]:
+            name, row["notes"] = split_name_notes(row[col_names[-1]],
+                                                  row["notes"])
+            row[col_names[-1]] = name or None
 
         rows.append(row)
 
@@ -1098,12 +1107,14 @@ def read_tile_drain(path: str | Path) -> TileDrainFile:
                 body = re.split(r"\s+/", line, maxsplit=1)[0]
                 parts = body.split(None, 2)
                 m = re.search(r"\s/(.+)$", line)
+                name, note = split_name_notes(
+                    parts[2].rstrip() if len(parts) > 2 else "",
+                    m.group(1).strip().lstrip("/").strip() if m else "")
                 rows.append({
                     "id": int(float(parts[0])),
                     "idtyp": int(float(parts[1])),
-                    "name": (parts[2].rstrip() if len(parts) > 2 else ""),
-                    "notes": (m.group(1).strip().lstrip("/").strip()
-                              if m else ""),
+                    "name": name,
+                    "notes": note,
                 })
             if rows:
                 hydrographs = pd.DataFrame(rows)

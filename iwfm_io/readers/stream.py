@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 from iwfm_io._parser import IWFMFileReader
-from iwfm_io._tokens import tokenize_data_line
+from iwfm_io._tokens import split_name_notes, tokenize_data_line
 from iwfm_io.models.stream import (
     BypassSpecsFile,
     DiverSpecsFile,
@@ -107,6 +107,8 @@ def read_stream_main(path: str | Path) -> StreamMain:
                 raise reader.error("hydrograph spec row is empty")
             node_id = reader.to_ints(parts[:1], "hydrograph spec")[0]
             name = parts[1].rstrip() if len(parts) > 1 else ""
+            # IWFM cuts the row at the first "/", glued or not
+            name, _ = split_name_notes(name)
             hydrograph_specs.append({"node_id": node_id, "name": name})
 
     # ---- Node budget settings ----
@@ -413,6 +415,7 @@ def read_diver_specs(path: str | Path) -> DiverSpecsFile:
         # NAME is a real positional field (IWFM reads it); a trailing
         # "/" annotation is kept separately as "notes"
         name = " ".join(toks[n_slots:])
+        name, comment_name = split_name_notes(name, comment_name)
         tail = nums[n_slots - 6:]
         try:
             row = {
@@ -581,6 +584,7 @@ def read_bypass_specs(path: str | Path) -> BypassSpecsFile:
         name = parts[7].rstrip() if len(parts) > 7 else ""
         m = re.search(r"\s/(.+)$", line)
         note = m.group(1).strip().lstrip("/").strip() if m else ""
+        name, note = split_name_notes(name, note)
 
         bypass_rows.append({
             "bypass_id": bypass_id,
