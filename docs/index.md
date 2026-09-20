@@ -8,6 +8,7 @@ Python file I/O, DLL wrapper, and visualization library for the **Integrated Wat
 |----------|-------------|
 | [Quick Start Tutorial](quickstart.md) | Install, read files, query the DLL, and make your first plot |
 | [API Reference](api-reference.md) | Full listing of all public functions and classes (incl. `iwfm_io.pest` and `iwfm_io.dss`) |
+| [API Index](API_INDEX.md) | Every public name, one line each, grouped by intent - searchable with `iwfm-io api <keyword>` |
 | [Agents & Scripting Guide](agents.md) | Compact recipes for driving iwfm-io from code or AI agents |
 | [Plot Gallery](plotting.md) | 66 visualization functions across 15 modules |
 | [Example Gallery](GALLERY.md) | All plots rendered from DWR's C2VSimFG v1.5 |

@@ -3,3 +3,4 @@
 # DLL, or executables are absent)
 recursive-include tests *.py
 include LICENSE NOTICE LICENSE-DLLS.md README.md
+include iwfm_io/API_INDEX.md iwfm_io/AGENT_RULES.md

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iwfm-io"
-version = "2.16.0"
+version = "2.17.0"
 description = "Read, write, analyze and visualize IWFM (Integrated Water Flow Model) models: pure-Python file I/O, DLL wrapper, and 66 plot functions"
 readme = "README.md"
 license = "Apache-2.0"
@@ -75,6 +75,11 @@ pest = [
 
 [tool.setuptools.packages.find]
 include = ["iwfm_io*"]
+
+[tool.setuptools.package-data]
+# The API index ships with the package so `iwfm-io api <keyword>` works
+# from any environment, with no repo checkout.
+iwfm_io = ["API_INDEX.md", "AGENT_RULES.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

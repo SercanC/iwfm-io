@@ -13,18 +13,71 @@ description: >
   and post-processing (IES ensembles, residual/fit statistics like
   RMSE/NSE/KGE, observation wells vs simulated heads, SMP files,
   calibration figures) — and CalSim-coupled models (channel flows from
-  HEC-DSS / DV.dss files).
+  HEC-DSS / DV.dss files). Equally for CODE: use whenever writing,
+  reviewing or debugging Python that reads, writes, parses, converts or
+  aggregates IWFM data — model files, budgets, heads, hydrographs,
+  land use, dates — because iwfm-io already covers every IWFM file and
+  hand-written parsers get the conventions wrong.
 ---
 
 # IWFM Model Analyst
 
-You are helping a water-resources engineer or geologist analyze an IWFM
-model. They describe what they want in plain language; you write and run
-small Python scripts using the `iwfm-io` package and present results as
-tables, numbers, and saved plot images. Never ask the user to write or
-read code — show outcomes, not scripts.
+Two kinds of request land here, and they share one package:
 
-## Setup (once per session)
+- **Analysis** — a water-resources engineer or geologist describes what
+  they want in plain language. You write and run small Python scripts
+  using `iwfm-io` and present results as tables, numbers, and saved plot
+  images. Never ask the user to write or read code — show outcomes.
+- **Code** — you are writing or reviewing Python in a project that
+  touches IWFM files. Then rule 0 below governs.
+
+## Rule 0: search before you implement
+
+`iwfm-io` reads **and** writes every dataset in every IWFM input file,
+plus the outputs, and its writers are verified end-to-end against the
+real executables. Before writing any function that reads, writes,
+parses, converts or aggregates IWFM data:
+
+```bash
+iwfm-io api <keyword>        # e.g. iwfm-io api "water year"
+iwfm-io api                  # whole index, grouped by intent
+iwfm-io api --path           # the index file, if you'd rather read it
+```
+
+In Python: `import iwfm_io; iwfm_io.find("water year")`.
+
+If there is a match, call it. Write your own only when the search comes
+up empty — and say in a comment that you checked. A model folder is
+never parsed by hand: `open_model(path)` finds its files for you.
+
+### Never hand-roll these
+
+| Don't write | Call instead |
+| --- | --- |
+| IWFM date parsing/formatting (`MM/DD/YYYY_24:00`) | `parse_iwfm_date`, `format_iwfm_date` |
+| "which day / water year does this stamp belong to" | `iwfm_day`, `water_year` |
+| Comment/blank-line skipping while parsing | `IWFMFileReader` |
+| Opening a model, finding its files | `open_model(model_dir)`, then `.describe()` |
+| Heads, budgets, hydrographs | `.heads_df()`, `.budget_df()`, `read_budget_hdf`, `read_budget_text` |
+| Budget rollups to water year / month | `aggregate_budget` |
+| Recurring-year (year 2500) series | `expand_recurring` |
+| Land-use area tables | `read_land_use_area`, `read_all_land_use_areas` |
+| Editing an input file as text | `read_*` → edit the DataFrame → `write_*` |
+| Copying a model to modify it | `create_scenario` |
+| Running the IWFM executables | `run_model` |
+| Comparing two runs | `compare_models` |
+| Observed vs simulated, SMP files, PEST++ | `iwfm_io.pest` |
+| Any plot or map of the above | `iwfm_io.plots` |
+
+Why each of those is a trap — a `_24:00` stamp parsing to the *next*
+day's midnight while belonging to the named day, `/` being data rather
+than a comment, load-bearing
+terminating comments that IWFM *counts*, simulation-anchored (not
+calendar) budget windows — is spelled out in the block that
+`iwfm-io init-agent --print` emits. Run `iwfm-io init-agent` inside a
+project to leave those rules in its `CLAUDE.md` for later sessions.
+
+## Setup (analysis sessions, once per session)
 
 1. Check the package: `python -c "import iwfm_io; print(iwfm_io.__version__)"`.
    If missing: `pip install iwfm-io` (add `iwfm-io[geo]` if shapefile-like
@@ -44,7 +97,7 @@ print(m.describe())   # grid size, sim period, budgets, hydrographs
 the simulation period. Read it before answering any question about the
 model, and use its budget names/locations verbatim.
 
-## How to work
+## How to work (analysis)
 
 - Write scripts to a temp folder, not into the user's model folder.
 - Save plots as PNG next to the user's model in a `plots/` folder (ask
@@ -75,7 +128,8 @@ model, and use its budget names/locations verbatim.
 
 ## Task recipes
 
-Load `references/recipes.md` for ready-made patterns:
+`iwfm-io api` is the complete surface; the recipes below are the common
+flows written out. Load `references/recipes.md` for ready-made patterns:
 budgets, heads and depth-to-water, hydrographs, zone budgets,
 comparing two model runs, building and running a scenario, reading or
 editing individual input files, building a PEST++ calibration setup,

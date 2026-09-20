@@ -3,6 +3,27 @@
 This page is a compact orientation for driving `iwfm-io` from code —
 written with AI agents in mind, but equally useful for scripted analysis.
 
+## First: does it already exist?
+
+`iwfm-io` covers every dataset in every IWFM input file, the outputs,
+budget aggregation, plotting, GIS/VTK export and PEST++ calibration.
+Before writing anything that reads, writes, parses, converts or
+aggregates IWFM data, search the API index:
+
+```bash
+iwfm-io api <keyword>        # e.g. iwfm-io api "water year"
+iwfm-io api                  # the whole index, grouped by intent
+```
+
+or, in process, `import iwfm_io; iwfm_io.find("water year")`. The index
+is [API_INDEX.md](API_INDEX.md) and ships inside the package, so it is
+there wherever `iwfm-io` is installed.
+
+Working in a project that touches IWFM files? `iwfm-io init-agent`
+writes the "call iwfm-io, don't reimplement it" block -- with the
+conventions hand-written parsers get wrong -- into that project's
+`CLAUDE.md`, so later sessions start from it.
+
 ## Orient first: open the model and describe it
 
 ```python

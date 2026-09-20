@@ -1,8 +1,10 @@
 """
-iwfm-io command line: model inspection and PEST++ calibration workflow.
+iwfm-io command line: API search, model inspection, PEST++ calibration.
 
 Installed as the ``iwfm-io`` console script::
 
+    iwfm-io api <keyword>
+    iwfm-io init-agent [project_dir]
     iwfm-io describe <model_dir>
     iwfm-io pest setup   --model-dir M --obs obs.smp --dest pest_template
     iwfm-io pest agents  --template pest_template -n 8
@@ -30,6 +32,85 @@ def _cmd_describe(args) -> int:
     from iwfm_io.model_adapter import open_model
     info = open_model(args.model_dir).describe()
     print(json.dumps(info, indent=2, default=str))
+    return 0
+
+
+def _cmd_api(args) -> int:
+    from iwfm_io._api_index import (index_path, load_index, safe_print,
+                                    search)
+
+    if args.path:
+        print(index_path())
+        return 0
+
+    if not args.query:
+        safe_print(load_index())
+        return 0
+
+    query = " ".join(args.query)
+    hits = search(query)
+    if not hits:
+        safe_print(
+            f"no iwfm-io name matches {query!r}.\n"
+            f"`iwfm-io api` lists the whole index ({index_path()}).\n"
+            f"If nothing there fits, writing it yourself is the right "
+            f"call.")
+        return 1
+    safe_print(f"{len(hits)} match(es) for {query!r} - call these instead "
+               f"of writing your own:\n")
+    for entry in hits:
+        safe_print(f"- {entry.parent}{entry.qualname}{entry.signature}\n"
+                   f"    {entry.summary}")
+    return 0
+
+
+AGENT_RULES_FILENAME = "AGENT_RULES.md"
+_BEGIN = "<!-- iwfm-io:begin"
+_END = "<!-- iwfm-io:end -->"
+
+
+def agent_rules_path() -> Path:
+    """Path of the shipped coding-agent instruction block."""
+    return Path(__file__).with_name(AGENT_RULES_FILENAME)
+
+
+def _cmd_init_agent(args) -> int:
+    """Install the "call iwfm-io, do not reimplement it" block."""
+    import re
+
+    block = agent_rules_path().read_text(encoding="utf-8").strip() + "\n"
+    if args.print_only:
+        from iwfm_io._api_index import safe_print
+        safe_print(block)
+        return 0
+
+    target = Path(args.directory) / args.file
+    if not target.parent.is_dir():
+        print(f"error: {target.parent} does not exist", file=sys.stderr)
+        return 1
+
+    if not target.exists():
+        target.write_text(f"# {target.parent.resolve().name}\n\n{block}",
+                          encoding="utf-8")
+        print(f"created {target}")
+        return 0
+
+    existing = target.read_text(encoding="utf-8")
+    pattern = re.compile(
+        re.escape(_BEGIN) + r".*?" + re.escape(_END), re.DOTALL)
+    if pattern.search(existing):
+        updated = pattern.sub(block.strip(), existing, count=1)
+        if updated == existing:
+            print(f"{target} is already up to date")
+            return 0
+        target.write_text(updated, encoding="utf-8")
+        print(f"updated the iwfm-io block in {target}")
+        return 0
+
+    separator = "" if existing.endswith("\n\n") else (
+        "\n" if existing.endswith("\n") else "\n\n")
+    target.write_text(existing + separator + block, encoding="utf-8")
+    print(f"appended the iwfm-io block to {target}")
     return 0
 
 
@@ -157,8 +238,10 @@ def _add_traceback_everywhere(parser):
 def _build_parser() -> "argparse.ArgumentParser":
     parser = argparse.ArgumentParser(
         prog="iwfm-io",
-        description="IWFM model inspection and PEST++ calibration "
-                    "workflow (iwfm-io).")
+        description="Search the iwfm-io API, inspect a model, and drive "
+                    "the PEST++ calibration workflow. Start with "
+                    "`iwfm-io api <keyword>` to find the function you "
+                    "need.")
     parser.add_argument("--traceback", action="store_true",
                         help="show full tracebacks on errors")
     sub = parser.add_subparsers(dest="command")
@@ -167,6 +250,36 @@ def _build_parser() -> "argparse.ArgumentParser":
                        help="summarize a model folder as JSON")
     p.add_argument("model_dir", help="model root folder")
     p.set_defaults(func=_cmd_describe)
+
+    p = sub.add_parser(
+        "api", help="search the API index: does iwfm-io already do this?",
+        description="Search every public iwfm-io name by keyword. Run "
+                    "this before writing any function that reads, "
+                    "writes, parses, converts or aggregates IWFM data.")
+    p.add_argument("query", nargs="*",
+                   help="words to match against names and summaries "
+                        "(no query prints the whole index)")
+    p.add_argument("--path", action="store_true",
+                   help="print the index file's location and exit")
+    p.set_defaults(func=_cmd_api)
+
+    p = sub.add_parser(
+        "init-agent",
+        help="add the 'use iwfm-io, don't reimplement it' block to a "
+             "project's CLAUDE.md",
+        description="Write the iwfm-io instruction block into a "
+                    "project's agent instructions, so coding agents "
+                    "working there call the package instead of "
+                    "rewriting its readers. Re-run to update the block "
+                    "in place; edits outside the markers are kept.")
+    p.add_argument("directory", nargs="?", default=".",
+                   help="project directory (default: the current one)")
+    p.add_argument("--file", default="CLAUDE.md",
+                   help="instructions filename (default: CLAUDE.md; "
+                        "use AGENTS.md for other agent tooling)")
+    p.add_argument("--print", dest="print_only", action="store_true",
+                   help="print the block instead of writing it")
+    p.set_defaults(func=_cmd_init_agent)
 
     pest = sub.add_parser("pest", help="PEST++ calibration workflow")
     pest_sub = pest.add_subparsers(dest="pest_command")

@@ -19,6 +19,13 @@ two subpackages:
    ``iwfm.plots`` → ``iwfm_io.plots``, ``iwfm.IWFMModel`` →
    ``iwfm_io.dll.IWFMModel``, ``iwfm.run_model`` → ``iwfm_io.run_model``.
 
+Looking for a function? Search the API index instead of writing your
+own — this package reads *and* writes every dataset in every IWFM input
+file, and hand-rolled parsers get the conventions wrong::
+
+    import iwfm_io
+    iwfm_io.find("water year")     # or, in a shell: iwfm-io api <keyword>
+
 Quick-start::
 
     from iwfm_io import open_model
@@ -314,6 +321,12 @@ def __getattr__(name):
     if name in ("plots", "dll", "pest"):
         import importlib
         return importlib.import_module(f".{name}", __name__)
+    # ``iwfm_io.find("budget")`` -- the in-process API index search.
+    # Lazy so that ``python -m iwfm_io._api_index`` can regenerate the
+    # index without the module being half-imported underneath it.
+    if name == "find":
+        from iwfm_io._api_index import find as _find
+        return _find
     raise AttributeError(f"module 'iwfm_io' has no attribute {name!r}")
 
 
@@ -321,6 +334,16 @@ __all__ = [
     "plots",
     "dll",
     "pest",
+    # Entry point + the workflow this package is built around
+    "open_model",
+    "find",
+    "create_scenario",
+    "set_keyed_value",
+    "replace_text",
+    "compare_models",
+    "diff_model_files",
+    "head_difference",
+    "budget_difference",
     "GIS_LAYERS",
     "export_gis",
     "nodes_gdf",
