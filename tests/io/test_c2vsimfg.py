@@ -201,6 +201,43 @@ class TestRootZoneComponents:
         assert len(rz.element_params) == 32537
         assert "typdest" in rz.element_params.columns
         assert rz.element_params["dest"].iloc[0] == 2711
+        # 14-column deck: KPonded present for every element (issue #37)
+        assert "k_ponded" in rz.element_params.columns
+        assert rz.element_params["k_ponded"].notna().all()
+
+    def test_rootzone_main_v411_without_kponded(self, tmp_path):
+        """A real v4.11 deck with its KPonded column removed (issue #37).
+
+        IWFM sizes the soil table from the first row and accepts 13
+        columns; the same deck must read identically here, minus the
+        column, with ``k_ponded()`` falling back to ``k``.
+        """
+        from iwfm_io._tokens import tokenize_data_line
+        from iwfm_io.readers.rootzone import read_rootzone_main
+
+        src = C2VSIMFG / "Simulation" / "RootZone" / "C2VSimFG_RootZone.dat"
+        full = read_rootzone_main(src)
+
+        # Drop the trailing value from every 14-token soil row.
+        out, trimmed = [], 0
+        for line in src.read_text(encoding="utf-8",
+                                  errors="replace").splitlines():
+            if line[:1] not in ("C", "c", "*", "#") and line.strip():
+                if len(tokenize_data_line(line)) == 14:
+                    line = line.rstrip().rsplit(None, 1)[0]
+                    trimmed += 1
+            out.append(line)
+        assert trimmed == 32537
+        deck = tmp_path / "C2VSimFG_RootZone_13col.dat"
+        deck.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+        thin = read_rootzone_main(deck)          # strict: must not raise
+        assert "k_ponded" not in thin.element_params.columns
+        assert len(thin.element_params) == 32537
+        for column in thin.element_params.columns:
+            assert thin.element_params[column].equals(
+                full.element_params[column])
+        assert thin.k_ponded().equals(thin.element_params["k"])
 
     def test_nonponded_crop(self):
         from iwfm_io.readers.rootzone import read_nonponded_ag_main

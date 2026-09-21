@@ -15,6 +15,7 @@ from iwfm_io.models.base import (
     TS_SPEC_FIELDS,
     ZoneDefinition,
 )
+from iwfm_io.models.rootzone import RootZoneMain
 from iwfm_io.models.timeseries import TimeSeriesDataFile, TimeSeriesFile
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "TimeSeriesSpecAccessMixin",
     "TS_SPEC_FIELDS",
     "ZoneDefinition",
+    "RootZoneMain",
     "TimeSeriesDataFile",
     "TimeSeriesFile",
 ]

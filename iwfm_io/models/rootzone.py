@@ -80,6 +80,11 @@ class RootZoneMain:
         surface-flow destination file); v4.11 and earlier instead have
         typdest (0=outside, 1=stream node, 2=element, 3=lake,
         4=subregion, 5=groundwater) and dest.
+
+        v4.1/v4.11 decks may omit ``k_ponded`` altogether — the column
+        is then absent here, as it is in the file, and means "same as
+        ``k``".  :meth:`k_ponded` resolves that (and the ``-1``
+        sentinel) into the values IWFM actually uses.
     """
 
     header: FileHeader = field(default_factory=FileHeader)
@@ -91,6 +96,34 @@ class RootZoneMain:
     path_order: list = field(default_factory=list)
     config: dict = field(default_factory=dict)
     element_params: Any = None
+
+    def k_ponded(self) -> Any:
+        """Ponded hydraulic conductivity per element, as IWFM uses it.
+
+        The file may leave KPonded out in two ways, and both mean "the
+        same as ``k``": v4.1/v4.11 decks may omit the column entirely
+        (IWFM reads the table 13 wide), and any version may write the
+        ``-1.0`` sentinel in it.  This resolves both, so callers do not
+        have to reproduce the rule::
+
+            rz = read_rootzone_main(path)
+            rz.element_params["k"]        # as written in the file
+            rz.k_ponded()                 # what IWFM runs with
+
+        Returns
+        -------
+        pd.Series or None
+            Indexed like ``element_params`` (``None`` when there is no
+            soil table).  Unscaled, like the rest of the table — IWFM
+            multiplies by ``config["factk"]`` and the timestep.
+        """
+        df = self.element_params
+        if df is None or "k" not in df.columns:
+            return None
+        k = df["k"]
+        if "k_ponded" not in df.columns:
+            return k.rename("k_ponded")
+        return df["k_ponded"].where(df["k_ponded"] != -1.0, k)
 
 
 @dataclass

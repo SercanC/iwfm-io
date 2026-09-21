@@ -69,6 +69,16 @@ _SOIL_COLS_V411 = [
     "element_id", "wp", "fc", "tn", "lambda", "k", "rhc", "cap_rise",
     "irne", "frne", "imsrc", "typdest", "dest", "k_ponded",
 ]
+# v4.1/v4.11 decks may omit the trailing KPonded column entirely, and
+# IWFM accepts both widths: it tries to read 14 reals from the FIRST
+# soil row and falls back to 13 when that fails, then reads the whole
+# table at that width (``RootZone_v411.f90`` "Backward compatibility:
+# Check if the user entered KPonded values at all", identical in
+# v41.f90; verified in the 2015.3.1443 and 2025.0.1747 sources).  An
+# absent KPonded means "same as K", exactly as the ``-1.0`` sentinel
+# does in the 14-column form — see :meth:`RootZoneMain.k_ponded`.
+_SOIL_COLS_V411_NO_KPONDED = _SOIL_COLS_V411[:-1]
+_OPTIONAL_KPONDED_VERSIONS = {"4.1", "4.11"}
 def _is_number(tok: str) -> bool:
     """True for a Fortran-readable number (``1.5``, ``2E-3``, ``1.0d0``)."""
     try:
@@ -189,6 +199,12 @@ def read_rootzone_main(path: str | Path,
             if columns is None:
                 if version_layout is not None:
                     columns = version_layout
+                    if (version in _OPTIONAL_KPONDED_VERSIONS
+                            and len(toks) < len(_SOIL_COLS_V411)):
+                        # IWFM probes the first row for a 14th value and
+                        # reads the whole table 13 wide when it is not
+                        # there.  KPonded is then K for every element.
+                        columns = _SOIL_COLS_V411_NO_KPONDED
                     if len(toks) > len(columns):
                         reader.warn_once(
                             "soil_extra",

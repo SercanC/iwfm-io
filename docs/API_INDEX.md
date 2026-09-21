@@ -23,7 +23,7 @@ open_model`). Full argument semantics live in `docs/api-reference.md`
 *Generated from the package by `python -m iwfm_io._api_index --write` -
 edit the docstrings, not this file.*
 
-*336 public names.*
+*340 public names.*
 
 ## Start here - open a model
 
@@ -248,10 +248,10 @@ Writers regenerate a whole file from its DataFrames and refuse cells IWFM would 
 - `composite_well_hydrographs(link: 'HydrographLink', hyd_output, fractions) -> "'pd.DataFrame'"` - Composite per-layer hydrograph series into per-well series.
 - `enrich_gwl_metadata(model, gwl_metadata, link: 'Optional[HydrographLink]' = None, ...) -> "'pd.DataFrame'"` - Add derived columns to a gwl_metadata frame (never required).
 - `GaugeLink(links: "'pd.DataFrame'", unmatched_gauges: "'list'", orphan_names: "'list, ...) -> None` - Result of :func:`link_stream_hydrographs`.
-  - `.summary(self) -> 'dict'` - (undocumented)
+  - `.summary() -> 'dict'` - (undocumented)
 - `gwl_metadata_from_legacy(df) -> "'pd.DataFrame'"` - Convert a legacy well-keys frame to the gwl_metadata schema.
 - `HydrographLink(links: "'pd.DataFrame'", unmatched_wells: "'list'", orphan_stems: "'list', ...) -> None` - Result of :func:`link_hydrographs`.
-  - `.summary(self) -> 'dict'` - (undocumented)
+  - `.summary() -> 'dict'` - (undocumented)
 - `link_hydrographs(gwl_metadata, gw_main, on: 'str' = 'site_code', name_sep: 'st, ...) -> 'HydrographLink'` - Link metadata wells to the GW main's hydrograph entries by name.
 - `link_stream_hydrographs(gauge_metadata, stream_main, on: 'str' = 'site_code', name_sep: 'O, ...) -> 'GaugeLink'` - Link gauge metadata to the Stream MAIN hydrograph entries by name.
 - `pest.build_well_mapping` - Alias of `build_well_mapping`.
@@ -270,7 +270,7 @@ Writers regenerate a whole file from its DataFrames and refuse cells IWFM would 
 
 - `calsim_streamflow_series(link: 'CalSimLink', dss_file, units: 'str' = 'cfs') -> "'pd.DataFrame'"` - Extract per-gauge CalSim channel-flow series from a DV DSS file.
 - `CalSimLink(links: "'pd.DataFrame'", unmatched_gauges: "'list'", orphan_arcs: "'list'") -> None` - Result of :func:`link_calsim_channels`.
-  - `.summary(self) -> 'dict'` - (undocumented)
+  - `.summary() -> 'dict'` - (undocumented)
 - `cfs_to_taf(frame) -> "'pd.DataFrame'"` - Convert period-average CFS to TAF per period (pure function).
 - `dss_catalog(dss_file, pattern: 'str' = '') -> "'pd.DataFrame'"` - Catalog the time-series records of a HEC-DSS file.
 - `link_calsim_channels(gauge_metadata, dss, on: 'str' = 'calsim_bpart', cpart: 'Optional, ...) -> 'CalSimLink'` - Link gauge metadata to CalSim channel arcs in a DSS file.
@@ -392,21 +392,21 @@ All plot functions take an `IWFMModel` or `IOModelAdapter` and return `(fig, ax)
 - `pest.ies_stats(results, observed=None, iterations=None, by=None) -> "'pd.DataFrame'"` - Per-``(iteration, realization, group)`` statistics for an IES run.
 - `pest.IesDiagnostics(case: 'str', state: 'dict' = <factory>) -> None` - Result of :func:`diagnose_ies`.
   - `.signals` - All boolean signals from all sections, flattened.
-  - `.summary(self) -> 'str'` - (undocumented)
+  - `.summary() -> 'str'` - (undocumented)
   - `.to_json(path=None) -> 'str'` - (undocumented)
 - `pest.IesResults(directory: 'Path', case: 'str', par_files: 'Dict[int, Path]' = <factory>, ...) -> None` - Handle to a discovered set of PESTPP-IES output files.
   - `.base_rei(iteration=None) -> "'pd.DataFrame'"` - Base-realization residuals (``<case>.<iter>.base.rei``).
   - `.best_realization(iteration=None, kind: 'str' = 'composite') -> 'str'` - Name of the minimum-phi realization in an iteration (default last).
-  - `.describe(self) -> 'dict'` - JSON-serializable inventory + phi summary (agent-friendly).
+  - `.describe() -> 'dict'` - JSON-serializable inventory + phi summary (agent-friendly).
   - `.iterations` - Sorted iterations for which any ensemble file exists.
   - `.obs(iteration=None) -> "'pd.DataFrame'"` - Simulated-observation ensemble for one iteration (default: last).
-  - `.obs_all(self) -> "'pd.DataFrame'"` - All observation ensembles, ``(iteration, real_name)`` MultiIndex.
-  - `.obs_plus_noise(self) -> "'Optional[pd.DataFrame]'"` - Observation-plus-noise realizations, or None if not written.
+  - `.obs_all() -> "'pd.DataFrame'"` - All observation ensembles, ``(iteration, real_name)`` MultiIndex.
+  - `.obs_plus_noise() -> "'Optional[pd.DataFrame]'"` - Observation-plus-noise realizations, or None if not written.
   - `.par(iteration=None) -> "'pd.DataFrame'"` - Parameter ensemble for one iteration (default: last available).
-  - `.par_all(self) -> "'pd.DataFrame'"` - All parameter ensembles, ``(iteration, real_name)`` MultiIndex.
-  - `.pdc(self) -> "'Optional[pd.DataFrame]'"` - Prior-data-conflict table (``<case>.pdc.csv``), or None.
+  - `.par_all() -> "'pd.DataFrame'"` - All parameter ensembles, ``(iteration, real_name)`` MultiIndex.
+  - `.pdc() -> "'Optional[pd.DataFrame]'"` - Prior-data-conflict table (``<case>.pdc.csv``), or None.
   - `.phi(kind: 'str' = 'composite') -> "'pd.DataFrame'"` - Tidy phi: columns ``iteration, real_name, phi``.
-  - `.phi_groups(self) -> "'pd.DataFrame'"` - Tidy per-group phi: columns ``iteration, real_name, group, phi``.
+  - `.phi_groups() -> "'pd.DataFrame'"` - Tidy per-group phi: columns ``iteration, real_name, group, phi``.
   - `.phi_summary(kind: 'str' = 'composite') -> "'pd.DataFrame'"` - Per-iteration phi summary (total_runs, mean, std, min, max).
 - `pest.load_ies_ensembles(path) -> 'IesResults'` - Discover PESTPP-IES output files and return an :class:`IesResults`.
 - `pest.long_term_stats(df, stat: 'str' = 'mean', min_n: 'int' = 1, obs_type: 'Option, ...) -> "'pd.DataFrame'"` - One whole-record statistic per site (dateless observations).
@@ -426,14 +426,14 @@ All plot functions take an `IWFMModel` or `IOModelAdapter` and return `(fig, ax)
   - `.write_output(values, path) -> 'None'` - Write the model-output file (the forward-run fast path).
 - `pest.ObsName(obs_type: 'str', location: 'str', time: 'Optional[pd.Timestamp]' = None) -> None` - Decoded parts of a structured observation name.
 - `pest.ParamBundle(par_data: "'pd.DataFrame'", pargp_data: "'pd.DataFrame'", tpl_texts: 'Dic, ...) -> None` - Everything :func:`build_parameters` produced.
-  - `.verify(self) -> 'None'` - Assert: filling each template with parval1 reproduces the initial value file exactly.
+  - `.verify() -> 'None'` - Assert: filling each template with parval1 reproduces the initial value file exactly.
   - `.write(directory) -> 'None'` - Write all templates and initial value files into *directory*.
 - `pest.ParamSpec(name: 'str', values_file: 'str', keys: "'pd.DataFrame'", zone_col: 'Optio, ...) -> None` - Declare one parameterized quantity and its grouping.
   - `.key_cols` - (undocumented)
-  - `.parameter_names(self) -> "'pd.Series'"` - Per-row parameter name (rows of one zone share a name).
+  - `.parameter_names() -> "'pd.Series'"` - Per-row parameter name (rows of one zone share a name).
 - `pest.parrep_v2(pst_path, values, noptmax: 'int' = 0) -> 'None'` - Put parameter values into a PEST++ v2 control file, in place.
 - `pest.Period(name: 'str', months: "'tuple'", rep: 'str') -> None` - One averaging period of the typical-hydrograph year.
-  - `.rep_month_day(self) -> "'tuple'"` - (undocumented)
+  - `.rep_month_day() -> "'tuple'"` - (undocumented)
 - `pest.PERIODS_QUARTERLY` - tuple constant: (Period(name='winter', months=(12, 1, 2), rep='01/15'), Period(name='spring', months=(3, 4, 5), r...
 - `pest.PERIODS_SPRING_FALL` - tuple constant: (Period(name='spring', months=(1, 2, 3, 4), rep='03/01'), Period(name='fall', months=(8, 9, 10, 1...
 - `pest.pest_setup_from_model(model_dir, obs, dest_dir, case: 'str' = 'iwfm_cal', paramete, ...) -> 'QuickstartSetup'` - Build a runnable pestpp-ies template directory from a model folder.
@@ -444,7 +444,7 @@ All plot functions take an `IWFMModel` or `IOModelAdapter` and return `(fig, ax)
   - `.write(dest_dir) -> 'Path'` - Write the complete template directory; returns its path.
 - `pest.place_pilot_points_grid(model_or_nodes, spacing: 'float', zones=None, buffer: 'Option, ...) -> "'pd.DataFrame'"` - Regular pilot-point grid clipped to the model's node cloud.
 - `pest.QuickstartSetup(template: 'Path', case: 'str', paired: "'pd.DataFrame'", par_data: "'pd.D, ...) -> None` - Result of :func:`pest_setup_from_model`.
-  - `.summary(self) -> 'dict'` - (undocumented)
+  - `.summary() -> 'dict'` - (undocumented)
 - `pest.RatioChain(_params: "'dict'" = <factory>, _derived: "'dict'" = <factory>) -> None` - Anchor + bounded-ratio parameter chains with ordering guarantees.
   - `.add_derived(name: 'str', expr: 'str') -> "'RatioChain'"` - Declare a derived quantity as an expression over previously declared parameters and derived names.
   - `.add_parameter(name: 'str', bounds: 'Tuple[float, float]', initial: 'Optional[, ...) -> "'RatioChain'"` - Declare a free (PEST-adjustable) parameter.
@@ -471,7 +471,7 @@ All plot functions take an `IWFMModel` or `IOModelAdapter` and return `(fig, ax)
   - `.encode(parts: 'ObsName') -> 'str'` - (undocumented)
 - `pest.typical_hydrographs(df, clusters, periods: 'Optional[Sequence]' = None, start, ...) -> 'TypicalHydrographs'` - Compute cluster-average typical hydrographs (CalcTypHyd).
 - `pest.TypicalHydrographs(series: "'pd.DataFrame'", well_means: "'pd.Series'", wells: "'pd.DataFrame'") -> None` - Result of :func:`typical_hydrographs`.
-  - `.summary(self) -> 'dict'` - (undocumented)
+  - `.summary() -> 'dict'` - (undocumented)
 - `pest.validate_obs_names(names, max_len: 'int' = 200) -> 'list'` - Check observation names for PEST-compatibility problems.
 - `pest.vertical_head_difference(df, pairs, obs_type: 'Optional[str]' = None, scheme='standard') -> "'pd.DataFrame'"` - Head difference between paired completions: ``shallow - deep``.
 - `pest.WeightBalance(obs_data: "'pd.DataFrame'", report: "'pd.DataFrame'") -> None` - Result of :func:`balance_weights`.
@@ -721,39 +721,39 @@ All plot functions take an `IWFMModel` or `IOModelAdapter` and return `(fig, ax)
   - `.data_eof` - True when no data line remains (only comments, or nothing).
   - `.degrade(msg: 'str', lineno: 'int | None' = None) -> 'None'` - Report a recoverable problem.
   - `.degrade_unknown_keyword(line: 'str', block: 'str', *, expected: 'tuple[str, ...] | set[str]' = ()) -> 'bool'` - Report a keyed line whose keyword a keyword-driven block does not model.
-  - `.drain_comments(self) -> 'list[str]'` - Return and clear accumulated comment lines.
+  - `.drain_comments() -> 'list[str]'` - Return and clear accumulated comment lines.
   - `.eof` - True when all lines have been consumed.
   - `.error(msg: 'str', lineno: 'int | None' = None) -> 'IWFMParseError'` - Build an :class:`IWFMParseError` carrying file, line and section.
   - `.from_lines(lines: 'list[str]', *, path: 'str | Path | None' = None, line, ...) -> 'IWFMFileReader'` - Build a reader over raw *lines* (comments included) instead of a file on disk.
   - `.lineno` - 1-based file line number of the most recently consumed line (:attr:`lineno0` before any line was read).
   - `.n_lines` - Number of lines held by this reader.
-  - `.next_data_line(self) -> 'str'` - Return the next non-comment line, accumulating skipped comments.
-  - `.next_line(self) -> 'str'` - Return the next raw line (comment or data) and advance.
-  - `.peek_data_line(self) -> 'str | None'` - Peek at the next non-comment line without consuming it.
-  - `.peek_keyword(self) -> 'str'` - Uppercased first word of the next data line's ``/ keyword`` part, without consuming it (``""`` for a keyword-less line...
+  - `.next_data_line() -> 'str'` - Return the next non-comment line, accumulating skipped comments.
+  - `.next_line() -> 'str'` - Return the next raw line (comment or data) and advance.
+  - `.peek_data_line() -> 'str | None'` - Peek at the next non-comment line without consuming it.
+  - `.peek_keyword() -> 'str'` - Uppercased first word of the next data line's ``/ keyword`` part, without consuming it (``""`` for a keyword-less line...
   - `.read_data_table(n_rows: 'int', n_cols: 'int | None' = None, what: 'str' = 't, ...) -> 'list[list[str]]'` - Read *n_rows* of whitespace-delimited data.
   - `.read_dss_pathnames(spec: 'TimeSeriesSpec') -> 'list[tuple[int, str]]'` - Read DSS pathname assignments (col_id, pathname) pairs.
   - `.read_floats(n: 'int', what: 'str' = 'values') -> 'list[float]'` - Read one data line holding *n* numbers.
-  - `.read_header(self) -> 'FileHeader'` - Read the file header: optional version line + leading comments.
+  - `.read_header() -> 'FileHeader'` - Read the file header: optional version line + leading comments.
   - `.read_ints(n: 'int', what: 'str' = 'values') -> 'list[int]'` - Read one data line holding *n* integers.
-  - `.read_keyed_float(self) -> 'tuple[float, str]'` - Read a keyed float value.
-  - `.read_keyed_int(self) -> 'tuple[int, str]'` - Read a keyed integer value.
+  - `.read_keyed_float() -> 'tuple[float, str]'` - Read a keyed float value.
+  - `.read_keyed_int() -> 'tuple[int, str]'` - Read a keyed integer value.
   - `.read_keyed_path(base_dir: 'str | Path | None' = None) -> 'tuple[str | None, str]'` - Read a keyed file path, resolving relative to *base_dir*.
-  - `.read_keyed_value(self) -> 'tuple[str, str]'` - Read a ``VALUE / KEYWORD`` line.
+  - `.read_keyed_value() -> 'tuple[str, str]'` - Read a ``VALUE / KEYWORD`` line.
   - `.read_row(n_cols: 'int', what: 'str' = 'row', *, min_cols: 'int | None' = None) -> 'list[str]'` - Read one data line as tokens, requiring at least *min_cols* (default *n_cols*) of them.
-  - `.read_timeseries_spec(self) -> 'TimeSeriesSpec'` - Read a 5-parameter time-series header block.
+  - `.read_timeseries_spec() -> 'TimeSeriesSpec'` - Read a 5-parameter time-series header block.
   - `.read_ts_rows(n_columns: 'int', col_names: 'list[str] | None' = None, *, what, ...) -> 'pd.DataFrame'` - Read ``DATE v1 ..
   - `.section(name: 'str')` - Name the section being read, for error messages.
   - `.section_name` - The current section context (nested names joined by ``" > "``).
-  - `.skip_to_end(self) -> 'list[str]'` - Consume all remaining lines and return them.
-  - `.tail_cursor(self) -> 'IWFMFileReader'` - Consume the rest of the file into a new :class:`IWFMFileReader` (see :meth:`from_lines`) that reports this file's path,...
+  - `.skip_to_end() -> 'list[str]'` - Consume all remaining lines and return them.
+  - `.tail_cursor() -> 'IWFMFileReader'` - Consume the rest of the file into a new :class:`IWFMFileReader` (see :meth:`from_lines`) that reports this file's path,...
   - `.to_floats(tokens: 'list[str]', what: 'str' = 'value', lineno: 'int | None', ...) -> 'list[float]'` - Convert *tokens* to floats, naming line and column on failure.
   - `.to_ints(tokens: 'list[str]', what: 'str' = 'value', lineno: 'int | None' = None) -> 'list[int]'` - Convert *tokens* to integers, naming line and column on failure.
   - `.warn_once(key: 'str', msg: 'str') -> 'None'` - Emit an :class:`IWFMReadWarning` once per file per *key*.
 - `IWFMFileWriter(path: 'str | Path | None' = None) -> 'None'` - Sequential writer for IWFM text files.
   - `.flush(path: 'str | Path | None' = None) -> 'None'` - Write all accumulated lines to the output file.
   - `.lines` - The accumulated output lines.
-  - `.to_string(self) -> 'str'` - Return all lines joined as a single string.
+  - `.to_string() -> 'str'` - Return all lines joined as a single string.
   - `.write_comment(text: 'str') -> 'None'` - Write a single comment line.
   - `.write_comments(lines: 'list[str]') -> 'None'` - Write multiple comment lines (each through :meth:`write_comment`).
   - `.write_data_line(tokens: 'list[object]', widths: 'list[int] | None' = None, note: 'str' = '') -> 'None'` - Write a single row of whitespace-delimited data.
@@ -768,6 +768,17 @@ All plot functions take an `IWFMModel` or `IOModelAdapter` and return `(fig, ax)
   - `.write_version_header(version: 'str') -> 'None'` - Write a version header like ``#4.0``.
 - `IWFMParseError(msg: 'str', *, path=None, lineno: 'int | None' = None, section: 'str' = '') -> 'None'` - Malformed content or unexpected end of data in an IWFM file.
 - `IWFMReadWarning(...)` - A reader kept going past malformed input (lenient mode only).
+- `models.FlatTimeSeriesSpecMixin()` - ``.spec`` view for time-series files that store the spec flat.
+  - `.spec` - The five spec parameters as a :class:`TimeSeriesSpec` snapshot.
+- `models.RootZoneMain(header: 'FileHeader' = <factory>, convergence: 'float' = 0.001, max_itera, ...) -> None` - Parsed root zone component main file (e.g.
+  - `.k_ponded() -> 'Any'` - Ponded hydraulic conductivity per element, as IWFM uses it.
+- `models.TimeSeriesSpecAccessMixin()` - Flat ``n_columns`` / ``factor`` / ...
+  - `.dss_file` - (undocumented)
+  - `.factor` - (undocumented)
+  - `.n_columns` - (undocumented)
+  - `.n_steps_update` - (undocumented)
+  - `.repeat_freq` - (undocumented)
+- `models.TS_SPEC_FIELDS` - tuple constant: ('n_columns', 'factor', 'n_steps_update', 'repeat_freq', 'dss_file')
 - `strict_mode(enabled: 'bool' = True)` - Context manager setting the reader mode for the enclosed block.
 - `TimeSeriesDataFile(header: 'FileHeader' = <factory>, keywords: 'list[str]' = <factory>, n_co, ...) -> None` - Generic IWFM time-series data file.
 - `TimeSeriesFile(header: 'FileHeader' = <factory>, spec: 'TimeSeriesSpec' = <factory>, dat, ...) -> None` - Generic time-series file container.

@@ -198,22 +198,23 @@ def _signature(obj, drop_self: bool = False) -> str:
         sig = " ".join(_to_ascii(str(inspect.signature(obj))).split())
     except (TypeError, ValueError):
         return "(...)"
-    if drop_self:
-        for first in ("(self, ", "(cls, "):
-            if sig.startswith(first):
-                sig = "(" + sig[len(first):]
-                break
-        else:
-            if sig in ("(self)", "(cls)"):
-                sig = "()"
-
-    # Split off a return annotation so truncation never cuts through it
-    # and leaves a dangling "->". The arrow that ends the parameter list
-    # is the one following the closing paren.
+    # Split off a return annotation first, so neither dropping ``self``
+    # nor truncating can cut through it and leave a dangling "->". The
+    # arrow that ends the parameter list is the one after the closing
+    # paren.
     params, returns = sig, ""
     head, arrow, tail = sig.rpartition(" -> ")
     if arrow and head.endswith(")"):
         params, returns = head, f" -> {tail}"
+
+    if drop_self:
+        for first in ("(self, ", "(cls, "):
+            if params.startswith(first):
+                params = "(" + params[len(first):]
+                break
+        else:
+            if params in ("(self)", "(cls)"):
+                params = "()"
 
     if len(params) + len(returns) > MAX_SIGNATURE:
         room = MAX_SIGNATURE - len(returns) - 6
@@ -349,6 +350,17 @@ def collect_entries() -> List[Entry]:
             else f"plots.{name}"
         entries.append(Entry(qualname, _signature(obj), _summarize(obj),
                              "Plotting (iwfm_io.plots)", ""))
+
+    # The dataclasses the readers return. Most are re-exported at top
+    # level already and would only produce "alias of" noise, so the
+    # namespace contributes the ones that are not -- their methods are
+    # what a caller is looking for (``RootZoneMain.k_ponded``).
+    models = importlib.import_module("iwfm_io.models")
+    top_level = set(iwfm_io.__all__)
+    for entry in _namespace_entries(models, "models.", seen):
+        name = entry.parent or entry.qualname
+        if name.removeprefix("models.") not in top_level:
+            entries.append(entry)
 
     entries += _namespace_entries(
         importlib.import_module("iwfm_io.pest"), "pest.", seen)
